@@ -31,7 +31,7 @@ import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.util.Context;
 import java.io.Serializable;
 import javax.lang.model.element.ElementKind;
-import org.checkerframework.shaded.dataflow.analysis.Analysis;
+import org.checkerframework.shaded.dataflow.analysis.ForwardAnalysisImpl;
 import org.checkerframework.shaded.dataflow.cfg.CFGBuilder;
 import org.checkerframework.shaded.dataflow.cfg.ControlFlowGraph;
 import org.checkerframework.shaded.dataflow.cfg.UnderlyingAST;
@@ -115,8 +115,8 @@ public final class TrustingNullnessAnalysis implements Serializable {
           .setContext(context)
           .setCompilationUnit(fieldDeclPath.getCompilationUnit());
 
-      Analysis<Nullness, AccessPathStore<Nullness>, TrustingNullnessPropagation> analysis =
-          new Analysis<>(nullnessPropagation);
+      ForwardAnalysisImpl<Nullness, AccessPathStore<Nullness>, TrustingNullnessPropagation> analysis =
+          new ForwardAnalysisImpl<>(nullnessPropagation);
       analysis.performAnalysis(cfg);
       return analysis.getValue(initializer);
     } finally {

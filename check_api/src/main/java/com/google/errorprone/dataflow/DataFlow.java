@@ -36,16 +36,18 @@ import com.sun.tools.javac.processing.JavacProcessingEnvironment;
 import com.sun.tools.javac.util.Context;
 import javax.annotation.Nullable;
 import javax.annotation.processing.ProcessingEnvironment;
+
 import org.checkerframework.shaded.dataflow.analysis.AbstractValue;
-import org.checkerframework.shaded.dataflow.analysis.Analysis;
+import org.checkerframework.shaded.dataflow.analysis.ForwardAnalysis;
+import org.checkerframework.shaded.dataflow.analysis.ForwardAnalysisImpl;
+import org.checkerframework.shaded.dataflow.analysis.ForwardTransferFunction;
 import org.checkerframework.shaded.dataflow.analysis.Store;
-import org.checkerframework.shaded.dataflow.analysis.TransferFunction;
 import org.checkerframework.shaded.dataflow.cfg.CFGBuilder;
 import org.checkerframework.shaded.dataflow.cfg.ControlFlowGraph;
 import org.checkerframework.shaded.dataflow.cfg.UnderlyingAST;
 
 /**
- * Provides a wrapper around {@link org.checkerframework.shaded.dataflow.analysis.Analysis}.
+ * Provides a wrapper around {@link org.checkerframework.shaded.dataflow.analysis.ForwardAnalysisImpl}.
  *
  * @author konne@google.com (Konstantin Weitz)
  */
@@ -53,8 +55,8 @@ public final class DataFlow {
 
   /** A pair of Analysis and ControlFlowGraph. */
   public interface Result<
-      A extends AbstractValue<A>, S extends Store<S>, T extends TransferFunction<A, S>> {
-    Analysis<A, S, T> getAnalysis();
+      A extends AbstractValue<A>, S extends Store<S>, T extends ForwardTransferFunction<A, S>> {
+    ForwardAnalysisImpl<A, S, T> getAnalysis();
 
     ControlFlowGraph getControlFlowGraph();
   }
@@ -70,17 +72,16 @@ public final class DataFlow {
    *
    * TODO(b/158869538): Write a test that checks these assumptions
    */
-  private static final LoadingCache<AnalysisParams, Analysis<?, ?, ?>> analysisCache =
+  private static final LoadingCache<AnalysisParams, ForwardAnalysis<?, ?, ?>> analysisCache =
       CacheBuilder.newBuilder()
           .build(
-              new CacheLoader<AnalysisParams, Analysis<?, ?, ?>>() {
+              new CacheLoader<AnalysisParams, ForwardAnalysis<?, ?, ?>>() {
                 @Override
-                public Analysis<?, ?, ?> load(AnalysisParams key) {
+                public ForwardAnalysis<?, ?, ?> load(AnalysisParams key) {
                   final ControlFlowGraph cfg = key.cfg();
-                  final TransferFunction<?, ?> transfer = key.transferFunction();
+                  final ForwardTransferFunction<?, ?> transfer = key.transferFunction();
 
-                  @SuppressWarnings({"unchecked", "rawtypes"})
-                  final Analysis<?, ?, ?> analysis = new Analysis(transfer);
+                  final ForwardAnalysis<?, ?, ?> analysis = new ForwardAnalysisImpl<>(transfer);
                   analysis.performAnalysis(cfg);
                   return analysis;
                 }
@@ -158,7 +159,7 @@ public final class DataFlow {
    * run over the same control flow graph, the analysis result is the same. - for all contexts, the
    * analysis result is the same.
    */
-  private static <A extends AbstractValue<A>, S extends Store<S>, T extends TransferFunction<A, S>>
+  private static <A extends AbstractValue<A>, S extends Store<S>, T extends ForwardTransferFunction<A, S>>
       Result<A, S, T> methodDataflow(TreePath methodPath, Context context, T transfer) {
     final ProcessingEnvironment env = JavacProcessingEnvironment.instance(context);
 
@@ -170,11 +171,11 @@ public final class DataFlow {
     }
     final AnalysisParams aparams = AnalysisParams.create(transfer, cfg, env);
     @SuppressWarnings("unchecked")
-    final Analysis<A, S, T> analysis = (Analysis<A, S, T>) analysisCache.getUnchecked(aparams);
+    final ForwardAnalysisImpl<A, S, T> analysis = (ForwardAnalysisImpl<A, S, T>) analysisCache.getUnchecked(aparams);
 
     return new Result<A, S, T>() {
       @Override
-      public Analysis<A, S, T> getAnalysis() {
+      public ForwardAnalysisImpl<A, S, T> getAnalysis() {
         return analysis;
       }
 
@@ -200,7 +201,7 @@ public final class DataFlow {
    *     of a method, lambda or initializer
    */
   @Nullable
-  public static <A extends AbstractValue<A>, S extends Store<S>, T extends TransferFunction<A, S>>
+  public static <A extends AbstractValue<A>, S extends Store<S>, T extends ForwardTransferFunction<A, S>>
       A expressionDataflow(TreePath exprPath, Context context, T transfer) {
     final Tree leaf = exprPath.getLeaf();
     Preconditions.checkArgument(
@@ -247,7 +248,7 @@ public final class DataFlow {
   @AutoValue
   abstract static class AnalysisParams {
 
-    abstract TransferFunction<?, ?> transferFunction();
+    abstract ForwardTransferFunction<?, ?> transferFunction();
 
     abstract ControlFlowGraph cfg();
 
@@ -255,7 +256,7 @@ public final class DataFlow {
     private ProcessingEnvironment environment;
 
     private static AnalysisParams create(
-        TransferFunction<?, ?> transferFunction,
+        ForwardTransferFunction<?, ?> transferFunction,
         ControlFlowGraph cfg,
         ProcessingEnvironment environment) {
       AnalysisParams ap = new AutoValue_DataFlow_AnalysisParams(transferFunction, cfg);
