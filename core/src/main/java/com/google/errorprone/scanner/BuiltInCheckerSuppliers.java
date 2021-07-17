@@ -23,7 +23,9 @@ import com.google.common.collect.Streams;
 import com.google.errorprone.BugCheckerInfo;
 import com.google.errorprone.bugpatterns.AmbiguousMethodReference;
 import com.google.errorprone.bugpatterns.AnnotateFormatMethod;
+import com.google.errorprone.bugpatterns.AnnotationMirrorToString;
 import com.google.errorprone.bugpatterns.AnnotationPosition;
+import com.google.errorprone.bugpatterns.AnnotationValueToString;
 import com.google.errorprone.bugpatterns.ArrayAsKeyOfSetOrMap;
 import com.google.errorprone.bugpatterns.ArrayEquals;
 import com.google.errorprone.bugpatterns.ArrayFillIncompatibleType;
@@ -33,7 +35,6 @@ import com.google.errorprone.bugpatterns.ArraysAsListPrimitiveArray;
 import com.google.errorprone.bugpatterns.AssertFalse;
 import com.google.errorprone.bugpatterns.AssertThrowsMultipleStatements;
 import com.google.errorprone.bugpatterns.AssertionFailureIgnored;
-import com.google.errorprone.bugpatterns.AssignmentToMock;
 import com.google.errorprone.bugpatterns.AsyncCallableReturnsNull;
 import com.google.errorprone.bugpatterns.AsyncFunctionReturnsNull;
 import com.google.errorprone.bugpatterns.AutoValueFinalMethods;
@@ -177,6 +178,7 @@ import com.google.errorprone.bugpatterns.JUnit4ClassUsedInJUnit3;
 import com.google.errorprone.bugpatterns.JUnit4SetUpNotRun;
 import com.google.errorprone.bugpatterns.JUnit4TearDownNotRun;
 import com.google.errorprone.bugpatterns.JUnit4TestNotRun;
+import com.google.errorprone.bugpatterns.JUnit4TestsNotRunWithinEnclosed;
 import com.google.errorprone.bugpatterns.JUnitAmbiguousTestClass;
 import com.google.errorprone.bugpatterns.JUnitAssertSameCheck;
 import com.google.errorprone.bugpatterns.JUnitParameterMethodNotFound;
@@ -250,6 +252,7 @@ import com.google.errorprone.bugpatterns.OptionalEquality;
 import com.google.errorprone.bugpatterns.OptionalMapToOptional;
 import com.google.errorprone.bugpatterns.OptionalMapUnusedValue;
 import com.google.errorprone.bugpatterns.OptionalNotPresent;
+import com.google.errorprone.bugpatterns.OptionalOfRedundantMethod;
 import com.google.errorprone.bugpatterns.OrphanedFormatString;
 import com.google.errorprone.bugpatterns.OutlineNone;
 import com.google.errorprone.bugpatterns.OverrideThrowableToString;
@@ -345,6 +348,7 @@ import com.google.errorprone.bugpatterns.UngroupedOverloads;
 import com.google.errorprone.bugpatterns.UnnecessarilyFullyQualified;
 import com.google.errorprone.bugpatterns.UnnecessarilyVisible;
 import com.google.errorprone.bugpatterns.UnnecessaryAnonymousClass;
+import com.google.errorprone.bugpatterns.UnnecessaryAssignment;
 import com.google.errorprone.bugpatterns.UnnecessaryBoxedAssignment;
 import com.google.errorprone.bugpatterns.UnnecessaryBoxedVariable;
 import com.google.errorprone.bugpatterns.UnnecessaryDefaultInEnumSwitch;
@@ -368,7 +372,6 @@ import com.google.errorprone.bugpatterns.UnusedNestedClass;
 import com.google.errorprone.bugpatterns.UnusedVariable;
 import com.google.errorprone.bugpatterns.UseCorrectAssertInTests;
 import com.google.errorprone.bugpatterns.UseEnumSwitch;
-import com.google.errorprone.bugpatterns.UseTimeInScope;
 import com.google.errorprone.bugpatterns.VarChecker;
 import com.google.errorprone.bugpatterns.VarTypeName;
 import com.google.errorprone.bugpatterns.VariableNameSameAsType;
@@ -446,6 +449,9 @@ import com.google.errorprone.bugpatterns.inject.guice.InjectOnFinalField;
 import com.google.errorprone.bugpatterns.inject.guice.OverridesGuiceInjectableMethod;
 import com.google.errorprone.bugpatterns.inject.guice.OverridesJavaxInjectableMethod;
 import com.google.errorprone.bugpatterns.inject.guice.ProvidesMethodOutsideOfModule;
+import com.google.errorprone.bugpatterns.inlineme.Inliner;
+import com.google.errorprone.bugpatterns.inlineme.Suggester;
+import com.google.errorprone.bugpatterns.inlineme.Validator;
 import com.google.errorprone.bugpatterns.javadoc.AlmostJavadoc;
 import com.google.errorprone.bugpatterns.javadoc.EmptyBlockTag;
 import com.google.errorprone.bugpatterns.javadoc.EscapedEntity;
@@ -459,8 +465,10 @@ import com.google.errorprone.bugpatterns.javadoc.InvalidThrowsLink;
 import com.google.errorprone.bugpatterns.javadoc.MissingSummary;
 import com.google.errorprone.bugpatterns.javadoc.ReturnFromVoid;
 import com.google.errorprone.bugpatterns.javadoc.UnescapedEntity;
+import com.google.errorprone.bugpatterns.javadoc.UnrecognisedJavadocTag;
 import com.google.errorprone.bugpatterns.javadoc.UrlInSee;
 import com.google.errorprone.bugpatterns.nullness.EqualsBrokenForNull;
+import com.google.errorprone.bugpatterns.nullness.ReturnMissingNullable;
 import com.google.errorprone.bugpatterns.nullness.UnnecessaryCheckNotNull;
 import com.google.errorprone.bugpatterns.overloading.InconsistentOverloads;
 import com.google.errorprone.bugpatterns.threadsafety.DoubleCheckedLocking;
@@ -636,6 +644,7 @@ public class BuiltInCheckerSuppliers {
           JUnit4SetUpNotRun.class,
           JUnit4TearDownNotRun.class,
           JUnit4TestNotRun.class,
+          JUnit4TestsNotRunWithinEnclosed.class,
           JUnitAssertSameCheck.class,
           JUnitParameterMethodNotFound.class,
           JavaxInjectOnAbstractMethod.class,
@@ -664,6 +673,7 @@ public class BuiltInCheckerSuppliers {
           NullTernary.class,
           OptionalEquality.class,
           OptionalMapUnusedValue.class,
+          OptionalOfRedundantMethod.class,
           OverlappingQualifierAndScopeAnnotation.class,
           OverridesJavaxInjectableMethod.class,
           PackageInfo.class,
@@ -710,6 +720,7 @@ public class BuiltInCheckerSuppliers {
           UnnecessaryTypeArgument.class,
           UnusedAnonymousClass.class,
           UnusedCollectionModifiedInPlace.class,
+          Validator.class,
           VarTypeName.class,
           WrongOneof.class,
           XorPower.class,
@@ -729,7 +740,6 @@ public class BuiltInCheckerSuppliers {
           AssertEqualsArgumentOrderChecker.class,
           AssertThrowsMultipleStatements.class,
           AssertionFailureIgnored.class,
-          AssignmentToMock.class,
           AssistedInjectAndInjectOnSameConstructor.class,
           AutoValueFinalMethods.class,
           AutoValueImmutableFields.class,
@@ -800,6 +810,7 @@ public class BuiltInCheckerSuppliers {
           InjectOnConstructorOfAbstractClass.class,
           InjectedConstructorAnnotations.class,
           InlineFormatString.class,
+          Inliner.class,
           InputStreamSlowMultibyteRead.class,
           InstanceOfAndCastMatchWrongType.class,
           IntLongMath.class,
@@ -896,6 +907,7 @@ public class BuiltInCheckerSuppliers {
           StreamResourceLeak.class,
           StreamToIterable.class,
           StringSplitter.class,
+          Suggester.class,
           SwigMemoryLeak.class,
           SynchronizeOnNonFinalField.class,
           ThreadJoinLoop.class,
@@ -915,10 +927,12 @@ public class BuiltInCheckerSuppliers {
           URLEqualsHashCode.class,
           UndefinedEquals.class,
           UnescapedEntity.class,
+          UnnecessaryAssignment.class,
           UnnecessaryLambda.class,
           UnnecessaryMethodInvocationMatcher.class,
           UnnecessaryMethodReference.class,
           UnnecessaryParentheses.class,
+          UnrecognisedJavadocTag.class,
           UnsafeFinalization.class,
           UnsafeReflectiveConstructionCast.class,
           UnsynchronizedOverridesSynchronized.class,
@@ -927,7 +941,6 @@ public class BuiltInCheckerSuppliers {
           UnusedVariable.class,
           UseBinds.class,
           UseCorrectAssertInTests.class,
-          UseTimeInScope.class,
           VariableNameSameAsType.class,
           WaitNotInLoop.class,
           WakelockReleasedDangerously.class,
@@ -940,7 +953,9 @@ public class BuiltInCheckerSuppliers {
       getSuppliers(
           // keep-sorted start
           AndroidJdkLibsChecker.class,
+          AnnotationMirrorToString.class,
           AnnotationPosition.class,
+          AnnotationValueToString.class,
           AssertFalse.class,
           AssistedInjectAndInjectOnConstructors.class,
           AutoFactoryAtInject.class,
@@ -1022,6 +1037,7 @@ public class BuiltInCheckerSuppliers {
           RedundantThrows.class,
           RefersToDaggerCodegen.class,
           RemoveUnusedImports.class,
+          ReturnMissingNullable.class,
           ReturnsNullCollection.class,
           ScopeOnModule.class,
           ScopeOrQualifierAnnotationRetention.class,
