@@ -93,11 +93,11 @@ public abstract class MisusedDateFormat extends BugChecker
     if (!PATTERN_MATCHER.matches(tree, state)) {
       return NO_MATCH;
     }
-    String argument = constValue(tree.getArguments().get(0), String.class);
+    String argument = constValue(tree.getArguments().getFirst(), String.class);
     if (argument == null) {
       return NO_MATCH;
     }
-    return constructDescription(tree, tree.getArguments().get(0), state);
+    return constructDescription(tree, tree.getArguments().getFirst(), state);
   }
 
   @Override
@@ -105,7 +105,7 @@ public abstract class MisusedDateFormat extends BugChecker
     if (!PATTERN_CTOR_MATCHER.matches(tree, state)) {
       return NO_MATCH;
     }
-    return constructDescription(tree, tree.getArguments().get(0), state);
+    return constructDescription(tree, tree.getArguments().getFirst(), state);
   }
 
   /**
@@ -114,8 +114,7 @@ public abstract class MisusedDateFormat extends BugChecker
    */
   abstract Optional<String> rewriteTo(String pattern);
 
-  private Description constructDescription(
-      Tree tree, ExpressionTree patternArg, VisitorState state) {
+  Description constructDescription(Tree tree, ExpressionTree patternArg, VisitorState state) {
     return Optional.ofNullable(constValue(patternArg, String.class))
         .flatMap(this::rewriteTo)
         .map(replacement -> describeMatch(tree, replaceArgument(patternArg, replacement, state)))

@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.fixes.SuggestedFixes.variableNamer;
 import static com.google.errorprone.matchers.JUnitMatchers.JUNIT_AFTER_ANNOTATION;
 import static com.google.errorprone.matchers.JUnitMatchers.JUNIT_BEFORE_ANNOTATION;
 import static com.google.errorprone.matchers.JUnitMatchers.hasJUnit4TestCases;
@@ -44,9 +45,10 @@ import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.bugpatterns.BugChecker.TryTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
+import com.google.errorprone.fixes.SuggestedFixes.VariableNamer;
 import com.google.errorprone.matchers.ChildMultiMatcher;
 import com.google.errorprone.matchers.ChildMultiMatcher.MatchType;
 import com.google.errorprone.matchers.Description;
@@ -76,16 +78,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
 import javax.lang.model.element.Name;
+import org.safere.Pattern;
 
-/** @author schmitt@google.com (Peter Schmitt) */
+/**
+ * @author schmitt@google.com (Peter Schmitt)
+ */
 @BugPattern(
-    name = "MissingFail",
     altNames = "missing-fail",
     summary = "Not calling fail() when expecting an exception masks bugs",
     severity = WARNING)
-public class MissingFail extends BugChecker implements TryTreeMatcher {
+public class MissingFail extends BugChecker implements MethodTreeMatcher {
 
   // Many test writers don't seem to know about `fail()`. They instead use synonyms of varying
   // complexity instead.
@@ -224,18 +227,36 @@ public class MissingFail extends BugChecker implements TryTreeMatcher {
       Matchers.anyOf(isTestCaseDescendant, hasJUnit4TestRunner, hasJUnit4TestCases);
 
   @Override
-  public Description matchTry(TryTree tree, VisitorState state) {
-    if (tryTreeMatches(tree, state)) {
-      List<? extends StatementTree> tryStatements = tree.getBlock().getStatements();
-      StatementTree lastTryStatement = tryStatements.get(tryStatements.size() - 1);
+  public Description matchMethod(MethodTree tree, VisitorState state) {
+    VariableNamer namer = variableNamer(state);
+    new SuppressibleTreePathScanner<Void, Void>(state) {
+      @Override
+      public Void visitClass(ClassTree tree, Void unused) {
+        // Don't descend into nested classes, as MethodTreeMatcher will be called for them
+        // separately.
+        return null;
+      }
 
-      Optional<Fix> assertThrowsFix =
-          AssertThrowsUtils.tryFailToAssertThrows(tree, tryStatements, Optional.empty(), state);
-      Fix failFix = addFailCall(tree, lastTryStatement, state);
-      return buildDescription(lastTryStatement).addFix(assertThrowsFix).addFix(failFix).build();
-    } else {
-      return Description.NO_MATCH;
-    }
+      @Override
+      public Void visitTry(TryTree tryTree, Void unused) {
+        VisitorState tryState = state.withPath(getCurrentPath());
+        if (tryTreeMatches(tryTree, tryState)) {
+          List<? extends StatementTree> tryStatements = tryTree.getBlock().getStatements();
+          StatementTree lastTryStatement = tryStatements.getLast();
+
+          Optional<Fix> assertThrowsFix =
+              AssertThrowsUtils.tryFailToAssertThrows(tryTree, tryStatements, tryState, namer);
+          Fix failFix = addFailCall(tryTree, lastTryStatement, tryState);
+          state.reportMatch(
+              buildDescription(lastTryStatement)
+                  .addFix(assertThrowsFix.orElse(SuggestedFix.emptyFix()))
+                  .addFix(failFix)
+                  .build());
+        }
+        return super.visitTry(tryTree, null);
+      }
+    }.scan(state.getPath(), null);
+    return Description.NO_MATCH;
   }
 
   public static Fix addFailCall(TryTree tree, StatementTree lastTryStatement, VisitorState state) {
@@ -432,7 +453,7 @@ public class MissingFail extends BugChecker implements TryTreeMatcher {
   }
 
   /**
-   * Matches any try-tree that is in a JUNit3 {@code setUp} or {@code tearDown} method, their JUnit4
+   * Matches any try-tree that is in a JUnit3 {@code setUp} or {@code tearDown} method, their JUnit4
    * equivalents, a JUnit {@code suite()} method or a {@code main} method.
    */
   private static class IgnoredEnclosingMethodMatcher implements Matcher<TryTree> {
@@ -459,14 +480,8 @@ public class MissingFail extends BugChecker implements TryTreeMatcher {
   /**
    * Matches if any two of the given list of expressions are integer literals with different values.
    */
-  private static class UnequalIntegerLiteralMatcher implements Matcher<MethodInvocationTree> {
-
-    private final Matcher<ExpressionTree> methodSelectMatcher;
-
-    private UnequalIntegerLiteralMatcher(Matcher<ExpressionTree> methodSelectMatcher) {
-      this.methodSelectMatcher = methodSelectMatcher;
-    }
-
+  private record UnequalIntegerLiteralMatcher(Matcher<ExpressionTree> methodSelectMatcher)
+      implements Matcher<MethodInvocationTree> {
     @Override
     public boolean matches(MethodInvocationTree methodInvocationTree, VisitorState state) {
       return methodSelectMatcher.matches(methodInvocationTree, state)
@@ -476,10 +491,10 @@ public class MissingFail extends BugChecker implements TryTreeMatcher {
     private static boolean matches(List<? extends ExpressionTree> expressionTrees) {
       Set<Integer> foundValues = new HashSet<>();
       for (Tree tree : expressionTrees) {
-        if (tree instanceof LiteralTree) {
-          Object value = ((LiteralTree) tree).getValue();
-          if (value instanceof Integer) {
-            boolean duplicate = !foundValues.add((Integer) value);
+        if (tree instanceof LiteralTree literalTree) {
+          Object value = literalTree.getValue();
+          if (value instanceof Integer integer) {
+            boolean duplicate = !foundValues.add(integer);
             if (!duplicate && foundValues.size() > 1) {
               return true;
             }
@@ -492,7 +507,7 @@ public class MissingFail extends BugChecker implements TryTreeMatcher {
 
   private static class ChildOfTryMatcher extends ChildMultiMatcher<TryTree, Tree> {
 
-    public ChildOfTryMatcher(MatchType matchType, Matcher<Tree> nodeMatcher) {
+    ChildOfTryMatcher(MatchType matchType, Matcher<Tree> nodeMatcher) {
       super(matchType, nodeMatcher);
     }
 

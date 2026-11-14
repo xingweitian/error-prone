@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -35,7 +36,6 @@ import com.sun.tools.javac.code.Symbol.MethodSymbol;
 
 /** Checks for static fields being assigned within constructors. */
 @BugPattern(
-    name = "StaticAssignmentInConstructor",
     severity = WARNING,
     summary =
         "This assignment is to a static field. Mutating static state from a constructor is highly"
@@ -44,7 +44,7 @@ public final class StaticAssignmentInConstructor extends BugChecker implements M
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
     MethodSymbol methodSymbol = getSymbol(tree);
-    if (methodSymbol == null || !methodSymbol.isConstructor()) {
+    if (!methodSymbol.isConstructor()) {
       return NO_MATCH;
     }
     new TreeScanner<Void, Void>() {
@@ -66,18 +66,15 @@ public final class StaticAssignmentInConstructor extends BugChecker implements M
       @Override
       public Void visitAssignment(AssignmentTree assignmentTree, Void unused) {
         Symbol symbol = getSymbol(assignmentTree.getVariable());
-        if (symbol != null && symbol.isStatic() && shouldEmitFinding(assignmentTree)) {
+        if (symbol != null && isStatic(symbol) && shouldEmitFinding(assignmentTree)) {
           state.reportMatch(describeMatch(assignmentTree));
         }
         return super.visitAssignment(assignmentTree, null);
       }
 
       private boolean shouldEmitFinding(AssignmentTree assignmentTree) {
-        if (!(assignmentTree.getExpression() instanceof IdentifierTree)) {
-          return true;
-        }
-        IdentifierTree identifierTree = ((IdentifierTree) assignmentTree.getExpression());
-        return !identifierTree.getName().contentEquals("this");
+        return !(assignmentTree.getExpression() instanceof IdentifierTree identifierTree)
+            || !identifierTree.getName().contentEquals("this");
       }
     }.scan(tree.getBody(), null);
     return NO_MATCH;

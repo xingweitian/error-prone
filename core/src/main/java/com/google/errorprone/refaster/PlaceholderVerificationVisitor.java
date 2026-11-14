@@ -17,9 +17,7 @@ package com.google.errorprone.refaster;
 import static com.google.common.base.MoreObjects.firstNonNull;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.Tree;
@@ -28,6 +26,7 @@ import com.sun.tools.javac.tree.JCTree.JCExpression;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 
 /**
  * Cheap visitor to verify that a tree or set of trees could conceivably match a placeholder, by
@@ -37,8 +36,8 @@ import java.util.LinkedList;
  * @author lowasser@google.com (Louis Wasserman)
  */
 final class PlaceholderVerificationVisitor extends TreeScanner<Boolean, Unifier> {
-  private final Collection<UExpression> unmatched;
-  private final ImmutableCollection<UExpression> allowed;
+  private final List<UExpression> unmatched;
+  private final ImmutableList<UExpression> allowed;
 
   /**
    * @param required UExpressions that must potentially match at least one expression in the tested
@@ -58,7 +57,7 @@ final class PlaceholderVerificationVisitor extends TreeScanner<Boolean, Unifier>
   }
 
   private boolean couldUnify(UExpression expr, Tree tree, Unifier unifier) {
-    return expr.unify(tree, unifier.fork()).first().isPresent();
+    return expr.unify(tree, unifier.fork()).findFirst().isPresent();
   }
 
   @Override
@@ -75,28 +74,19 @@ final class PlaceholderVerificationVisitor extends TreeScanner<Boolean, Unifier>
         return true;
       }
     }
-    if (node instanceof JCExpression) {
-      JCExpression expr = (JCExpression) node;
-      for (UFreeIdent.Key key :
-          Iterables.filter(unifier.getBindings().keySet(), UFreeIdent.Key.class)) {
-        JCExpression keyBinding = unifier.getBinding(key);
-        if (PlaceholderUnificationVisitor.equivalentExprs(unifier, expr, keyBinding)) {
-          return false;
-        }
-      }
+    if (node instanceof JCExpression expr
+        && unifier
+            .getBindings()
+            .hasFreeIdentMatching(keyBinding ->
+                PlaceholderUnificationVisitor.equivalentExprs(unifier, expr, keyBinding))) {
+      return false;
     }
     return firstNonNull(super.scan(node, unifier), true);
   }
 
   @Override
   public Boolean visitIdentifier(IdentifierTree node, Unifier unifier) {
-    for (LocalVarBinding localBinding :
-        Iterables.filter(unifier.getBindings().values(), LocalVarBinding.class)) {
-      if (localBinding.getSymbol().equals(ASTHelpers.getSymbol(node))) {
-        return false;
-      }
-    }
-    return true;
+    return !unifier.getBindings().hasBindingForLocalVar(ASTHelpers.getSymbol(node));
   }
 
   @Override

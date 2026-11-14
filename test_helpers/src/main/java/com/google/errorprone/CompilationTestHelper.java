@@ -19,6 +19,7 @@ package com.google.errorprone;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static com.google.errorprone.BugCheckerInfo.canonicalName;
 import static com.google.errorprone.FileObjects.forResource;
 import static com.google.errorprone.FileObjects.forSourceLines;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -27,14 +28,13 @@ import static java.util.Arrays.stream;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
 import com.google.errorprone.DiagnosticTestHelper.LookForCheckNameInDiagnostic;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.CheckReturnValue;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.scanner.ScannerSupplier;
-import com.google.errorprone.util.RuntimeVersion;
 import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.main.Main.Result;
 import java.io.BufferedWriter;
@@ -49,17 +49,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
-import javax.annotation.Nullable;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
+import org.jspecify.annotations.Nullable;
 
 /** Helps test Error Prone bug checkers and compilations. */
 @CheckReturnValue
-public class CompilationTestHelper {
+public final class CompilationTestHelper {
   private static final ImmutableList<String> DEFAULT_ARGS =
       ImmutableList.of(
           "-encoding",
@@ -68,6 +68,7 @@ public class CompilationTestHelper {
           "-XDdev",
           "-parameters",
           "-XDcompilePolicy=simple",
+          "-XDaddTypeAnnotationsToSymbol=true",
           // Don't limit errors/warnings for tests to the default of 100
           "-Xmaxerrs",
           "500",
@@ -80,11 +81,12 @@ public class CompilationTestHelper {
   private final Class<?> clazz;
   private final List<JavaFileObject> sources = new ArrayList<>();
   private ImmutableList<String> extraArgs = ImmutableList.of();
-  @Nullable private ImmutableList<Class<?>> overrideClasspath;
+  private @Nullable ImmutableList<Class<?>> overrideClasspath;
   private boolean expectNoDiagnostics = false;
   private Optional<Result> expectedResult = Optional.empty();
   private LookForCheckNameInDiagnostic lookForCheckNameInDiagnostic =
       LookForCheckNameInDiagnostic.YES;
+  private boolean testOnly = false;
 
   private boolean run = false;
 
@@ -114,7 +116,8 @@ public class CompilationTestHelper {
   public static CompilationTestHelper newInstance(
       Class<? extends BugChecker> checker, Class<?> clazz) {
     ScannerSupplier scannerSupplier = ScannerSupplier.fromBugCheckerClasses(checker);
-    String checkName = checker.getAnnotation(BugPattern.class).name();
+    String checkName =
+        canonicalName(checker.getSimpleName(), checker.getAnnotation(BugPattern.class));
     return new CompilationTestHelper(scannerSupplier, checkName, clazz);
   }
 
@@ -135,11 +138,14 @@ public class CompilationTestHelper {
    * Creates a list of arguments to pass to the compiler. Uses DEFAULT_ARGS as the base and appends
    * the overridden classpath, if provided, and any extraArgs that were provided.
    */
-  private static List<String> buildArguments(
-      @Nullable List<Class<?>> overrideClasspath, List<String> extraArgs) {
+  private static ImmutableList<String> buildArguments(
+      @Nullable List<Class<?>> overrideClasspath, List<String> extraArgs, boolean testOnly) {
     ImmutableList.Builder<String> result = ImmutableList.<String>builder().addAll(DEFAULT_ARGS);
     getOverrideClasspath(overrideClasspath)
         .ifPresent((Path jar) -> result.add("-cp").add(jar.toString()));
+    if (testOnly && !extraArgs.contains("-XepCompilingTestOnlyCode")) {
+      result.add("-XepCompilingTestOnlyCode");
+    }
     return result.addAll(disableImplicitProcessing(extraArgs)).build();
   }
 
@@ -148,7 +154,7 @@ public class CompilationTestHelper {
       return Optional.empty();
     }
     try {
-      Path tempJarFile = Files.createTempFile(/* prefix = */ null, /* suffix = */ ".jar");
+      Path tempJarFile = Files.createTempFile(/* prefix= */ null, /* suffix= */ ".jar");
       try (OutputStream os = Files.newOutputStream(tempJarFile);
           JarOutputStream jos = new JarOutputStream(os)) {
         for (Class<?> clazz : overrideClasspath) {
@@ -180,6 +186,7 @@ public class CompilationTestHelper {
    */
   // TODO(eaftan): We could eliminate this path parameter and just infer the path from the
   // package and class name
+  @CanIgnoreReturnValue
   public CompilationTestHelper addSourceLines(String path, String... lines) {
     this.sources.add(forSourceLines(path, lines));
     return this;
@@ -190,8 +197,16 @@ public class CompilationTestHelper {
    *
    * <p>See {@link #addSourceLines} for how expected diagnostics should be specified.
    *
+   * <p>For most uses, {@link #addSourceLines} is preferred. Using separate source files to denote
+   * positive/negative examples tends to bloat individual tests. Prefer writing smaller tests using
+   * {@link #addSourceLines} which test a single behaviour in isolation.
+   *
    * @param path the path to the source file
+   * @deprecated prefer {@link #addSourceLines}. Declaring tests in the same file using text blocks
+   *     is more readable, as it encourages writing small, focussed tests.
    */
+  @Deprecated
+  @CanIgnoreReturnValue
   public CompilationTestHelper addSourceFile(String path) {
     this.sources.add(forResource(clazz, path));
     return this;
@@ -204,15 +219,14 @@ public class CompilationTestHelper {
    *
    * @param classes the class(es) to use as the classpath
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper withClasspath(Class<?>... classes) {
     this.overrideClasspath = ImmutableList.copyOf(classes);
     return this;
   }
 
+  @CanIgnoreReturnValue
   public CompilationTestHelper addModules(String... modules) {
-    if (!RuntimeVersion.isAtLeast9()) {
-      return this;
-    }
     return setArgs(
         stream(modules)
             .map(m -> String.format("--add-exports=%s=ALL-UNNAMED", m))
@@ -223,6 +237,7 @@ public class CompilationTestHelper {
    * Sets custom command-line arguments for the compilation. These will be appended to the default
    * compilation arguments.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper setArgs(String... args) {
     return setArgs(asList(args));
   }
@@ -231,6 +246,7 @@ public class CompilationTestHelper {
    * Sets custom command-line arguments for the compilation. These will be appended to the default
    * compilation arguments.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper setArgs(List<String> args) {
     checkState(
         extraArgs.isEmpty(),
@@ -241,11 +257,19 @@ public class CompilationTestHelper {
     return this;
   }
 
+  /** Configures the compilation to treat the code as test-only. Off by default. */
+  @CanIgnoreReturnValue
+  public CompilationTestHelper setTestOnly() {
+    this.testOnly = true;
+    return this;
+  }
+
   /**
    * Tells the compilation helper to expect that no diagnostics will be generated, even if the
    * source file contains bug markers. Useful for testing that a check is actually disabled when the
    * proper command-line argument is passed.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper expectNoDiagnostics() {
     this.expectNoDiagnostics = true;
     return this;
@@ -256,6 +280,7 @@ public class CompilationTestHelper {
    * tested. This behaviour can be disabled to test the interaction between Error Prone checks and
    * javac diagnostics.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper matchAllDiagnostics() {
     this.lookForCheckNameInDiagnostic = LookForCheckNameInDiagnostic.NO;
     return this;
@@ -265,6 +290,7 @@ public class CompilationTestHelper {
    * Tells the compilation helper to expect a specific result from the compilation, e.g. success or
    * failure.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper expectResult(Result result) {
     expectedResult = Optional.of(result);
     return this;
@@ -284,6 +310,7 @@ public class CompilationTestHelper {
    *
    * <p>Error message keys that don't match any diagnostics will cause test to fail.
    */
+  @CanIgnoreReturnValue
   public CompilationTestHelper expectErrorMessage(String key, Predicate<? super String> matcher) {
     diagnosticHelper.expectErrorMessage(key, matcher);
     return this;
@@ -293,68 +320,83 @@ public class CompilationTestHelper {
   public void doTest() {
     checkState(!sources.isEmpty(), "No source files to compile");
     checkState(!run, "doTest should only be called once");
+
+    String depsForTestInputs = System.getProperty("com.google.errorprone.deps_for_test_inputs");
+    if (depsForTestInputs != null) {
+      extraArgs =
+          ImmutableList.<String>builder()
+              .addAll(extraArgs)
+              .add("-cp")
+              .add(depsForTestInputs)
+              .build();
+    }
+
     this.run = true;
     Result result = compile();
     for (Diagnostic<? extends JavaFileObject> diagnostic : diagnosticHelper.getDiagnostics()) {
       if (diagnostic.getCode().contains("error.prone.crash")) {
-        fail(diagnostic.getMessage(Locale.ENGLISH));
+        fail(diagnostic.toString());
       }
     }
+    String stringifiedOutput = outputStream.toString(UTF_8);
+    assertWithMessage("ErrorProne suffered an internal crash: %s", stringifiedOutput)
+        .that(stringifiedOutput)
+        .doesNotContain("An exception has occurred in the compiler");
+
     if (expectNoDiagnostics) {
       List<Diagnostic<? extends JavaFileObject>> diagnostics = diagnosticHelper.getDiagnostics();
       assertWithMessage(
-              String.format(
-                  "Expected no diagnostics produced, but found %d: %s",
-                  diagnostics.size(), diagnostics))
+              "Expected no diagnostics produced, but found %s: %s", diagnostics.size(), diagnostics)
           .that(diagnostics.size())
           .isEqualTo(0);
       assertWithMessage(
-              String.format(
-                  "Expected compilation result to be "
-                      + expectedResult.orElse(Result.OK)
-                      + ", but was %s. No diagnostics were emitted."
-                      + " OutputStream from Compiler follows.\n\n%s",
-                  result,
-                  outputStream))
+              "Expected compilation result to be %s, but was %s. No diagnostics were emitted."
+                  + " OutputStream from Compiler follows.\n\n%s",
+              expectedResult.orElse(Result.OK), result, outputStream)
           .that(result)
           .isEqualTo(expectedResult.orElse(Result.OK));
     } else {
+      ImmutableList.Builder<String> mismatches = ImmutableList.builder();
       for (JavaFileObject source : sources) {
         try {
-          diagnosticHelper.assertHasDiagnosticOnAllMatchingLines(
-              source, lookForCheckNameInDiagnostic);
+          for (String mismatch :
+              diagnosticHelper.findMismatchedLines(source, lookForCheckNameInDiagnostic)) {
+            mismatches.add(sources.size() > 1 ? source.getName() + ": " + mismatch : mismatch);
+          }
         } catch (IOException e) {
           throw new UncheckedIOException(e);
         }
       }
-      assertWithMessage("Unused error keys: " + diagnosticHelper.getUnusedLookupKeys())
+      ImmutableList<String> allMismatches = mismatches.build();
+      if (!allMismatches.isEmpty()) {
+        fail(diagnosticHelper.describeMismatches(allMismatches));
+      }
+      assertWithMessage("Unused error keys: %s", diagnosticHelper.getUnusedLookupKeys())
           .that(diagnosticHelper.getUnusedLookupKeys().isEmpty())
           .isTrue();
     }
 
-    expectedResult.ifPresent(
-        expected ->
-            assertWithMessage(
-                    String.format(
-                        "Expected compilation result %s, but was %s\n%s\n%s",
-                        expected,
-                        result,
-                        Joiner.on('\n').join(diagnosticHelper.getDiagnostics()),
-                        outputStream))
-                .that(result)
-                .isEqualTo(expected));
+    expectedResult.ifPresent(expected ->
+        assertWithMessage(
+                "Expected compilation result %s, but was %s\n%s\n%s",
+                expected,
+                result,
+                Joiner.on('\n').join(diagnosticHelper.getDiagnostics()),
+                outputStream)
+            .that(result)
+            .isEqualTo(expected));
   }
 
   private Result compile() {
-    List<String> processedArgs = buildArguments(overrideClasspath, extraArgs);
+    ImmutableList<String> processedArgs = buildArguments(overrideClasspath, extraArgs, testOnly);
     return compiler
             .getTask(
                 new PrintWriter(
                     new BufferedWriter(new OutputStreamWriter(outputStream, UTF_8)),
-                    /*autoFlush=*/ true),
+                    /* autoFlush= */ true),
                 FileManagers.testFileManager(),
                 diagnosticHelper.collector,
-                /* options= */ ImmutableList.copyOf(processedArgs),
+                /* options= */ processedArgs,
                 /* classes= */ ImmutableList.of(),
                 sources)
             .call()

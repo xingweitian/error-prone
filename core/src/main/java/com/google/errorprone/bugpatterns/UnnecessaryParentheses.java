@@ -17,35 +17,52 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
-import static com.google.errorprone.BugPattern.StandardTags.STYLE;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.bugpatterns.BugChecker.AnnotationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.ParenthesizedTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ParenthesizedTree;
-import com.sun.source.tree.StatementTree;
+import com.sun.source.tree.Tree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "UnnecessaryParentheses",
     summary =
-        "These grouping parentheses are unnecessary; it is unlikely the code will"
-            + " be misinterpreted without them",
-    severity = WARNING,
-    tags = STYLE)
-public class UnnecessaryParentheses extends BugChecker implements ParenthesizedTreeMatcher {
+        "These parentheses are unnecessary; it is unlikely the code will be misinterpreted without"
+            + " them",
+    severity = WARNING)
+public class UnnecessaryParentheses extends BugChecker
+    implements ParenthesizedTreeMatcher, AnnotationTreeMatcher {
+
+  @Override
+  public Description matchAnnotation(AnnotationTree tree, VisitorState state) {
+    if (!hasExplicitSource(tree, state)) {
+      return NO_MATCH;
+    }
+    return state.getSourceForNode(tree).endsWith("()")
+        ? describeMatch(
+            tree,
+            SuggestedFix.replace(tree, "@" + state.getSourceForNode(tree.getAnnotationType())))
+        : NO_MATCH;
+  }
 
   @Override
   public Description matchParenthesized(ParenthesizedTree tree, VisitorState state) {
     ExpressionTree expression = tree.getExpression();
-    if (state.getPath().getParentPath().getLeaf() instanceof StatementTree) {
-      return NO_MATCH;
+    Tree parent = state.getPath().getParentPath().getLeaf();
+    switch (parent.getKind()) {
+      case IF, WHILE_LOOP, DO_WHILE_LOOP, FOR_LOOP, SWITCH, SYNCHRONIZED, SWITCH_EXPRESSION -> {
+        return NO_MATCH;
+      }
+      default -> {}
     }
     if (ASTHelpers.requiresParentheses(expression, state)) {
       return NO_MATCH;
@@ -53,7 +70,8 @@ public class UnnecessaryParentheses extends BugChecker implements ParenthesizedT
     return describeMatch(
         tree,
         SuggestedFix.builder()
-            .replace(getStartPosition(tree), getStartPosition(expression), "")
+            // add an extra leading space to handle e.g. `return(x)`
+            .replace(getStartPosition(tree), getStartPosition(expression), " ")
             .replace(state.getEndPosition(expression), state.getEndPosition(tree), "")
             .build());
   }

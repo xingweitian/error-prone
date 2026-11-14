@@ -27,17 +27,30 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 @RunWith(JUnit4.class)
 public class AnnotationHasArgumentWithValueTest extends CompilerBasedAbstractTest {
   @Before
   public void setUp() {
-    writeFile("Thing.java", "public @interface Thing {", "  String stuff();", "}");
+    writeFile(
+        "Thing.java",
+        """
+        public @interface Thing {
+          String stuff();
+        }
+        """);
   }
 
   @Test
-  public void testMatches() {
-    writeFile("A.java", "@Thing(stuff=\"y\")", "public class A {}");
+  public void matches() {
+    writeFile(
+        "A.java",
+        """
+        @Thing(stuff = "y")
+        public class A {}
+        """);
     assertCompiles(
         annotationMatches(
             /* shouldMatch= */ true,
@@ -45,9 +58,20 @@ public class AnnotationHasArgumentWithValueTest extends CompilerBasedAbstractTes
   }
 
   @Test
-  public void testMatchesExtraParentheses() {
-    writeFile("Thing2.java", "public @interface Thing2 {", "  String value();", "}");
-    writeFile("A.java", "@Thing2((\"y\"))", "public class A {}");
+  public void matchesExtraParentheses() {
+    writeFile(
+        "Thing2.java",
+        """
+        public @interface Thing2 {
+          String value();
+        }
+        """);
+    writeFile(
+        "A.java",
+        """
+        @Thing2(("y"))
+        public class A {}
+        """);
     assertCompiles(
         annotationMatches(
             /* shouldMatch= */ true,
@@ -56,7 +80,12 @@ public class AnnotationHasArgumentWithValueTest extends CompilerBasedAbstractTes
 
   @Test
   public void notMatches() {
-    writeFile("A.java", "@Thing(stuff=\"n\")", "public class A{}");
+    writeFile(
+        "A.java",
+        """
+        @Thing(stuff = "n")
+        public class A {}
+        """);
     assertCompiles(
         annotationMatches(
             /* shouldMatch= */ false,
@@ -69,15 +98,19 @@ public class AnnotationHasArgumentWithValueTest extends CompilerBasedAbstractTes
 
   @Test
   public void arrayValuedElement() {
-    writeFile("A.java", "@SuppressWarnings({\"unchecked\",\"fallthrough\"})", "public class A{}");
+    writeFile(
+        "A.java",
+        """
+        @SuppressWarnings({"unchecked", "fallthrough"})
+        public class A {}
+        """);
     assertCompiles(
         annotationMatches(
             /* shouldMatch= */ true,
             new AnnotationHasArgumentWithValue("value", stringLiteral("unchecked"))));
   }
 
-  private Scanner annotationMatches(
-      final boolean shouldMatch, final AnnotationHasArgumentWithValue toMatch) {
+  private Scanner annotationMatches(boolean shouldMatch, AnnotationHasArgumentWithValue toMatch) {
     return new Scanner() {
       @Override
       public Void visitAnnotation(AnnotationTree node, VisitorState visitorState) {

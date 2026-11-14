@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -27,8 +28,10 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
+import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ExpressionTree;
@@ -39,7 +42,6 @@ import com.sun.tools.javac.code.Type;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "IdentityHashMapUsage",
     summary = "IdentityHashMap usage shouldn't be intermingled with Map",
     severity = WARNING)
 public class IdentityHashMapUsage extends BugChecker
@@ -58,8 +60,8 @@ public class IdentityHashMapUsage extends BugChecker
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (IHM_ONE_ARG_METHODS.matches(tree, state)
         && !ASTHelpers.isSameType(
-            ASTHelpers.getType(tree.getArguments().get(0)),
-            state.getTypeFromString(IDENTITY_HASH_MAP),
+            ASTHelpers.getType(tree.getArguments().getFirst()),
+            JAVA_UTIL_IDENTITYHASHMAP.get(state),
             state)) {
       return describeMatch(tree);
     }
@@ -68,7 +70,7 @@ public class IdentityHashMapUsage extends BugChecker
 
   @Override
   public Description matchAssignment(AssignmentTree tree, VisitorState state) {
-    Type ihmType = state.getTypeFromString(IDENTITY_HASH_MAP);
+    Type ihmType = JAVA_UTIL_IDENTITYHASHMAP.get(state);
     if (!ASTHelpers.isSameType(ASTHelpers.getType(tree.getExpression()), ihmType, state)) {
       return Description.NO_MATCH;
     }
@@ -84,17 +86,15 @@ public class IdentityHashMapUsage extends BugChecker
       // method params don't have initializers.
       return Description.NO_MATCH;
     }
-    Type ihmType = state.getTypeFromString(IDENTITY_HASH_MAP);
+    Type ihmType = JAVA_UTIL_IDENTITYHASHMAP.get(state);
     if (ASTHelpers.isSameType(ASTHelpers.getType(tree.getType()), ihmType, state)) {
       return Description.NO_MATCH;
     }
-    if (ASTHelpers.isSameType(ASTHelpers.getType(tree.getInitializer()), ihmType, state)) {
-      return describeMatch(
-          tree,
-          SuggestedFix.builder()
-              .replace(tree.getType(), "IdentityHashMap")
-              .addImport(IDENTITY_HASH_MAP)
-              .build());
+    Type type = ASTHelpers.getType(tree.getInitializer());
+    if (ASTHelpers.isSameType(type, ihmType, state)) {
+      SuggestedFix.Builder fix = SuggestedFix.builder();
+      fix.replace(tree.getType(), SuggestedFixes.qualifyType(state, fix, type));
+      return describeMatch(tree, fix.build());
     }
     return Description.NO_MATCH;
   }
@@ -103,11 +103,13 @@ public class IdentityHashMapUsage extends BugChecker
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
     if (IHM_CTOR_MAP_ARG.matches(tree, state)
         && !ASTHelpers.isSameType(
-            ASTHelpers.getType(tree.getArguments().get(0)),
-            state.getTypeFromString(IDENTITY_HASH_MAP),
+            ASTHelpers.getType(tree.getArguments().getFirst()),
+            JAVA_UTIL_IDENTITYHASHMAP.get(state),
             state)) {
       return describeMatch(tree);
     }
     return Description.NO_MATCH;
   }
+
+  private static final Supplier<Type> JAVA_UTIL_IDENTITYHASHMAP = typeFromString(IDENTITY_HASH_MAP);
 }

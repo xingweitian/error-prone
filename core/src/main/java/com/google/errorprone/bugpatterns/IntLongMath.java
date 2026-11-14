@@ -31,6 +31,7 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BinaryTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ReturnTree;
 import com.sun.source.tree.Tree;
@@ -41,7 +42,6 @@ import javax.lang.model.type.TypeKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "IntLongMath",
     summary = "Expression of type int may overflow before being assigned to a long",
     severity = WARNING,
     tags = FRAGILE_CODE)
@@ -56,14 +56,16 @@ public class IntLongMath extends BugChecker
     Type type = null;
     outer:
     for (Tree parent : state.getPath()) {
-      switch (parent.getKind()) {
-        case METHOD:
-          type = ASTHelpers.getType(((MethodTree) parent).getReturnType());
+      switch (parent) {
+        case MethodTree methodTree -> {
+          type = ASTHelpers.getType(methodTree.getReturnType());
           break outer;
-        case LAMBDA_EXPRESSION:
+        }
+        case LambdaExpressionTree lambdaExpressionTree -> {
           type = state.getTypes().findDescriptorType(ASTHelpers.getType(parent)).getReturnType();
           break outer;
-        default: // fall out
+        }
+        default -> {}
       }
     }
     if (type == null) {
@@ -93,7 +95,7 @@ public class IntLongMath extends BugChecker
       return NO_MATCH;
     }
     // Note that we don't care about boxing as int isn't assignable to Long;
-    // primtive widening conversions can't be combined with autoboxing.
+    // primitive widening conversions can't be combined with autoboxing.
     if (ASTHelpers.getType(init).getKind() != TypeKind.INT) {
       return NO_MATCH;
     }
@@ -105,17 +107,11 @@ public class IntLongMath extends BugChecker
         break;
       }
       switch (nested.getKind()) {
-        case DIVIDE:
-        case REMAINDER:
-        case AND:
-        case XOR:
-        case OR:
-        case RIGHT_SHIFT:
+        case DIVIDE, REMAINDER, AND, XOR, OR, RIGHT_SHIFT -> {
           // Skip binops that can't overflow; it doesn't matter whether they're performed on
           // longs or ints.
-          break;
-        default:
-          innerMost = (BinaryTree) nested;
+        }
+        default -> innerMost = (BinaryTree) nested;
       }
       nested = ((BinaryTree) nested).getLeftOperand();
     }

@@ -19,14 +19,18 @@ package com.google.errorprone;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
+import static java.util.Objects.requireNonNull;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultiset;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.SuppressionInfo.SuppressedState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.dataflow.nullnesspropagation.NullnessAnalysis;
+import com.google.errorprone.fixes.ErrorProneEndPosTable;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Suppressible;
 import com.google.errorprone.suppliers.Supplier;
@@ -44,27 +48,29 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.comp.Modules;
 import com.sun.tools.javac.model.JavacElements;
 import com.sun.tools.javac.parser.Tokens.Token;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Convert;
 import com.sun.tools.javac.util.Name;
 import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Options;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.ref.SoftReference;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import javax.annotation.Nullable;
 import javax.lang.model.util.Elements;
+import javax.tools.JavaFileObject;
+import org.jspecify.annotations.Nullable;
 
-/** @author alexeagle@google.com (Alex Eagle) */
-public class VisitorState {
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
+public final class VisitorState {
 
   private final SharedState sharedState;
   public final Context context;
@@ -127,64 +133,6 @@ public class VisitorState {
   }
 
   /**
-   * Return a VisitorState that has no Error Prone configuration, and can't report results.
-   *
-   * @deprecated If VisitorState is needed, use {@link #createForUtilityPurposes}, otherwise just
-   *     use utility methods in ASTHelpers that don't need VisitorSate.
-   */
-  @Deprecated
-  public VisitorState(Context context) {
-    this(
-        context,
-        VisitorState::nullListener,
-        ImmutableMap.of(),
-        ErrorProneOptions.empty(),
-        // Can't use this VisitorState to report results, so no-op collector.
-        StatisticsCollector.createNoOpCollector(),
-        null,
-        SuppressedState.UNSUPPRESSED);
-  }
-
-  /**
-   * Return a VisitorState that has no Error Prone configuration, but can report findings to {@code
-   * listener}.
-   *
-   * @deprecated Use the equivalent factory method {@link #createForCustomFindingCollection}.
-   */
-  @Deprecated
-  public VisitorState(Context context, DescriptionListener listener) {
-    this(
-        context,
-        listener,
-        ImmutableMap.of(),
-        ErrorProneOptions.empty(),
-        StatisticsCollector.createCollector(),
-        null,
-        SuppressedState.UNSUPPRESSED);
-  }
-
-  /**
-   * Return a VisitorState configured for a new compilation, including Error Prone configuration.
-   *
-   * @deprecated Use the equivalent factory method {@link #createConfiguredForCompilation}.
-   */
-  @Deprecated
-  public VisitorState(
-      Context context,
-      DescriptionListener listener,
-      Map<String, SeverityLevel> severityMap,
-      ErrorProneOptions errorProneOptions) {
-    this(
-        context,
-        listener,
-        severityMap,
-        errorProneOptions,
-        StatisticsCollector.createCollector(),
-        null,
-        SuppressedState.UNSUPPRESSED);
-  }
-
-  /**
    * The constructor used for brand-new VisitorState objects from outside. It builds a new
    * SharedState.
    */
@@ -218,7 +166,15 @@ public class VisitorState {
   }
 
   public VisitorState withPath(TreePath path) {
+    checkNotNull(path);
     return new VisitorState(context, path, suppressedState, sharedState);
+  }
+
+  private VisitorState withNoPathForMemoization() {
+    if (path == null) {
+      return this;
+    }
+    return new VisitorState(context, null, suppressedState, sharedState);
   }
 
   public VisitorState withSuppression(SuppressedState suppressedState) {
@@ -229,6 +185,13 @@ public class VisitorState {
   }
 
   public TreePath getPath() {
+    if (path == null) {
+      throw new UnsupportedOperationException(
+          "VisitorState.memoize Supplier implementations cannot access the TreePath: The result is"
+              + " cached across multiple CompilationUnitTree instances, which share none of the"
+              + " path. Alternatively, you've managed to call getPath() before the VisitorState's"
+              + " path was initialized.");
+    }
     return path;
   }
 
@@ -258,6 +221,14 @@ public class VisitorState {
 
   public ErrorProneOptions errorProneOptions() {
     return sharedState.errorProneOptions;
+  }
+
+  public Map<String, SeverityLevel> severityMap() {
+    return sharedState.severityMap;
+  }
+
+  JavacInvocationInstance javacInvocationInstance() {
+    return sharedState.javacInvocationInstance;
   }
 
   public void reportMatch(Description description) {
@@ -323,30 +294,33 @@ public class VisitorState {
   /**
    * Given the binary name of a class, returns the {@link Type}.
    *
-   * <p>Prefer not to use this method for constant strings, or strings otherwise known at compile
-   * time. Instead, save the result of {@link
-   * com.google.errorprone.suppliers.Suppliers#typeFromString} as a class constant, and use its
-   * {@link Supplier#get} method to look up the Type when needed. This lookup will be faster,
+   * <p>Prefer not to use this method for constant class or interface name strings, or strings
+   * otherwise known at compile time. Instead, save the result of {@link ClassName#of} as a class
+   * constant, and use its {@link ClassName#type} method to look up the Type when needed (or use
+   * {@link #getSymtab()} for primitive and {@code void} types). This lookup will be faster,
    * improving Error Prone's analysis time.
    *
-   * <p>If this method returns null, the compiler doesn't have access to this type, which means that
-   * if you are comparing other types to this for equality or the subtype relation, your result
-   * would always be false even if it could create the type. Thus it might be best to bail out early
-   * in your matcher if this method returns null on your type of interest.
+   * <p>If this method returns null, the type has not been entered into the compiler's symbol table,
+   * which typically means that if you are comparing other types to this for equality or the subtype
+   * relation, your result would be false (unless the type is an indirect supertype of a class whose
+   * supertype hierarchy has not been completed yet; see b/138753468 and b/584699307).
    *
    * @param typeStr the JLS 13.1 binary name of the class, e.g. {@code "java.util.Map$Entry"}
    * @return the {@link Type}, or null if it cannot be found
    */
-  @Nullable
-  public Type getTypeFromString(String typeStr) {
-    return sharedState
-        .typeCache
-        .computeIfAbsent(typeStr, key -> Optional.ofNullable(getTypeFromStringInternal(key)))
-        .orElse(null);
+  public @Nullable Type getTypeFromString(String typeStr) {
+    Type cached = sharedState.typeCache.get(typeStr);
+    if (cached != null) {
+      return cached;
+    }
+    Type type = getTypeFromStringInternal(typeStr);
+    if (type != null) {
+      sharedState.typeCache.put(typeStr, type);
+    }
+    return type;
   }
 
-  @Nullable
-  private Type getTypeFromStringInternal(String typeStr) {
+  private @Nullable Type getTypeFromStringInternal(String typeStr) {
     validateTypeStr(typeStr);
     Type primitiveOrVoidType = getPrimitiveOrVoidType(typeStr);
     if (primitiveOrVoidType != null) {
@@ -363,19 +337,37 @@ public class VisitorState {
   }
 
   /**
+   * Looks up the {@link Symbol} for a class name.
+   *
+   * <p>Prefer {@link ClassName#of} and {@link ClassName#symbol} for constant class names.
+   *
    * @param symStr the string representation of a symbol
    * @return the Symbol object, or null if it cannot be found
    */
   // TODO(cushon): deal with binary compat issues and return ClassSymbol
-  @Nullable
-  public Symbol getSymbolFromString(String symStr) {
-    return getSymbolFromName(binaryNameFromClassname(symStr));
+  public @Nullable Symbol getSymbolFromString(String symStr) {
+    SharedState.ParsedName parsed = parseClassName(symStr);
+    return getSymbolFromName(parsed.binaryName(), parsed.enclosingCandidates());
+  }
+
+  private SharedState.ParsedName parseClassName(String className) {
+    SharedState.ParsedName parsed = sharedState.parsedNameCache.get(className);
+    if (parsed == null) {
+      Name binaryName = binaryNameFromClassname(className);
+      parsed =
+          new SharedState.ParsedName(
+              binaryName, ImmutableList.copyOf(Convert.enclosingCandidates(binaryName)));
+      sharedState.parsedNameCache.put(className, parsed);
+    }
+    return parsed;
   }
 
   /**
    * Returns the Name object corresponding to the named class, converting it to binary form along
    * the way if necessary (i.e., replacing Foo.Bar with Foo$Bar). To get the Name corresponding to
    * some string that is not a class name, see the more general {@link #getName(String)}.
+   *
+   * <p>Prefer {@link ClassName#of} and {@link ClassName#binaryName} for constant class names.
    */
   public Name binaryNameFromClassname(String className) {
     return getName(inferBinaryName(className));
@@ -386,27 +378,53 @@ public class VisitorState {
    *
    * @param name the name to look up, which must be in binary form (i.e. with $ for nested classes).
    */
-  @Nullable
-  public ClassSymbol getSymbolFromName(Name name) {
-    boolean modular = sharedState.modules.getDefaultModule() != getSymtab().noModule;
-    if (!modular) {
-      return getSymbolFromString(getSymtab().noModule, name);
+  public @Nullable ClassSymbol getSymbolFromName(Name name) {
+    return getSymbolFromName(name, /* enclosingCandidates= */ null);
+  }
+
+  @Nullable ClassSymbol getSymbolFromName(Name name, @Nullable List<Name> enclosingCandidates) {
+    ClassSymbol cached = sharedState.symbolCache.get(name);
+    if (cached != null) {
+      return cached;
     }
-    for (ModuleSymbol msym : sharedState.modules.allModules()) {
-      ClassSymbol result = getSymbolFromString(msym, name);
-      if (result != null) {
-        // TODO(cushon): the path where we iterate over all modules is probably slow.
-        // Try to learn some lessons from JDK-8189747, and consider disallowing this case and
-        // requiring users to call the getSymbolFromString(ModuleSymbol, Name) overload instead.
-        return result;
+    ClassSymbol sym = getSymbolFromNameInternal(name, enclosingCandidates);
+    if (sym != null) {
+      sharedState.symbolCache.put(name, sym);
+    }
+    return sym;
+  }
+
+  private @Nullable ClassSymbol getSymbolFromNameInternal(
+      Name name, @Nullable List<Name> enclosingCandidates) {
+    ClassSymbol result = lookupSymbolFromName(name);
+    if (result != null) {
+      return result;
+    }
+    boolean completedEnclosing = false;
+    for (Name enclosing :
+        enclosingCandidates != null ? enclosingCandidates : Convert.enclosingCandidates(name)) {
+      if (lookupSymbolFromName(enclosing) != null) {
+        completedEnclosing = true;
+      }
+    }
+    return completedEnclosing ? lookupSymbolFromName(name) : null;
+  }
+
+  private @Nullable ClassSymbol lookupSymbolFromName(Name name) {
+    for (ClassSymbol result : getSymtab().getClassesForName(name)) {
+      ClassSymbol completed = completeSymbol(result);
+      if (completed != null) {
+        return completed;
       }
     }
     return null;
   }
 
-  @Nullable
-  public ClassSymbol getSymbolFromString(ModuleSymbol msym, Name name) {
-    ClassSymbol result = getSymtab().getClass(msym, name);
+  public @Nullable ClassSymbol getSymbolFromString(ModuleSymbol msym, Name name) {
+    return completeSymbol(getSymtab().getClass(msym, name));
+  }
+
+  private static @Nullable ClassSymbol completeSymbol(@Nullable ClassSymbol result) {
     if (result == null || result.kind == Kind.ERR || !result.exists()) {
       return null;
     }
@@ -478,7 +496,12 @@ public class VisitorState {
     }
   }
 
-  /** Build an Array Type from another Type */
+  /**
+   * Build an array type from another type.
+   *
+   * <p>For constant types, prefer not to use this method. Instead, save the result of {@link
+   * com.google.errorprone.suppliers.Suppliers#arrayOf} as a class constant.
+   */
   public Type arrayTypeForType(Type baseType) {
     return new ArrayType(baseType, getSymtab().arrayClass);
   }
@@ -489,9 +512,8 @@ public class VisitorState {
    *
    * @return the path, or {@code null} if there is no match
    */
-  @Nullable
   @SafeVarargs
-  public final TreePath findPathToEnclosing(Class<? extends Tree>... classes) {
+  public final @Nullable TreePath findPathToEnclosing(Class<? extends Tree>... classes) {
     TreePath enclosingPath = getPath();
     while (enclosingPath != null) {
       for (Class<? extends Tree> clazz : classes) {
@@ -509,12 +531,23 @@ public class VisitorState {
    *
    * @return the node, or {@code null} if there is no match
    */
-  @Nullable
-  @SuppressWarnings("unchecked") // findPathToEnclosing guarantees that the type is from |classes|
+  // findPathToEnclosing guarantees that the type is from |classes|
+  @SuppressWarnings("unchecked")
   @SafeVarargs
-  public final <T extends Tree> T findEnclosing(Class<? extends T>... classes) {
+  public final <T extends Tree> @Nullable T findEnclosing(Class<? extends T>... classes) {
     TreePath pathToEnclosing = findPathToEnclosing(classes);
     return (pathToEnclosing == null) ? null : (T) pathToEnclosing.getLeaf();
+  }
+
+  public CharSequence getSourceCode(int start, int end) {
+    CharSequence sourceCode = getSourceCode();
+    if (start > 0 && start < sourceCode.length() && start > end) {
+      // If the start position is a valid position position, but the [start, end) range is invalid,
+      // use the start position for the crash message. Otherwise if the start position is invalid
+      // continue below to let CharSequence#subSequence throw an exception.
+      throw new SourcePositionException(start, end);
+    }
+    return sourceCode.subSequence(start, end);
   }
 
   /**
@@ -522,12 +555,13 @@ public class VisitorState {
    *
    * @return the source file as a sequence of characters, or null if it is not available
    */
-  @Nullable
   public CharSequence getSourceCode() {
     try {
-      return getPath().getCompilationUnit().getSourceFile().getCharContent(false);
+      JavaFileObject javaFileObject = getPath().getCompilationUnit().getSourceFile();
+      return requireNonNull(javaFileObject.getCharContent(/* ignoreEncodingErrors= */ false));
     } catch (IOException e) {
-      return null;
+      // this should be impossible if ignoreEncodingErrors is false
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -541,17 +575,16 @@ public class VisitorState {
    * @return the source code that represents the node, or {@code null} if the source code is
    *     unavailable (e.g. for generated or desugared AST nodes)
    */
-  @Nullable
-  public String getSourceForNode(Tree tree) {
-    int start = ((JCTree) tree).getStartPosition();
+  public @Nullable String getSourceForNode(Tree tree) {
+    int start = getStartPosition(tree);
     int end = getEndPosition(tree);
     CharSequence source = getSourceCode();
-    if (end == -1) {
+    if (!hasExplicitSource(tree, this)) {
       return null;
     }
     checkArgument(start >= 0, "invalid start position (%s) for: %s", start, tree);
     checkArgument(start < end, "invalid source positions (%s, %s) for: %s", start, end, tree);
-    checkArgument(end < source.length(), "invalid end position (%s) for: %s", end, tree);
+    checkArgument(end <= source.length(), "invalid end position (%s) for: %s", end, tree);
     return source.subSequence(start, end).toString();
   }
 
@@ -561,7 +594,7 @@ public class VisitorState {
    * <p>This is moderately expensive (the source of the node has to be re-lexed), so it should only
    * be used if a fix is already going to be emitted.
    */
-  public List<ErrorProneToken> getTokensForNode(Tree tree) {
+  public ImmutableList<ErrorProneToken> getTokensForNode(Tree tree) {
     return ErrorProneTokens.getTokens(getSourceForNode(tree), context);
   }
 
@@ -572,7 +605,7 @@ public class VisitorState {
    * <p>This is moderately expensive (the source of the node has to be re-lexed), so it should only
    * be used if a fix is already going to be emitted.
    */
-  public List<ErrorProneToken> getOffsetTokensForNode(Tree tree) {
+  public ImmutableList<ErrorProneToken> getOffsetTokensForNode(Tree tree) {
     int start = getStartPosition(tree);
     return ErrorProneTokens.getTokens(getSourceForNode(tree), start, context);
   }
@@ -584,18 +617,13 @@ public class VisitorState {
    * <p>This is moderately expensive (the source of the node has to be re-lexed), so it should only
    * be used if a fix is already going to be emitted.
    */
-  public List<ErrorProneToken> getOffsetTokens(int start, int end) {
-    return ErrorProneTokens.getTokens(
-        getSourceCode().subSequence(start, end).toString(), start, context);
+  public ImmutableList<ErrorProneToken> getOffsetTokens(int start, int end) {
+    return ErrorProneTokens.getTokens(getSourceCode(start, end).toString(), start, context);
   }
 
   /** Returns the end position of the node, or -1 if it is not available. */
   public int getEndPosition(Tree node) {
-    JCCompilationUnit compilationUnit = (JCCompilationUnit) getPath().getCompilationUnit();
-    if (compilationUnit.endPositions == null) {
-      return -1;
-    }
-    return ((JCTree) node).getEndPosition(compilationUnit.endPositions);
+    return ErrorProneEndPosTable.getEndPosition(node, getPath().getCompilationUnit());
   }
 
   /** Validates a type string, ensuring it is not generic and not an array type. */
@@ -616,30 +644,19 @@ public class VisitorState {
    * Given a string that represents a type, if it's a primitive type (e.g., "int") or "void", return
    * the corresponding Type, or null otherwise.
    */
-  @Nullable
-  private Type getPrimitiveOrVoidType(String typeStr) {
-    switch (typeStr) {
-      case "byte":
-        return getSymtab().byteType;
-      case "short":
-        return getSymtab().shortType;
-      case "int":
-        return getSymtab().intType;
-      case "long":
-        return getSymtab().longType;
-      case "float":
-        return getSymtab().floatType;
-      case "double":
-        return getSymtab().doubleType;
-      case "boolean":
-        return getSymtab().booleanType;
-      case "char":
-        return getSymtab().charType;
-      case "void":
-        return getSymtab().voidType;
-      default:
-        return null;
-    }
+  private @Nullable Type getPrimitiveOrVoidType(String typeStr) {
+    return switch (typeStr) {
+      case "byte" -> getSymtab().byteType;
+      case "short" -> getSymtab().shortType;
+      case "int" -> getSymtab().intType;
+      case "long" -> getSymtab().longType;
+      case "float" -> getSymtab().floatType;
+      case "double" -> getSymtab().doubleType;
+      case "boolean" -> getSymtab().booleanType;
+      case "char" -> getSymtab().charType;
+      case "void" -> getSymtab().voidType;
+      default -> null;
+    };
   }
 
   /** Returns true if the compilation is targeting Android. */
@@ -647,18 +664,28 @@ public class VisitorState {
     return Options.instance(context).getBoolean("androidCompatible");
   }
 
-  /** Returns a timing span for the given {@link Suppressible}. */
+  private static final AutoCloseable NO_TIMING_SPAN =
+      new AutoCloseable() {
+        @Override
+        public void close() {}
+      };
+
+  /**
+   * Returns a timing span for the given {@link Suppressible} if {@link
+   * ErrorProneOptions#recordTimings} is true, or else a span that records nothing.
+   */
   public AutoCloseable timingSpan(Suppressible suppressible) {
-    return sharedState.timings.span(suppressible);
+    return sharedState.recordTimings ? sharedState.timings.span(suppressible) : NO_TIMING_SPAN;
   }
 
-  private static class Cache<T> implements Supplier<T> {
+  private static final class Cache<T> implements Supplier<T> {
     private final Supplier<T> impl;
     /* Uses T instead of Optional<T> because we don't want to cache null results
-    (b/138753468). These inline caches persist between compilation units, and a type that fails to
-    resolve in one may become available in the next; we want to keep looking it up
-    (relying on the per-file cache in typeCache) if we don't have a result. If you want to cache a
-    computation which can return null, wrap it in an Optional at the call site.*/
+    (b/138753468, b/584699307). A type or symbol that fails to resolve at one point in a
+    compilation may become available later (in the same compilation unit or a subsequent one) once
+    enclosing classes or supertype hierarchies are completed, so we want to keep looking it up if
+    we don't have a result. If you want to cache a computation which can return null, wrap it in an
+    Optional at the call site. */
 
     private SoftReference<T> cache = new SoftReference<>(null);
     private JavacInvocationInstance provenance;
@@ -675,7 +702,7 @@ public class VisitorState {
       always correct. */
       T value = cache.get();
       if (value == null) {
-        value = impl.get(state);
+        value = compute(state);
         if (value != null) {
           cache = new SoftReference<>(value);
           provenance = state.sharedState.javacInvocationInstance;
@@ -683,19 +710,30 @@ public class VisitorState {
       } else {
         JavacInvocationInstance current = state.sharedState.javacInvocationInstance;
         if (provenance != current) {
-          value = impl.get(state);
+          value = compute(state);
           cache = new SoftReference<>(value);
           provenance = current;
         }
       }
       return value;
     }
+
+    private T compute(VisitorState state) {
+      /*
+       * Don't let callers rely on the TreePath: The Cache is shared across the whole compilation,
+       * not just the current VisitorState's TreePath's CompilationUnit.
+       */
+      return impl.get(state.withNoPathForMemoization());
+    }
   }
 
   /**
    * Produces a cache for a function that is expected to return the same result throughout a
-   * compilation, but requires a VisitorState to compute that result. Do not use this method for a
-   * function that depends on the varying state of a VisitorState (e.g. {@link #getPath()}.
+   * compilation, but requires a {@link VisitorState} to compute that result.
+   *
+   * <p><b>Note:</b> Do not use this method for a function that depends on the varying state of a
+   * {@link com.google.errorprone.VisitorState} (e.g. {@link #getPath()}—including the compilation
+   * unit itself!).
    */
   public static <T> Supplier<T> memoize(Supplier<T> f) {
     return new Cache<>(f);
@@ -708,10 +746,10 @@ public class VisitorState {
    * {@code SomeClass.instance(context)} has sizable performance improvements in aggregate.
    */
   private static final class SharedState {
-    private final Modules modules;
     private final Names names;
     private final Symtab symtab;
     private final ErrorProneTimings timings;
+    private final boolean recordTimings;
     private final Types types;
     private final TreeMaker treeMaker;
     private final JavacInvocationInstance javacInvocationInstance;
@@ -721,10 +759,14 @@ public class VisitorState {
     private final Map<String, SeverityLevel> severityMap;
     private final ErrorProneOptions errorProneOptions;
 
+    private record ParsedName(Name binaryName, ImmutableList<Name> enclosingCandidates) {}
+
     // TODO(ronshapiro): should we presize this with a reasonable size? We can check for the
     // smallest build and see how many types are loaded and use that. Or perhaps a heuristic
     // based on number of files?
-    private final Map<String, Optional<Type>> typeCache = new HashMap<>();
+    private final Map<String, Type> typeCache = new HashMap<>();
+    private final Map<String, ParsedName> parsedNameCache = new HashMap<>();
+    private final Map<Name, ClassSymbol> symbolCache = new HashMap<>();
 
     SharedState(
         Context context,
@@ -732,10 +774,10 @@ public class VisitorState {
         StatisticsCollector statisticsCollector,
         Map<String, SeverityLevel> severityMap,
         ErrorProneOptions errorProneOptions) {
-      this.modules = Modules.instance(context);
       this.names = Names.instance(context);
       this.symtab = Symtab.instance(context);
       this.timings = ErrorProneTimings.instance(context);
+      this.recordTimings = errorProneOptions.recordTimings();
       this.types = Types.instance(context);
       this.treeMaker = TreeMaker.instance(context);
       this.javacInvocationInstance = JavacInvocationInstance.instance(context);

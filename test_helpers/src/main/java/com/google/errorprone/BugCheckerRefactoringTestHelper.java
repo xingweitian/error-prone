@@ -23,6 +23,7 @@ import static com.google.common.collect.Streams.stream;
 import static com.google.common.truth.Truth.assertAbout;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static com.google.errorprone.BaseErrorProneJavaCompiler.setupMessageBundle;
 import static com.google.errorprone.FileObjects.forResource;
 import static com.google.errorprone.FileObjects.forSourceLines;
 import static com.google.testing.compile.JavaSourceSubjectFactory.javaSource;
@@ -47,7 +48,6 @@ import com.google.errorprone.scanner.ErrorProneScanner;
 import com.google.errorprone.scanner.ErrorProneScannerTransformer;
 import com.google.errorprone.scanner.Scanner;
 import com.google.errorprone.scanner.ScannerSupplier;
-import com.google.errorprone.util.RuntimeVersion;
 import com.google.googlejavaformat.java.Formatter;
 import com.google.googlejavaformat.java.FormatterException;
 import com.google.testing.compile.JavaFileObjects;
@@ -59,11 +59,13 @@ import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Log;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -81,34 +83,58 @@ import javax.tools.JavaFileObject;
  * @author kurs@google.com (Jan Kurs)
  */
 @CheckReturnValue
-public class BugCheckerRefactoringTestHelper {
+public final class BugCheckerRefactoringTestHelper {
 
   /** Test mode for matching refactored source against expected source. */
   public enum TestMode {
     TEXT_MATCH {
       @Override
-      void verifyMatch(JavaFileObject refactoredSource, JavaFileObject expectedSource)
+      void verifyMatch(
+          JavaFileObject refactoredSource,
+          JavaFileObject expectedSource,
+          boolean allowFormattingErrors)
           throws IOException {
-        assertThat(maybeFormat(refactoredSource.getCharContent(false).toString()))
-            .isEqualTo(maybeFormat(expectedSource.getCharContent(false).toString()));
+        assertThat(
+                maybeFormat(
+                    refactoredSource.getCharContent(false).toString(), allowFormattingErrors))
+            .isEqualTo(
+                maybeFormat(
+                    expectedSource.getCharContent(false).toString(), allowFormattingErrors));
       }
 
-      private String maybeFormat(String input) {
+      private String maybeFormat(String input, boolean allowFormattingErrors) {
         try {
-          return new Formatter().formatSource(input);
+          Formatter formatter = new Formatter();
+          return formatter.formatSourceAndFixImports(input);
         } catch (FormatterException e) {
-          return input;
+          if (allowFormattingErrors) {
+            return input;
+          }
+          throw new AssertionError(
+              "Failed to format source, and allowFormattingErrors is false", e);
         }
       }
     },
+    /**
+     * @deprecated prefer {@link #TEXT_MATCH}, which formats the actual and expected output to be
+     *     lenient of whitespace differences. {@link #AST_MATCH} will ignore differences in
+     *     comments, and may miss other differences that aren't detectable in the AST.
+     */
+    @Deprecated
     AST_MATCH {
       @Override
-      void verifyMatch(JavaFileObject refactoredSource, JavaFileObject expectedSource) {
+      void verifyMatch(
+          JavaFileObject refactoredSource,
+          JavaFileObject expectedSource,
+          boolean allowFormattingErrors) {
         assertAbout(javaSource()).that(refactoredSource).parsesAs(expectedSource);
       }
     };
 
-    abstract void verifyMatch(JavaFileObject refactoredSource, JavaFileObject expectedSource)
+    abstract void verifyMatch(
+        JavaFileObject refactoredSource,
+        JavaFileObject expectedSource,
+        boolean allowFormattingErrors)
         throws IOException;
   }
 
@@ -148,14 +174,18 @@ public class BugCheckerRefactoringTestHelper {
     }
   }
 
+  private static final String COMPILING_TEST_ONLY_CODE_ARG = "-XepCompilingTestOnlyCode";
+
   private final Map<JavaFileObject, JavaFileObject> sources = new HashMap<>();
   private final Class<?> clazz;
   private final ScannerSupplier scannerSupplier;
 
   private FixChooser fixChooser = FixChoosers.FIRST;
-  private List<String> options = ImmutableList.of();
+  private final List<String> options = new ArrayList<>();
   private boolean allowBreakingChanges = false;
+  private boolean allowFormattingErrors = false;
   private String importOrder = "static-first";
+  private boolean testOnly = false;
 
   private boolean run = false;
 
@@ -164,7 +194,9 @@ public class BugCheckerRefactoringTestHelper {
     this.scannerSupplier = scannerSupplier;
   }
 
-  /** @deprecated prefer {@link #newInstance(Class, Class)} */
+  /**
+   * @deprecated prefer {@link #newInstance(Class, Class)}
+   */
   @Deprecated
   public static BugCheckerRefactoringTestHelper newInstance(
       BugChecker refactoringBugChecker, Class<?> clazz) {
@@ -189,6 +221,13 @@ public class BugCheckerRefactoringTestHelper {
         clazz, ScannerSupplier.fromBugCheckerClasses(checkerClass));
   }
 
+  /**
+   * Adds an input file.
+   *
+   * @deprecated prefer {@link #addInputLines}. Declaring tests in the same file using text blocks
+   *     is more readable, as it encourages writing small, focussed tests.
+   */
+  @Deprecated
   public BugCheckerRefactoringTestHelper.ExpectOutput addInput(String inputFilename) {
     return new ExpectOutput(forResource(clazz, inputFilename));
   }
@@ -197,49 +236,93 @@ public class BugCheckerRefactoringTestHelper {
     return new ExpectOutput(forSourceLines(path, input));
   }
 
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper setFixChooser(FixChooser chooser) {
     this.fixChooser = chooser;
     return this;
   }
 
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper addModules(String... modules) {
-    if (!RuntimeVersion.isAtLeast9()) {
-      return this;
-    }
     return setArgs(
         Arrays.stream(modules)
             .map(m -> String.format("--add-exports=%s=ALL-UNNAMED", m))
             .collect(toImmutableList()));
   }
 
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper setArgs(ImmutableList<String> args) {
     checkState(options.isEmpty());
-    this.options = args;
+    this.options.addAll(args);
     return this;
   }
 
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper setArgs(String... args) {
-    this.options = ImmutableList.copyOf(args);
+    this.options.clear();
+    this.options.addAll(Arrays.asList(args));
+    return this;
+  }
+
+  /** Configures the compilation to treat the code as test-only. Off by default. */
+  @CanIgnoreReturnValue
+  public BugCheckerRefactoringTestHelper setTestOnly() {
+    this.testOnly = true;
     return this;
   }
 
   /** If set, fixes that produce output that doesn't compile are allowed. Off by default. */
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper allowBreakingChanges() {
     allowBreakingChanges = true;
     return this;
   }
 
+  /** If set, formatting errors in the output are allowed. Off by default. */
+  @CanIgnoreReturnValue
+  public BugCheckerRefactoringTestHelper allowFormattingErrors() {
+    allowFormattingErrors = true;
+    return this;
+  }
+
+  @CanIgnoreReturnValue
   public BugCheckerRefactoringTestHelper setImportOrder(String importOrder) {
     this.importOrder = importOrder;
     return this;
   }
 
+  /**
+   * Runs the test.
+   *
+   * <p>By default outputs are compared with {@link TestMode#TEXT_MATCH}.
+   */
   public void doTest() {
-    this.doTest(TestMode.AST_MATCH);
+    this.doTest(TestMode.TEXT_MATCH);
   }
 
+  /**
+   * Runs the test.
+   *
+   * @param testMode the comparison to use to for the test outputs. The default is {@link
+   *     TestMode#TEXT_MATCH}.
+   * @deprecated prefer {@link #doTest()}, which is equivalent to {@code doTest(TEXT_MATCH)}. {@link
+   *     TestMode#TEXT_MATCH} formats the actual and expected output to be lenient of whitespace
+   *     differences. {@link TestMode#AST_MATCH} will ignore differences in comments, and may miss
+   *     other differences that aren't detectable in the AST.
+   */
+  @Deprecated
   public void doTest(TestMode testMode) {
     checkState(!run, "doTest should only be called once");
+
+    String depsForTestInputs = System.getProperty("com.google.errorprone.deps_for_test_inputs");
+    if (depsForTestInputs != null) {
+      options.add("-cp");
+      options.add(depsForTestInputs);
+    }
+    if (testOnly && !options.contains(COMPILING_TEST_ONLY_CODE_ARG)) {
+      options.add(COMPILING_TEST_ONLY_CODE_ARG);
+    }
+
     this.run = true;
     for (Map.Entry<JavaFileObject, JavaFileObject> entry : sources.entrySet()) {
       try {
@@ -250,6 +333,7 @@ public class BugCheckerRefactoringTestHelper {
     }
   }
 
+  @CanIgnoreReturnValue
   private BugCheckerRefactoringTestHelper addInputAndOutput(
       JavaFileObject input, JavaFileObject output) {
     sources.put(input, output);
@@ -259,10 +343,14 @@ public class BugCheckerRefactoringTestHelper {
   private void runTestOnPair(JavaFileObject input, JavaFileObject output, TestMode testMode)
       throws IOException {
     Context context = new Context();
-    JCCompilationUnit tree = doCompile(input, sources.keySet(), context);
+    setupMessageBundle(context);
+    DiagnosticCollector<JavaFileObject> diagnosticsCollector = new DiagnosticCollector<>();
+    JCCompilationUnit tree = doCompile(input, sources.keySet(), context, diagnosticsCollector);
+    handleDiagnostics(diagnosticsCollector);
     JavaFileObject transformed = applyDiff(input, context, tree);
+    handleDiagnostics(diagnosticsCollector);
     closeCompiler(context);
-    testMode.verifyMatch(transformed, output);
+    testMode.verifyMatch(transformed, output, allowFormattingErrors);
     if (!allowBreakingChanges) {
       Context anotherContext = new Context();
       doCompile(output, sources.values(), anotherContext);
@@ -272,10 +360,21 @@ public class BugCheckerRefactoringTestHelper {
 
   @CanIgnoreReturnValue
   private JCCompilationUnit doCompile(
-      final JavaFileObject input, Iterable<JavaFileObject> files, Context context)
+      JavaFileObject input, Iterable<JavaFileObject> files, Context context) throws IOException {
+    DiagnosticCollector<JavaFileObject> diagnosticsCollector = new DiagnosticCollector<>();
+    JCCompilationUnit unit = doCompile(input, files, context, diagnosticsCollector);
+    handleDiagnostics(diagnosticsCollector);
+    return unit;
+  }
+
+  @CanIgnoreReturnValue
+  private JCCompilationUnit doCompile(
+      JavaFileObject input,
+      Iterable<JavaFileObject> files,
+      Context context,
+      DiagnosticCollector<JavaFileObject> diagnosticsCollector)
       throws IOException {
     JavacTool tool = JavacTool.create();
-    DiagnosticCollector<JavaFileObject> diagnosticsCollector = new DiagnosticCollector<>();
     ErrorProneOptions errorProneOptions;
     try {
       errorProneOptions = ErrorProneOptions.processArgs(options);
@@ -290,42 +389,49 @@ public class BugCheckerRefactoringTestHelper {
                 new PrintWriter(out, true),
                 FileManagers.testFileManager(),
                 diagnosticsCollector,
-                ImmutableList.copyOf(errorProneOptions.getRemainingArgs()),
-                /*classes=*/ null,
+                errorProneOptions.getRemainingArgs(),
+                /* classes= */ null,
                 files,
                 context);
     Iterable<? extends CompilationUnitTree> trees = task.parse();
     task.analyze();
-    ImmutableMap<URI, ? extends CompilationUnitTree> byURI =
+    ImmutableMap<URI, ? extends CompilationUnitTree> byUri =
         stream(trees).collect(toImmutableMap(t -> t.getSourceFile().toUri(), t -> t));
-    URI inputURI = input.toUri();
-    assertWithMessage(out + Joiner.on('\n').join(diagnosticsCollector.getDiagnostics()))
-        .that(byURI)
-        .containsKey(inputURI);
-    JCCompilationUnit tree = (JCCompilationUnit) byURI.get(inputURI);
+    URI inputUri = input.toUri();
+    assertWithMessage("%s%s", out, Joiner.on('\n').join(diagnosticsCollector.getDiagnostics()))
+        .that(byUri)
+        .containsKey(inputUri);
+    JCCompilationUnit tree = (JCCompilationUnit) byUri.get(inputUri);
+    return tree;
+  }
+
+  private static void handleDiagnostics(DiagnosticCollector<JavaFileObject> diagnosticsCollector) {
     Iterable<Diagnostic<? extends JavaFileObject>> errorDiagnostics =
         Iterables.filter(
             diagnosticsCollector.getDiagnostics(), d -> d.getKind() == Diagnostic.Kind.ERROR);
     if (!Iterables.isEmpty(errorDiagnostics)) {
       fail("compilation failed unexpectedly: " + errorDiagnostics);
     }
-    return tree;
   }
 
   private JavaFileObject applyDiff(
       JavaFileObject sourceFileObject, Context context, JCCompilationUnit tree) throws IOException {
     ImportOrganizer importOrganizer = ImportOrderParser.getImportOrganizer(importOrder);
-    final DescriptionBasedDiff diff = DescriptionBasedDiff.create(tree, importOrganizer);
+    DescriptionBasedDiff diff = DescriptionBasedDiff.create(tree, importOrganizer);
     ErrorProneOptions errorProneOptions = context.get(ErrorProneOptions.class);
-    ErrorProneScannerTransformer.create(scannerSupplier.applyOverrides(errorProneOptions).get())
-        .apply(
-            new TreePath(tree),
-            context,
-            description -> {
-              if (!description.fixes.isEmpty()) {
-                diff.handleFix(fixChooser.choose(description.fixes));
-              }
-            });
+    try {
+      ErrorProneScannerTransformer.create(scannerSupplier.applyOverrides(errorProneOptions).get())
+          .apply(
+              new TreePath(tree),
+              context,
+              description -> {
+                if (!description.fixes.isEmpty()) {
+                  diff.handleFix(description, fixChooser.choose(description.fixes));
+                }
+              });
+    } catch (ErrorProneError e) {
+      e.logFatalError(Log.instance(context), context);
+    }
     SourceFile sourceFile = SourceFile.create(sourceFileObject);
     diff.applyDifferences(sourceFile);
 
@@ -341,26 +447,44 @@ public class BugCheckerRefactoringTestHelper {
       return Iterators.getOnlyElement(types).sym.getQualifiedName().toString();
     }
 
-    // Fallback: if no class is declared, then assume we're looking at a `package-info.java`.
-    return tree.getPackage().packge.package_info.toString();
+    // Fallback: if no class is declared, then assume we're looking at a `package-info.java`..
+    if (tree.getPackage() != null) {
+      return tree.getPackage().packge.package_info.toString();
+    }
+    // ..or a `module-info.java`.
+    if (tree.getModuleDecl() != null) {
+      return tree.getModuleDecl().sym.getQualifiedName().toString();
+    }
+    throw new IllegalArgumentException(
+        "Expected a class, package, or module declaration:\n" + tree);
   }
 
   /** To assert the proper {@code .addInput().addOutput()} chain. */
-  public class ExpectOutput {
+  public final class ExpectOutput {
     private final JavaFileObject input;
 
     private ExpectOutput(JavaFileObject input) {
       this.input = input;
     }
 
+    @CanIgnoreReturnValue
     public BugCheckerRefactoringTestHelper addOutputLines(String path, String... output) {
       return addInputAndOutput(input, forSourceLines(path, output));
     }
 
+    /**
+     * Adds an output file.
+     *
+     * @deprecated prefer {@link #addOutputLines}. Declaring tests in the same file using text
+     *     blocks is more readable, as it encourages writing small, focussed tests.
+     */
+    @Deprecated
+    @CanIgnoreReturnValue
     public BugCheckerRefactoringTestHelper addOutput(String outputFilename) {
       return addInputAndOutput(input, forResource(clazz, outputFilename));
     }
 
+    @CanIgnoreReturnValue
     public BugCheckerRefactoringTestHelper expectUnchanged() {
       return addInputAndOutput(input, input);
     }
@@ -381,7 +505,7 @@ public class BugCheckerRefactoringTestHelper {
 
     private final ScannerSupplier delegate;
 
-    public OverrideIgnoringScannerSupplier(ErrorProneScanner scanner) {
+    OverrideIgnoringScannerSupplier(ErrorProneScanner scanner) {
       delegate = ScannerSupplier.fromScanner(scanner);
     }
 

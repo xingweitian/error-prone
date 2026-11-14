@@ -18,9 +18,7 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
-import static com.google.errorprone.predicates.TypePredicates.allOf;
-import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
-import static com.google.errorprone.predicates.TypePredicates.not;
+import static com.google.errorprone.matchers.ProtobufMatchers.IS_LITE_PROTO_ENUM;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -37,20 +35,15 @@ import com.sun.source.tree.MethodInvocationTree;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "LiteEnumValueOf",
     summary =
-        "Instead of converting enums to string and back, its numeric value should be used instead"
-            + " as it is the stable part of the protocol defined by the enum.",
+        "Instead of looking up a lite enum by name, use its numeric value since that is the stable "
+            + "part of the protocol defined by the enum.",
     severity = WARNING)
 public class LiteEnumValueOf extends BugChecker implements MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> PROTO_MSG_VALUE_OF_MATCHER =
       staticMethod()
-          .onClass(
-              allOf(
-                  isDescendantOf("com.google.protobuf.Internal.EnumLite"),
-                  not(isDescendantOf("com.google.protobuf.ProtocolMessageEnum")),
-                  not(isDescendantOf("com.google.protobuf.AbstractMessageLite.InternalOneOfEnum"))))
+          .onClass(IS_LITE_PROTO_ENUM)
           .named("valueOf")
           .withParameters("java.lang.String");
 

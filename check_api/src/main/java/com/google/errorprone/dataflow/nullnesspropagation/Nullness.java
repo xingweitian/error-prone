@@ -16,7 +16,7 @@
 
 package com.google.errorprone.dataflow.nullnesspropagation;
 
-import org.checkerframework.shaded.dataflow.analysis.AbstractValue;
+import org.checkerframework.errorprone.dataflow.analysis.AbstractValue;
 
 /**
  * Represents one of the possible nullness values in our nullness analysis.
@@ -104,17 +104,11 @@ public enum Nullness implements AbstractValue<Nullness> {
    * get the set of all values, or {@code NULLABLE}.
    */
   public Nullness deducedValueWhenNotEqual() {
-    switch (this) {
-      case NULLABLE:
-      case NONNULL:
-        return NULLABLE;
-      case NULL:
-        return NONNULL;
-      case BOTTOM:
-        return BOTTOM;
-      default:
-        throw new AssertionError("Inverse of " + this + " not defined");
-    }
+    return switch (this) {
+      case NULLABLE, NONNULL -> NULLABLE;
+      case NULL -> NONNULL;
+      case BOTTOM -> BOTTOM;
+    };
   }
 
   @Override

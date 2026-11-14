@@ -39,17 +39,20 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    try {",
-            "      // BUG: Diagnostic contains:",
-            "      lock.lock();",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                try {
+                  // BUG: Diagnostic contains:
+                  lock.lock();
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -58,17 +61,20 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -77,19 +83,22 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lockA, ReentrantLock lockB) {",
-            "    try {",
-            "      lockA.lock();",
-            "      lockB.lock();",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lockA.unlock();",
-            "      lockB.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lockA, ReentrantLock lockB) {
+                try {
+                  lockA.lock();
+                  lockB.lock();
+                  System.out.println("hi");
+                } finally {
+                  lockA.unlock();
+                  lockB.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -98,30 +107,62 @@ public final class LockNotBeforeTryTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    try {",
-            "      lock.lock();",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                try {
+                  lock.lock();
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                try {
+
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void interspersed() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                try {
+                  System.out.println("hi");
+                  // BUG: Diagnostic contains:
+                  lock.lock();
+                  System.out.println("bye");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
+        .expectUnchanged()
         .doTest();
   }
 
@@ -130,32 +171,39 @@ public final class LockNotBeforeTryTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    System.out.println(\"hi\");",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                System.out.println("hi");
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    System.out.println(\"hi\");",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                try {
+
+                  System.out.println("hi");
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -164,27 +212,33 @@ public final class LockNotBeforeTryTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    System.out.println(\"hi\");",
-            "    lock.unlock();",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                System.out.println("hi");
+                lock.unlock();
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -193,39 +247,45 @@ public final class LockNotBeforeTryTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    System.out.println(\"hi\");",
-            "    lock.unlock();",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                System.out.println("hi");
+                lock.unlock();
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -234,20 +294,23 @@ public final class LockNotBeforeTryTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    // BUG: Diagnostic contains:",
-            "    lock.lock();",
-            "    System.out.println(\"hi\");",
-            "    lock.lock();",
-            "    try {",
-            "      System.out.println(\"hi\");",
-            "    } finally {",
-            "      lock.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock) {
+                // BUG: Diagnostic contains:
+                lock.lock();
+                System.out.println("hi");
+                lock.lock();
+                try {
+                  System.out.println("hi");
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -257,15 +320,17 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test implements java.util.concurrent.locks.Lock {",
-            "  private void test() {",
-            "    lock();",
-            "    try {",
-            "    } finally {",
-            "      unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            abstract class Test implements java.util.concurrent.locks.Lock {
+              private void test() {
+                lock();
+                try {
+                } finally {
+                  unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -274,18 +339,21 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.locks.Lock;",
-            "abstract class Test implements Lock {",
-            "  private void test(Lock l) {",
-            "    lock();",
-            "    l.lock();",
-            "    try {",
-            "    } finally {",
-            "      unlock();",
-            "      l.unlock();",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.Lock;
+
+            abstract class Test implements Lock {
+              private void test(Lock l) {
+                lock();
+                l.lock();
+                try {
+                } finally {
+                  unlock();
+                  l.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -294,16 +362,64 @@ public final class LockNotBeforeTryTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.locks.ReentrantLock;",
-            "abstract class Test {",
-            "  private void test(ReentrantLock lock) {",
-            "    String s;",
-            "    // BUG: Diagnostic contains:",
-            "    lock.lock();",
-            "    s = lock.toString();",
-            "    lock.unlock();",
-            "  }",
-            "}")
+            """
+            import java.util.concurrent.locks.ReentrantLock;
+
+            abstract class Test {
+              private void test(ReentrantLock lock) {
+                String s;
+                // BUG: Diagnostic contains:
+                lock.lock();
+                s = lock.toString();
+                lock.unlock();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nullCheck() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import static java.util.Objects.requireNonNull;
+
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock, Runnable r) {
+                lock.lock();
+                requireNonNull(r);
+                try {
+                  r.run();
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import static java.util.Objects.requireNonNull;
+
+            import java.util.concurrent.locks.ReentrantLock;
+
+            class Test {
+              private void test(ReentrantLock lock, Runnable r) {
+                lock.lock();
+                try {
+
+                  requireNonNull(r);
+                  r.run();
+                } finally {
+                  lock.unlock();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

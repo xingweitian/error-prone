@@ -32,7 +32,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author cpovirk@google.com (Chris Povirk) */
+/**
+ * @author cpovirk@google.com (Chris Povirk)
+ */
 @RunWith(JUnit4.class)
 public class HasIdentifierTest extends CompilerBasedAbstractTest {
   final List<ScannerTest> tests = new ArrayList<>();
@@ -46,69 +48,81 @@ public class HasIdentifierTest extends CompilerBasedAbstractTest {
 
   @Test
   public void shouldMatchThis() {
-    writeFile("A.java", "public class A {", "  A() { this(0); }", "  A(int foo) {}", "}");
+    writeFile(
+        "A.java",
+        """
+        public class A {
+          A() {
+            this(0);
+          }
+
+          A(int foo) {}
+        }
+        """);
     assertCompiles(
         methodHasIdentifierMatching(
             /* shouldMatch= */ true,
-            hasIdentifier(
-                new Matcher<IdentifierTree>() {
-                  @Override
-                  public boolean matches(IdentifierTree tree, VisitorState state) {
-                    return tree.getName().contentEquals("this");
-                  }
-                })));
+            hasIdentifier((IdentifierTree tree, VisitorState state) -> {
+              return tree.getName().contentEquals("this");
+            })));
   }
 
   @Test
   public void shouldMatchLocalVar() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    int foo = 1;",
-        "    int bar = foo;",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            int foo = 1;
+            int bar = foo;
+          }
+        }
+        """);
     assertCompiles(
         methodHasIdentifierMatching(
             /* shouldMatch= */ true,
-            hasIdentifier(
-                new Matcher<IdentifierTree>() {
-                  @Override
-                  public boolean matches(IdentifierTree tree, VisitorState state) {
-                    return tree.getName().contentEquals("foo");
-                  }
-                })));
+            hasIdentifier((IdentifierTree tree, VisitorState state) -> {
+              return tree.getName().contentEquals("foo");
+            })));
   }
 
   @Test
   public void shouldMatchParam() {
-    writeFile("A.java", "public class A {", "  A(int foo) {", "    int bar = foo;", "  }", "}");
+    writeFile(
+        "A.java",
+        """
+        public class A {
+          A(int foo) {
+            int bar = foo;
+          }
+        }
+        """);
     assertCompiles(
         methodHasIdentifierMatching(
             /* shouldMatch= */ true,
-            hasIdentifier(
-                new Matcher<IdentifierTree>() {
-                  @Override
-                  public boolean matches(IdentifierTree tree, VisitorState state) {
-                    return tree.getName().contentEquals("foo");
-                  }
-                })));
+            hasIdentifier((IdentifierTree tree, VisitorState state) -> {
+              return tree.getName().contentEquals("foo");
+            })));
   }
 
   @Test
   public void shouldNotMatchDeclaration() {
-    writeFile("A.java", "public class A {", "  A() {", "    int foo = 1;", "  }", "}");
+    writeFile(
+        "A.java",
+        """
+        public class A {
+          A() {
+            int foo = 1;
+          }
+        }
+        """);
     assertCompiles(
         methodHasIdentifierMatching(
             /* shouldMatch= */ false,
-            hasIdentifier(
-                new Matcher<IdentifierTree>() {
-                  @Override
-                  public boolean matches(IdentifierTree tree, VisitorState state) {
-                    return tree.getName().contentEquals("foo");
-                  }
-                })));
+            hasIdentifier((IdentifierTree tree, VisitorState state) -> {
+              return tree.getName().contentEquals("foo");
+            })));
   }
 
   /**
@@ -117,25 +131,28 @@ public class HasIdentifierTest extends CompilerBasedAbstractTest {
    */
   @Test
   public void doesNotThrowWhenMatcherIsAppliedDirectlyToLiteral() {
-    writeFile("A.java", "public class A {", "  A() {", "    int foo = 1;", "  }", "}");
+    writeFile(
+        "A.java",
+        """
+        public class A {
+          A() {
+            int foo = 1;
+          }
+        }
+        """);
     assertCompiles(
         literalHasIdentifierMatching(
             /* shouldMatch= */ false,
-            hasIdentifier(
-                new Matcher<IdentifierTree>() {
-                  @Override
-                  public boolean matches(IdentifierTree tree, VisitorState state) {
-                    return tree.getName().contentEquals("somethingElse");
-                  }
-                })));
+            hasIdentifier((IdentifierTree tree, VisitorState state) -> {
+              return tree.getName().contentEquals("somethingElse");
+            })));
   }
 
   private abstract static class ScannerTest extends Scanner {
     abstract void assertDone();
   }
 
-  private Scanner methodHasIdentifierMatching(
-      final boolean shouldMatch, final Matcher<Tree> toMatch) {
+  private Scanner methodHasIdentifierMatching(boolean shouldMatch, Matcher<Tree> toMatch) {
     ScannerTest test =
         new ScannerTest() {
           private boolean matched = false;
@@ -158,8 +175,7 @@ public class HasIdentifierTest extends CompilerBasedAbstractTest {
     return test;
   }
 
-  private Scanner literalHasIdentifierMatching(
-      final boolean shouldMatch, final Matcher<Tree> toMatch) {
+  private Scanner literalHasIdentifierMatching(boolean shouldMatch, Matcher<Tree> toMatch) {
     ScannerTest test =
         new ScannerTest() {
           private boolean matched = false;

@@ -20,17 +20,18 @@ import static com.google.errorprone.refaster.Unifier.unifications;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.base.Function;
-import com.google.common.base.Optional;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ModifiersTree;
+import com.sun.source.tree.Tree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.Name;
-import javax.annotation.Nullable;
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A {@link UTree} representation of a local variable declaration.
@@ -47,36 +48,57 @@ import javax.annotation.Nullable;
  */
 @AutoValue
 public abstract class UVariableDecl extends USimpleStatement implements VariableTree {
+  public static UVariableDecl create(
+      CharSequence identifier,
+      UExpression type,
+      @Nullable UType variableType,
+      @Nullable UExpression initializer) {
+    return new AutoValue_UVariableDecl(StringName.of(identifier), type, variableType, initializer);
+  }
 
   public static UVariableDecl create(
       CharSequence identifier, UExpression type, @Nullable UExpression initializer) {
-    return new AutoValue_UVariableDecl(StringName.of(identifier), type, initializer);
+    return create(identifier, type, null, initializer);
   }
 
   public static UVariableDecl create(CharSequence identifier, UExpression type) {
-    return create(identifier, type, null);
+    return create(identifier, type, null, null);
+  }
+
+  public static UVariableDecl create(
+      CharSequence identifier, UExpression type, UType variableType) {
+    return create(identifier, type, variableType, null);
   }
 
   @Override
   public abstract StringName getName();
 
   @Override
-  public abstract UExpression getType();
+  public abstract @Nullable UExpression getType();
+
+  public abstract @Nullable UType getVariableType();
 
   @Override
-  @Nullable
-  public abstract UExpression getInitializer();
+  public abstract @Nullable UExpression getInitializer();
 
   ULocalVarIdent.Key key() {
     return new ULocalVarIdent.Key(getName());
   }
 
+  static boolean isVarType(VariableTree tree) {
+    Tree type = tree.getType();
+    return type == null || type.getKind().name().equals("VAR_TYPE");
+  }
+
   @Override
-  public Choice<Unifier> visitVariable(final VariableTree decl, Unifier unifier) {
+  public Choice<Unifier> visitVariable(VariableTree decl, Unifier unifier) {
     return Choice.condition(unifier.getBinding(key()) == null, unifier)
-        .thenChoose(unifications(getType(), decl.getType()))
-        .thenChoose(unifications(getInitializer(), decl.getInitializer()))
-        .transform(
+        .flatMap(
+            (getType() != null && !isVarType(decl))
+                ? unifications(getType(), decl.getType())
+                : unifications(getVariableType(), ASTHelpers.getType(decl)))
+        .flatMap(unifications(getInitializer(), decl.getInitializer()))
+        .map(
             new Function<Unifier, Unifier>() {
               @Override
               public Unifier apply(Unifier unifier) {
@@ -103,11 +125,14 @@ public abstract class UVariableDecl extends USimpleStatement implements Variable
     Name name;
     TreeMaker maker = inliner.maker();
     if (binding.isPresent()) {
-      modifiers = (JCModifiers) binding.get().getModifiers();
+      modifiers = (JCModifiers) binding.get().modifiers();
       name = binding.get().getName();
     } else {
       modifiers = maker.Modifiers(0L);
       name = getName().inline(inliner);
+    }
+    if (name.isEmpty()) {
+      name = inliner.asName("_");
     }
     return maker.VarDef(
         modifiers,

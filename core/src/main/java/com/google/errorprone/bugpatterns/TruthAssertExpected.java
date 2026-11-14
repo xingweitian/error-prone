@@ -22,6 +22,7 @@ import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 
 import com.google.common.base.Ascii;
 import com.google.errorprone.BugPattern;
@@ -43,7 +44,7 @@ import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Type;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Detects usages of Truth assertions with the expected and actual values reversed.
@@ -51,7 +52,6 @@ import javax.annotation.Nullable;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "TruthAssertExpected",
     summary =
         "The actual and expected values appear to be swapped, which results in poor assertion "
             + "failure messages. The actual value should come first.",
@@ -80,16 +80,17 @@ public final class TruthAssertExpected extends BugChecker implements MethodInvoc
    * often named {@code expectedException} or similar).
    */
   private static boolean expectedValue(ExpressionTree tree, VisitorState state) {
-    if (!(tree instanceof MethodInvocationTree)) {
+    if (!(tree instanceof MethodInvocationTree methodTree)) {
       return false;
     }
-    MethodInvocationTree methodTree = (MethodInvocationTree) tree;
     IdentifierTree identifier = getRootIdentifier(getOnlyElement(methodTree.getArguments()));
     if (identifier == null) {
       return false;
     }
     Type throwable = Suppliers.typeFromClass(Throwable.class).get(state);
-    return Ascii.toLowerCase(identifier.getName().toString()).contains("expected")
+    String identifierName = Ascii.toLowerCase(identifier.getName().toString());
+    return identifierName.contains("expected")
+        && !identifierName.contains("actual")
         && !ASTHelpers.isSubtype(ASTHelpers.getType(identifier), throwable, state);
   }
 
@@ -121,7 +122,7 @@ public final class TruthAssertExpected extends BugChecker implements MethodInvoc
    * Matches expressions that look like they should be considered constant, i.e. {@code
    * ImmutableList.of(1, 2)}, {@code Long.valueOf(10L)}.
    */
-  static boolean isConstantCreator(ExpressionTree tree, VisitorState state) {
+  private static boolean isConstantCreator(ExpressionTree tree) {
     List<? extends ExpressionTree> arguments =
         tree.accept(
             new SimpleTreeVisitor<List<? extends ExpressionTree>, Void>() {
@@ -131,10 +132,10 @@ public final class TruthAssertExpected extends BugChecker implements MethodInvoc
               }
 
               @Override
-              public List<? extends ExpressionTree> visitMethodInvocation(
+              public @Nullable List<? extends ExpressionTree> visitMethodInvocation(
                   MethodInvocationTree node, Void unused) {
                 MethodSymbol symbol = ASTHelpers.getSymbol(node);
-                if (symbol == null || !symbol.isStatic()) {
+                if (!symbol.isStatic()) {
                   return null;
                 }
                 return node.getArguments();
@@ -158,20 +159,19 @@ public final class TruthAssertExpected extends BugChecker implements MethodInvoc
       return Description.NO_MATCH;
     }
     ExpressionTree assertion = findReceiverMatching(tree, state, ASSERT_ON_EXPECTED);
-    if (!(assertion instanceof MethodInvocationTree)) {
+    if (!(assertion instanceof MethodInvocationTree methodInvocationTree)) {
       return Description.NO_MATCH;
     }
-    ExpressionTree assertedArgument =
-        getOnlyElement(((MethodInvocationTree) assertion).getArguments());
+    ExpressionTree assertedArgument = getOnlyElement(methodInvocationTree.getArguments());
     ExpressionTree terminatingArgument = getOnlyElement(tree.getArguments());
     // To avoid some false positives, skip anything where the terminating value is already a
     // compile-time constant.
     if (ASTHelpers.constValue(terminatingArgument) != null
         || Matchers.staticFieldAccess().matches(terminatingArgument, state)
-        || isConstantCreator(terminatingArgument, state)) {
+        || isConstantCreator(terminatingArgument)) {
       return Description.NO_MATCH;
     }
-    SuggestedFix fix = SuggestedFix.swap(assertedArgument, terminatingArgument);
+    SuggestedFix fix = SuggestedFix.swap(assertedArgument, terminatingArgument, state);
     if (SuggestedFixes.compilesWithFix(fix, state)) {
       return describeMatch(tree, fix);
     }
@@ -186,35 +186,23 @@ public final class TruthAssertExpected extends BugChecker implements MethodInvoc
    * Walks up the receivers for an expression chain until one matching {@code matcher} is found, and
    * returns the matched {@link ExpressionTree}, or {@code null} if none match.
    */
-  @Nullable
-  private static ExpressionTree findReceiverMatching(
+  private static @Nullable ExpressionTree findReceiverMatching(
       ExpressionTree tree, VisitorState state, Matcher<ExpressionTree> matcher) {
-    while (tree instanceof MethodInvocationTree) {
-      tree = ASTHelpers.getReceiver(tree);
-      if (tree == null || matcher.matches(tree, state)) {
-        return tree;
-      }
-    }
-    return null;
+    return streamReceivers(tree).filter(t -> matcher.matches(t, state)).findFirst().orElse(null);
   }
 
   /**
    * Walks up the provided {@link ExpressionTree} to find the {@link IdentifierTree identifier} that
    * it stems from. Returns {@code null} if the tree doesn't terminate in an identifier.
    */
-  @Nullable
-  private static IdentifierTree getRootIdentifier(ExpressionTree tree) {
+  private static @Nullable IdentifierTree getRootIdentifier(ExpressionTree tree) {
     if (tree == null) {
       return null;
     }
-    switch (tree.getKind()) {
-      case IDENTIFIER:
-        return (IdentifierTree) tree;
-      case MEMBER_SELECT:
-      case METHOD_INVOCATION:
-        return getRootIdentifier(ASTHelpers.getReceiver(tree));
-      default:
-        return null;
-    }
+    return switch (tree.getKind()) {
+      case IDENTIFIER -> (IdentifierTree) tree;
+      case MEMBER_SELECT, METHOD_INVOCATION -> getRootIdentifier(ASTHelpers.getReceiver(tree));
+      default -> null;
+    };
   }
 }

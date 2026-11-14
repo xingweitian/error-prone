@@ -17,121 +17,80 @@
 package com.google.errorprone.fixes;
 
 import static com.google.common.truth.Truth.assertThat;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.sun.source.tree.TreeVisitor;
-import com.sun.tools.javac.tree.EndPosTable;
-import com.sun.tools.javac.tree.JCTree;
+import com.google.common.collect.ImmutableSet;
+import com.google.errorprone.ClassName;
 import com.sun.tools.javac.util.Position;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Set;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+import org.mockito.ArgumentMatchers;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 @RunWith(JUnit4.class)
 public class AppliedFixTest {
 
-  final EndPosTable endPositions =
-      new EndPosTable() {
+  // This is unused by the test, it just needs to be non-null.
+  final ErrorProneEndPosTable endPositions = tree -> Position.NOPOS;
 
-        final Map<JCTree, Integer> map = new HashMap<>();
-
-        @Override
-        public void storeEnd(JCTree tree, int endpos) {
-          map.put(tree, endpos);
-        }
-
-        @Override
-        public int replaceTree(JCTree oldtree, JCTree newtree) {
-          Integer endpos = map.getOrDefault(oldtree, Position.NOPOS);
-          map.put(newtree, endpos);
-          return endpos;
-        }
-
-        @Override
-        public int getEndPos(JCTree tree) {
-          Integer result = map.getOrDefault(tree, Position.NOPOS);
-          return result;
-        }
-      };
-
-  // TODO(b/67738557): consolidate helpers for creating fake trees
-  JCTree node(int startPos, int endPos) {
-    return new JCTree() {
-      @Override
-      public Tag getTag() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public void accept(Visitor v) {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public <R, D> R accept(TreeVisitor<R, D> v, D d) {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public Kind getKind() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public int getStartPosition() {
-        return startPos;
-      }
-
-      @Override
-      public int getEndPosition(EndPosTable endPosTable) {
-        return endPos;
-      }
-    };
+  ErrorPronePosition node(int startPos, int endPos) {
+    return new FixedPosition(null, startPos, endPos);
   }
 
   @Test
   public void shouldApplySingleFixOnALine() {
-    JCTree node = node(11, 14);
+    ErrorPronePosition node = node(11, 14);
 
-    AppliedFix fix =
-        AppliedFix.fromSource("import org.me.B;", endPositions).apply(SuggestedFix.delete(node));
-    assertThat(fix.getNewCodeSnippet().toString(), equalTo("import org.B;"));
+    AppliedFix fix = AppliedFix.apply("import org.me.B;", endPositions, SuggestedFix.delete(node));
+    assertThat(fix.snippet()).isEqualTo("import org.B;");
   }
 
   @Test
   public void shouldReportOnlyTheChangedLineInNewSnippet() {
-    JCTree node = node(25, 26);
+    ErrorPronePosition node = node(25, 26);
 
     AppliedFix fix =
-        AppliedFix.fromSource("public class Foo {\n" + "  int 3;\n" + "}", endPositions)
-            .apply(
-                SuggestedFix.builder().prefixWith(node, "three").postfixWith(node, "tres").build());
-    assertThat(fix.getNewCodeSnippet().toString()).isEqualTo("int three3tres;");
+        AppliedFix.apply(
+            """
+            public class Foo {
+              int 3;
+            }\
+            """,
+            endPositions,
+            SuggestedFix.builder().prefixWith(node, "three").postfixWith(node, "tres").build());
+    assertThat(fix.snippet()).isEqualTo("int three3tres;");
   }
 
   @Test
   public void shouldReturnNullOnEmptyFix() {
-    AppliedFix fix =
-        AppliedFix.fromSource("public class Foo {}", endPositions).apply(SuggestedFix.emptyFix());
+    AppliedFix fix = AppliedFix.apply("public class Foo {}", endPositions, SuggestedFix.emptyFix());
     assertThat(fix).isNull();
   }
 
   @Test
   public void shouldReturnNullOnImportOnlyFix() {
     AppliedFix fix =
-        AppliedFix.fromSource("public class Foo {}", endPositions)
-            .apply(SuggestedFix.builder().addImport("foo.bar.Baz").build());
+        AppliedFix.apply(
+            "public class Foo {}",
+            endPositions,
+            SuggestedFix.builder().addImport("foo.bar.Baz").build());
     assertThat(fix).isNull();
+  }
+
+  @Test
+  public void addAndRemoveImportWithClassName() {
+    SuggestedFix fix =
+        SuggestedFix.builder()
+            .addImport(ClassName.of("foo.bar.Outer$Inner"))
+            .removeImport(ClassName.of("foo.bar.Old$Nested"))
+            .build();
+    assertThat(fix.getImportsToAdd()).containsExactly("import foo.bar.Outer.Inner");
+    assertThat(fix.getImportsToRemove()).containsExactly("import foo.bar.Old.Nested");
   }
 
   @Test
@@ -143,33 +102,38 @@ public class AppliedFixTest {
 
   @Test
   public void shouldSuggestToRemoveLastLineIfAsked() {
-    JCTree node = node(21, 42);
+    ErrorPronePosition node = node(21, 42);
 
     AppliedFix fix =
-        AppliedFix.fromSource("package com.example;\n" + "import java.util.Map;\n", endPositions)
-            .apply(SuggestedFix.delete(node));
-    assertThat(fix.getNewCodeSnippet().toString(), equalTo("to remove this line"));
+        AppliedFix.apply(
+            """
+            package com.example;
+            import java.util.Map;
+            """,
+            endPositions,
+            SuggestedFix.delete(node));
+    assertThat(fix.snippet()).isEqualTo("to remove this line");
   }
 
   @Test
   public void shouldApplyFixesInReverseOrder() {
     // Have to use a mock Fix here in order to intentionally return Replacements in wrong order.
-    Set<Replacement> replacements = new LinkedHashSet<>();
-    replacements.add(Replacement.create(0, 1, ""));
-    replacements.add(Replacement.create(1, 1, ""));
+    ImmutableSet<Replacement> replacements =
+        ImmutableSet.of(Replacement.create(0, 1, ""), Replacement.create(1, 1, ""));
 
     Fix mockFix = mock(Fix.class);
-    when(mockFix.getReplacements(any())).thenReturn(replacements);
+    when(mockFix.getReplacements(ArgumentMatchers.<ErrorProneEndPosTable>any()))
+        .thenReturn(replacements);
 
     // If the fixes had been applied in the wrong order, this would fail.
     // But it succeeds, so they were applied in the right order.
-    AppliedFix.fromSource(" ", endPositions).apply(mockFix);
+    var unused = AppliedFix.apply(" ", endPositions, mockFix);
   }
 
   @Test
   public void shouldThrowIfReplacementOutsideSource() {
-    AppliedFix.Applier applier = AppliedFix.fromSource("Hello", endPositions);
     SuggestedFix fix = SuggestedFix.replace(0, 6, "World!");
-    assertThrows(IllegalArgumentException.class, () -> applier.apply(fix));
+    assertThrows(
+        StringIndexOutOfBoundsException.class, () -> AppliedFix.apply("Hello", endPositions, fix));
   }
 }

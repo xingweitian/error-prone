@@ -24,10 +24,8 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.source.util.TreePath;
-import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
-import com.sun.tools.javac.util.Context;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code UMatches} allows conditionally matching a {@code UExpression} predicated by an error-prone
@@ -40,7 +38,7 @@ abstract class UMatches extends UExpression {
       boolean positive,
       UExpression expression) {
     // Verify that we can instantiate the Matcher
-    makeMatcher(matcherClass);
+    var unused = makeMatcher(matcherClass);
 
     return new AutoValue_UMatches(positive, matcherClass, expression);
   }
@@ -52,12 +50,11 @@ abstract class UMatches extends UExpression {
   abstract UExpression expression();
 
   @Override
-  @Nullable
-  protected Choice<Unifier> defaultAction(Tree target, @Nullable Unifier unifier) {
-    final Tree exprTarget = ASTHelpers.stripParentheses(target);
+  protected @Nullable Choice<Unifier> defaultAction(Tree target, @Nullable Unifier unifier) {
+    Tree exprTarget = ASTHelpers.stripParentheses(target);
     return expression()
         .unify(exprTarget, unifier)
-        .condition((Unifier success) -> matches(exprTarget, success) == positive());
+        .filter((Unifier success) -> matches(exprTarget, success) == positive());
   }
 
   @Override
@@ -81,8 +78,8 @@ abstract class UMatches extends UExpression {
     if (matcher == null) {
       matcher = makeMatcher(matcherClass());
     }
-    return target instanceof ExpressionTree
-        && matcher.matches((ExpressionTree) target, makeVisitorState(target, unifier));
+    return target instanceof ExpressionTree expressionTree
+        && matcher.matches(expressionTree, makeVisitorState(target, unifier));
   }
 
   static <T> T makeMatcher(Class<T> klass) {
@@ -94,8 +91,11 @@ abstract class UMatches extends UExpression {
   }
 
   static VisitorState makeVisitorState(Tree target, Unifier unifier) {
-    Context context = unifier.getContext();
-    TreePath path = TreePath.getPath(context.get(JCCompilationUnit.class), target);
-    return new VisitorState(context).withPath(path);
+    VisitorState state = VisitorState.createForUtilityPurposes(unifier.getContext());
+    TreePath path = TreePath.getPath(unifier.compilationUnit(), target);
+    if (path != null) {
+      state = state.withPath(path);
+    }
+    return state;
   }
 }

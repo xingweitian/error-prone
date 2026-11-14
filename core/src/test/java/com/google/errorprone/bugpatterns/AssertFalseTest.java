@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author sebastian.h.monte@gmail.com (Sebastian Monte) */
+/**
+ * @author sebastian.h.monte@gmail.com (Sebastian Monte)
+ */
 @RunWith(JUnit4.class)
 public class AssertFalseTest {
 
@@ -29,12 +31,48 @@ public class AssertFalseTest {
       CompilationTestHelper.newInstance(AssertFalse.class, getClass());
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("AssertFalseNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "AssertFalseNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author sebastian.h.monte@gmail.com (Sebastian Monte)
+             */
+            public class AssertFalseNegativeCases {
+
+              public void assertTrue() {
+                assert true;
+              }
+
+              public void assertFalseFromCondition() {
+                assert 0 == 1;
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("AssertFalsePositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "AssertFalsePositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author sebastian.h.monte@gmail.com (Sebastian Monte)
+             */
+            public class AssertFalsePositiveCases {
+              public void assertFalse() {
+                // BUG: Diagnostic contains: throw new AssertionError()
+                assert false;
+              }
+            }
+            """)
+        .doTest();
   }
 }

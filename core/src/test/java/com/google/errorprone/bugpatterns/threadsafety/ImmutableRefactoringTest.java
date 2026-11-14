@@ -23,8 +23,7 @@ import org.junit.runners.JUnit4;
 
 /** {@link ImmutableRefactoring}Test */
 @RunWith(JUnit4.class)
-public class ImmutableRefactoringTest {
-
+public final class ImmutableRefactoringTest {
   private final BugCheckerRefactoringTestHelper compilationHelper =
       BugCheckerRefactoringTestHelper.newInstance(ImmutableRefactoring.class, getClass());
 
@@ -33,17 +32,59 @@ public class ImmutableRefactoringTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "import javax.annotation.concurrent.Immutable;",
-            "@Immutable class Test {",
-            "  final int a = 42;",
-            "  final String b = null;",
-            "}")
+            """
+            import javax.annotation.concurrent.Immutable;
+
+            @Immutable
+            class Test {
+              final int a = 42;
+              final String b = null;
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.google.errorprone.annotations.Immutable;
+
+            @Immutable
+            class Test {
+              final int a = 42;
+              final String b = null;
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void someImmutableSomeNot() {
+    compilationHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import javax.annotation.concurrent.Immutable;
+
+            @Immutable
+            class Test {
+              int a = 42;
+
+              @Immutable
+              static class Inner {
+                final int a = 43;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
             "import com.google.errorprone.annotations.Immutable;",
-            "@Immutable class Test {",
-            "  final int a = 42;",
-            "  final String b = null;",
+            "// This class was annotated with javax.annotation.concurrent.Immutable, but didn't"
+                + " seem to be provably immutable.",
+            "",
+            "class Test {",
+            "  int a = 42;",
+            "  @Immutable ",
+            "  static class Inner {",
+            "    final int a = 43;",
+            "  }",
             "}")
         .doTest();
   }
@@ -53,11 +94,59 @@ public class ImmutableRefactoringTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "import javax.annotation.concurrent.Immutable;",
-            "@Immutable class Test {",
+            """
+            import javax.annotation.concurrent.Immutable;
+
+            @Immutable
+            class Test {
+              int a = 42;
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            "import com.google.errorprone.annotations.Immutable;",
+            "// This class was annotated with javax.annotation.concurrent.Immutable, but didn't"
+                + " seem to be provably immutable.",
+            "",
+            "class Test {",
             "  int a = 42;",
             "}")
-        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void negative_multipleClasses() {
+    compilationHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import javax.annotation.concurrent.Immutable;
+
+            @Immutable
+            class Test {
+              int a = 42;
+
+              @Immutable
+              static class Inner {
+                int a = 43;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            "import com.google.errorprone.annotations.Immutable;",
+            "// This class was annotated with javax.annotation.concurrent.Immutable, but didn't"
+                + " seem to be provably immutable.",
+            "",
+            "class Test {",
+            "  int a = 42;",
+            "  // This class was annotated with javax.annotation.concurrent.Immutable, but didn't"
+                + " seem to be provably immutable.",
+            "",
+            "  static class Inner {",
+            "    int a = 43;",
+            "  }",
+            "}")
         .doTest();
   }
 }

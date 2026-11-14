@@ -24,16 +24,16 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getDeclaredSymbol;
+import static com.google.errorprone.util.ASTHelpers.getEnclosedElements;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 import static com.sun.source.tree.Tree.Kind.CLASS;
-import static com.sun.source.tree.Tree.Kind.METHOD_INVOCATION;
 import static java.lang.String.format;
 import static java.util.stream.Stream.concat;
 import static javax.lang.model.element.Modifier.STATIC;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -42,13 +42,15 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import javax.annotation.Nullable;
+import com.sun.tools.javac.code.Type;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Identifies calls to {@code assertThat} and similar methods inside the implementation of a {@code
@@ -67,7 +69,6 @@ import javax.annotation.Nullable;
  * }</pre>
  */
 @BugPattern(
-    name = "ChainedAssertionLosesContext",
     summary =
         "Inside a Subject, use check(...) instead of assert*() to preserve user-supplied messages"
             + " and other settings.",
@@ -149,8 +150,7 @@ public final class ChainedAssertionLosesContext extends BugChecker
    * {@code check()}, which is part of the expression {@code check().that(...)}. But sometimes there
    * is an intervening call to {@code withMessage}, {@code about}, or both.
    */
-  @Nullable
-  static MethodInvocationTree findThatCall(VisitorState state) {
+  static @Nullable MethodInvocationTree findThatCall(VisitorState state) {
     TreePath path = state.getPath();
     /*
      * Each iteration walks 1 method call up the tree, but it's actually 2 steps in the tree because
@@ -159,10 +159,9 @@ public final class ChainedAssertionLosesContext extends BugChecker
     while (true) {
       path = path.getParentPath().getParentPath();
       Tree leaf = path.getLeaf();
-      if (leaf.getKind() != METHOD_INVOCATION) {
+      if (!(leaf instanceof MethodInvocationTree maybeThatCall)) {
         return null;
       }
-      MethodInvocationTree maybeThatCall = (MethodInvocationTree) leaf;
       if (WITH_MESSAGE_OR_ABOUT.matches(maybeThatCall, state)) {
         continue;
       } else if (SUBJECT_BUILDER_THAT.matches(maybeThatCall, state)) {
@@ -178,31 +177,21 @@ public final class ChainedAssertionLosesContext extends BugChecker
     return describeMatch(tree, SuggestedFix.replace(tree, String.format(format, args)));
   }
 
-  @AutoValue
-  abstract static class FactoryMethodName {
+  private record FactoryMethodName(String clazz, String method) {
     static FactoryMethodName create(String clazz, String method) {
-      return new AutoValue_ChainedAssertionLosesContext_FactoryMethodName(clazz, method);
+      return new FactoryMethodName(clazz, method);
     }
 
-    @Nullable
-    static FactoryMethodName tryCreate(MethodSymbol symbol) {
+    static @Nullable FactoryMethodName tryCreate(MethodSymbol symbol) {
       return symbol.params.isEmpty()
           ? create(symbol.owner.getQualifiedName().toString(), symbol.getSimpleName().toString())
           : null;
     }
-
-    abstract String clazz();
-
-    abstract String method();
   }
 
-  @Nullable
-  private static FactoryMethodName tryFindFactory(
+  private static @Nullable FactoryMethodName tryFindFactory(
       MethodInvocationTree assertThatCall, VisitorState state) {
     MethodSymbol assertThatSymbol = getSymbol(assertThatCall);
-    if (assertThatSymbol == null) {
-      return null;
-    }
     /*
      * First, a special case for ProtoTruth.protos(). Usually the main case below finds it OK, but
      * sometimes it misses it, I believe because it can't decide between that and
@@ -214,15 +203,14 @@ public final class ChainedAssertionLosesContext extends BugChecker
     ImmutableSet<MethodSymbol> factories =
         concat(
                 // The class that assertThat is declared in:
-                assertThatSymbol.owner.getEnclosedElements().stream(),
+                getEnclosedElements(assertThatSymbol.owner).stream(),
                 // The Subject class (possibly the same; if so, toImmutableSet() will deduplicate):
-                assertThatSymbol.getReturnType().asElement().getEnclosedElements().stream())
+                getEnclosedElements(assertThatSymbol.getReturnType().asElement()).stream())
             .filter(s -> s instanceof MethodSymbol)
             .map(s -> (MethodSymbol) s)
-            .filter(
-                s ->
-                    returns(s, SUBJECT_FACTORY_CLASS, state)
-                        || returns(s, CUSTOM_SUBJECT_BUILDER_FACTORY_CLASS, state))
+            .filter(s ->
+                returns(s, SUBJECT_FACTORY_CLASS, state)
+                    || returns(s, CUSTOM_SUBJECT_BUILDER_FACTORY_CLASS, state))
             .collect(toImmutableSet());
     return factories.size() == 1 ? FactoryMethodName.tryCreate(getOnlyElement(factories)) : null;
     // TODO(cpovirk): If multiple factories exist, try filtering to visible ones only.
@@ -256,11 +244,10 @@ public final class ChainedAssertionLosesContext extends BugChecker
      * IterableSubject.UsingCorrespondence.
      */
     return isSubtype(
-        getDeclaredSymbol(enclosingClass).type, state.getTypeFromString(SUBJECT_CLASS), state);
+        getDeclaredSymbol(enclosingClass).type, COM_GOOGLE_COMMON_TRUTH_SUBJECT.get(state), state);
   }
 
-  @Nullable
-  private static String findThatCallAndMakeCheckDescription(VisitorState state) {
+  private static @Nullable String findThatCallAndMakeCheckDescription(VisitorState state) {
     MethodInvocationTree thatCall = findThatCall(state);
     if (thatCall == null) {
       return null;
@@ -303,4 +290,7 @@ public final class ChainedAssertionLosesContext extends BugChecker
       instanceMethod()
           .onDescendantOf("com.google.common.truth.StandardSubjectBuilder")
           .namedAnyOf("withMessage", "about");
+
+  private static final Supplier<Type> COM_GOOGLE_COMMON_TRUTH_SUBJECT =
+      typeFromString(SUBJECT_CLASS);
 }

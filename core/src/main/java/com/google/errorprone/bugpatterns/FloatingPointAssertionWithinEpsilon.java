@@ -22,6 +22,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static java.util.Locale.ROOT;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -48,7 +49,6 @@ import java.util.Optional;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "FloatingPointAssertionWithinEpsilon",
     summary =
         "This fuzzy equality check is using a tolerance less than the gap to the next number. "
             + "You may want a less restrictive tolerance, or to assert equality.",
@@ -56,10 +56,6 @@ import java.util.Optional;
     tags = StandardTags.SIMPLIFICATION)
 public final class FloatingPointAssertionWithinEpsilon extends BugChecker
     implements MethodInvocationTreeMatcher {
-
-  private static final String DESCRIPTION =
-      "This fuzzy equality check is using a tolerance less than the gap to the next number "
-          + "(which is ~%.2g). You may want a less restrictive tolerance, or to assert equality.";
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
@@ -169,29 +165,31 @@ public final class FloatingPointAssertionWithinEpsilon extends BugChecker
         BugChecker bugChecker, MethodInvocationTree tree, VisitorState state) {
       if (junitWithoutMessage.matches(tree, state)) {
         return check(tree.getArguments().get(2), tree.getArguments().get(0))
-            .map(
-                tolerance ->
-                    suggestJunitFix(bugChecker, tree)
-                        .setMessage(String.format(DESCRIPTION, tolerance))
-                        .build());
+            .map(tolerance ->
+                suggestJunitFix(bugChecker, tree).setMessage(description(tolerance)).build());
       }
       if (junitWithMessage.matches(tree, state)) {
         return check(tree.getArguments().get(3), tree.getArguments().get(1))
-            .map(
-                tolerance ->
-                    suggestJunitFix(bugChecker, tree)
-                        .setMessage(String.format(DESCRIPTION, tolerance))
-                        .build());
+            .map(tolerance ->
+                suggestJunitFix(bugChecker, tree).setMessage(description(tolerance)).build());
       }
       if (truthOfCall.matches(tree, state)) {
         return check(getReceiverArgument(tree), getOnlyElement(tree.getArguments()))
-            .map(
-                tolerance ->
-                    suggestTruthFix(bugChecker, tree, state)
-                        .setMessage(String.format(DESCRIPTION, tolerance))
-                        .build());
+            .map(tolerance ->
+                suggestTruthFix(bugChecker, tree, state)
+                    .setMessage(description(tolerance))
+                    .build());
       }
       return Optional.empty();
+    }
+
+    private static String description(double tolerance) {
+      return String.format(
+          ROOT,
+          "This fuzzy equality check is using a tolerance less than the gap to the next number"
+              + " (which is ~%.2g). You may want a less restrictive tolerance, or to assert"
+              + " equality.",
+          tolerance);
     }
 
     /**
@@ -250,8 +248,8 @@ public final class FloatingPointAssertionWithinEpsilon extends BugChecker
       if (state.getTypes().unboxedTypeOrType(type).getTag() == typeTag) {
         return source;
       }
-      if (tree instanceof LiteralTree) {
-        Optional<String> suffixed = suffixLiteralIfPossible((LiteralTree) tree, state);
+      if (tree instanceof LiteralTree literalTree) {
+        Optional<String> suffixed = suffixLiteralIfPossible(literalTree, state);
         if (suffixed.isPresent()) {
           return suffixed.get();
         }

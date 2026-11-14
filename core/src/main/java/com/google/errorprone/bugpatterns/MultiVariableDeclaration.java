@@ -48,13 +48,11 @@ import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "MultiVariableDeclaration",
     summary = "Variable declarations should declare only one variable",
     severity = SUGGESTION,
     linkType = CUSTOM,
     tags = StandardTags.STYLE,
-    link = "https://google.github.io/styleguide/javaguide.html#s4.8.2.1-variables-per-declaration"
-    )
+    link = "https://google.github.io/styleguide/javaguide.html#s4.8.2.1-variables-per-declaration")
 public class MultiVariableDeclaration extends BugChecker
     implements ClassTreeMatcher, BlockTreeMatcher {
 
@@ -71,36 +69,36 @@ public class MultiVariableDeclaration extends BugChecker
   private Description checkDeclarations(List<? extends Tree> children, VisitorState state) {
     PeekingIterator<Tree> it = Iterators.<Tree>peekingIterator(children.iterator());
     while (it.hasNext()) {
-      if (it.peek().getKind() != Tree.Kind.VARIABLE) {
+      if (!(it.peek() instanceof VariableTree)) {
         it.next();
         continue;
       }
       VariableTree variableTree = (VariableTree) it.next();
-      ArrayList<JCVariableDecl> fragments = new ArrayList<>();
-      fragments.add((JCVariableDecl) variableTree);
+      ArrayList<VariableTree> fragments = new ArrayList<>();
+      fragments.add(variableTree);
       // Javac handles multi-variable declarations by lowering them in the parser into a series of
       // individual declarations, all of which have the same start position. We search for the first
       // declaration in the group, which is either the first variable declared in this scope or has
       // a distinct end position from the previous declaration.
       while (it.hasNext()
-          && it.peek().getKind() == Tree.Kind.VARIABLE
+          && it.peek() instanceof VariableTree
           && getStartPosition(variableTree) == getStartPosition(it.peek())) {
-        fragments.add((JCVariableDecl) it.next());
+        fragments.add((VariableTree) it.next());
       }
       if (fragments.size() == 1) {
         continue;
       }
       Fix fix =
           SuggestedFix.replace(
-              fragments.get(0).getStartPosition(),
+              getStartPosition(fragments.getFirst()),
               state.getEndPosition(Iterables.getLast(fragments)),
               fragments.stream().map(this::pretty).collect(joining("")));
-      state.reportMatch(describeMatch(fragments.get(0), fix));
+      state.reportMatch(describeMatch(fragments.getFirst(), fix));
     }
     return NO_MATCH;
   }
 
-  private String pretty(JCVariableDecl variableDecl) {
+  private String pretty(VariableTree variableDecl) {
     StringWriter sw = new StringWriter();
     try {
       new Pretty(sw, true) {
@@ -117,7 +115,7 @@ public class MultiVariableDeclaration extends BugChecker
             super.visitAnnotation(anno);
           }
         }
-      }.printStat(variableDecl);
+      }.printStat((JCVariableDecl) variableDecl);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }

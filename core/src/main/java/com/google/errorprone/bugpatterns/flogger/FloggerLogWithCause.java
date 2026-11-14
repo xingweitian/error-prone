@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns.flogger;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.fixes.SuggestedFix.postfixWith;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
@@ -45,7 +46,6 @@ import java.util.List;
  * message.
  */
 @BugPattern(
-    name = "FloggerLogWithCause",
     summary =
         "Setting the caught exception as the cause of the log message may provide more context for"
             + " anyone debugging errors.",
@@ -65,18 +65,18 @@ public final class FloggerLogWithCause extends BugChecker implements CatchTreeMa
 
   @Override
   public Description matchCatch(CatchTree tree, VisitorState state) {
-    if (isSuppressed(tree.getParameter())) {
+    if (isSuppressed(tree.getParameter(), state)) {
       return Description.NO_MATCH;
     }
     List<? extends StatementTree> statements = tree.getBlock().getStatements();
     if (statements.size() != 1) {
       return NO_MATCH;
     }
-    StatementTree statementTree = statements.get(0);
-    if (!(statementTree instanceof ExpressionStatementTree)) {
+    StatementTree statementTree = getOnlyElement(statements);
+    if (!(statementTree instanceof ExpressionStatementTree expressionStatementTree)) {
       return NO_MATCH;
     }
-    ExpressionTree expressionTree = ((ExpressionStatementTree) statementTree).getExpression();
+    ExpressionTree expressionTree = expressionStatementTree.getExpression();
     if (!LOG_MATCHER.matches(expressionTree, state)) {
       return NO_MATCH;
     }

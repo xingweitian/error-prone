@@ -18,8 +18,8 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.MoreAnnotations.asElement;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Strings;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.Lists;
@@ -30,11 +30,11 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
-import com.sun.tools.javac.code.Attribute.Compound;
 import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Type;
@@ -42,10 +42,10 @@ import java.lang.annotation.Annotation;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
+import javax.lang.model.element.AnnotationMirror;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Helper for enforcing Annotations that disallow mocking.
@@ -84,22 +84,17 @@ public abstract class AbstractMockChecker<T extends Annotation> extends BugCheck
     Optional<Reason> forbidReason(Type type, VisitorState state);
   }
 
-  /** An explanation of what type should not be mocked, and the reason why. */
-  @AutoValue
-  public abstract static class Reason {
-
+  /**
+   * An explanation of what type should not be mocked, and the reason why.
+   *
+   * @param unmockableClass A Type object representing the class that should not be mocked.
+   * @param reason The reason this class should not be mocked, which may be as simple as "it is
+   *     annotated to forbid mocking" but may also provide a suggested workaround.
+   */
+  public record Reason(Type unmockableClass, String reason) {
     public static Reason of(Type t, String reason) {
-      return new AutoValue_AbstractMockChecker_Reason(t, reason);
+      return new Reason(t, reason);
     }
-
-    /** A Type object representing the class that should not be mocked. */
-    public abstract Type unmockableClass();
-
-    /**
-     * The reason this class should not be mocked, which may be as simple as "it is annotated to
-     * forbid mocking" but may also provide a suggested workaround.
-     */
-    public abstract String reason();
   }
 
   /**
@@ -168,10 +163,13 @@ public abstract class AbstractMockChecker<T extends Annotation> extends BugCheck
   public static TypeExtractor<MethodInvocationTree> extractFirstArg(
       Matcher<MethodInvocationTree> m) {
     return (tree, state) -> {
-      if (m.matches(tree, state)) {
-        return Optional.ofNullable(ASTHelpers.getType(tree.getArguments().get(0)));
+      if (!m.matches(tree, state)) {
+        return Optional.empty();
       }
-      return Optional.empty();
+      if (tree.getArguments().size() >= 1) {
+        return Optional.ofNullable(ASTHelpers.getType(tree.getArguments().getFirst()));
+      }
+      return Optional.ofNullable(TargetType.targetType(state)).map(t -> t.type());
     };
   }
 
@@ -214,21 +212,21 @@ public abstract class AbstractMockChecker<T extends Annotation> extends BugCheck
   }
 
   /**
-   * A TypeExtractor for method invocations that create a mock using Mockito.mock, Mockito.spy, or
-   * EasyMock.create[...]Mock, extracting the type being mocked.
+   * A {@link TypeExtractor} that extracts the type being mocked for method invocations that use
+   * either {@code org.mockito.Mockito.mock(...)} or {@code org.mockito.Mockito.spy(...)}.
    */
   public static final TypeExtractor<MethodInvocationTree> MOCKING_METHOD =
       extractFirstArg(
-              Matchers.toType(
-                  MethodInvocationTree.class,
-                  Matchers.staticMethod().onClass("org.mockito.Mockito").namedAnyOf("mock", "spy")))
-          .or(
-              extractClassArg(
-                  Matchers.toType(
-                      MethodInvocationTree.class,
-                      Matchers.staticMethod()
-                          .onClass("org.easymock.EasyMock")
-                          .withNameMatching(Pattern.compile("^create.*Mock(Builder)?$")))));
+          Matchers.toType(
+              MethodInvocationTree.class,
+              Matchers.staticMethod().onClass("org.mockito.Mockito").namedAnyOf("mock", "spy")));
+
+  /**
+   * A {@link TypeExtractor} that extracts the type of a variable declaration that is annotated with
+   * either {@code @org.mockito.Mock} or {@code @org.mockito.Spy}.
+   */
+  public static final TypeExtractor<VariableTree> MOCKED_VAR =
+      fieldAnnotatedWithOneOf(Stream.of("org.mockito.Mock", "org.mockito.Spy"));
 
   @Override
   public final Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
@@ -263,8 +261,8 @@ public abstract class AbstractMockChecker<T extends Annotation> extends BugCheck
             .build();
       }
 
-      for (Compound compound : currentSymbol.getAnnotationMirrors()) {
-        TypeSymbol metaAnnotationType = (TypeSymbol) compound.getAnnotationType().asElement();
+      for (AnnotationMirror annotation : currentSymbol.getAnnotationMirrors()) {
+        TypeSymbol metaAnnotationType = asElement(annotation);
         try {
           metaAnnotationType.complete();
         } catch (CompletionFailure e) {
@@ -283,12 +281,11 @@ public abstract class AbstractMockChecker<T extends Annotation> extends BugCheck
     return forbidder
         .get()
         .forbidReason(mockedClass, state)
-        .map(
-            reason ->
-                buildDescription(tree)
-                    .setMessage(
-                        buildMessage(mockedClass, reason.unmockableClass().tsym, reason.reason()))
-                    .build())
+        .map(reason ->
+            buildDescription(tree)
+                .setMessage(
+                    buildMessage(mockedClass, reason.unmockableClass().tsym, reason.reason()))
+                .build())
         .orElse(NO_MATCH);
   }
 

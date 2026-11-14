@@ -20,6 +20,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.isBoxedPrimitiveType;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -36,7 +37,6 @@ import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "IdentityHashMapBoxing",
     summary =
         "Using IdentityHashMap with a boxed type as the key is risky since boxing may produce"
             + " distinct instances",
@@ -68,17 +68,11 @@ public class IdentityHashMapBoxing extends BugChecker
   private Description checkTypes(ExpressionTree tree, VisitorState state) {
     List<Type> argumentTypes = ASTHelpers.getResultType(tree).getTypeArguments();
     if (argumentTypes.size() != 2) {
-      return Description.NO_MATCH;
+      return NO_MATCH;
     }
-    Type type = state.getTypes().unboxedType(argumentTypes.get(0));
-    switch (type.getKind()) {
-      case DOUBLE:
-      case LONG:
-      case INT:
-      case FLOAT:
-        return describeMatch(tree);
-      default:
-        return Description.NO_MATCH;
+    if (isBoxedPrimitiveType(argumentTypes.getFirst(), state)) {
+      return describeMatch(tree);
     }
+    return NO_MATCH;
   }
 }

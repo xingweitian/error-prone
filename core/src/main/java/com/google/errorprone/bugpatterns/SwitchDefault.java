@@ -20,6 +20,8 @@ import static com.google.common.collect.Iterables.getLast;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
+import static com.google.errorprone.util.ASTHelpers.getSwitchDefault;
+import static com.google.errorprone.util.ASTHelpers.isSwitchDefault;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -33,10 +35,10 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "SwitchDefault",
     summary = "The default case of a switch should appear at the end of the last statement group",
     tags = BugPattern.StandardTags.STYLE,
     severity = SUGGESTION)
@@ -44,9 +46,8 @@ public class SwitchDefault extends BugChecker implements SwitchTreeMatcher {
 
   @Override
   public Description matchSwitch(SwitchTree tree, VisitorState state) {
-    Optional<? extends CaseTree> maybeDefault =
-        tree.getCases().stream().filter(c -> c.getExpression() == null).findAny();
-    if (!maybeDefault.isPresent()) {
+    Optional<? extends CaseTree> maybeDefault = getSwitchDefault(tree);
+    if (maybeDefault.isEmpty()) {
       return NO_MATCH;
     }
     // Collect all case trees in the statement group containing the default
@@ -55,14 +56,14 @@ public class SwitchDefault extends BugChecker implements SwitchTreeMatcher {
     while (it.hasNext()) {
       CaseTree caseTree = it.next();
       defaultStatementGroup.add(caseTree);
-      if (caseTree.getExpression() == null) {
-        while (it.hasNext() && caseTree.getStatements().isEmpty()) {
+      if (isSwitchDefault(caseTree)) {
+        while (it.hasNext() && isNullOrEmpty(caseTree.getStatements())) {
           caseTree = it.next();
           defaultStatementGroup.add(caseTree);
         }
         break;
       }
-      if (!caseTree.getStatements().isEmpty()) {
+      if (!isNullOrEmpty(caseTree.getStatements())) {
         defaultStatementGroup.clear();
       }
     }
@@ -73,15 +74,15 @@ public class SwitchDefault extends BugChecker implements SwitchTreeMatcher {
     if (it.hasNext()) {
       // If there are trailing cases after the default statement group, move the default to the end.
       // Only emit a fix if the default doesn't fall through.
-      if (!Reachability.canCompleteNormally(getLast(defaultStatementGroup))) {
-        int start = getStartPosition(defaultStatementGroup.get(0));
+      if (!Reachability.canFallThrough(getLast(defaultStatementGroup))) {
+        int start = getStartPosition(defaultStatementGroup.getFirst());
         int end = state.getEndPosition(getLast(defaultStatementGroup));
         String replacement;
         String source = state.getSourceCode().toString();
 
         // If the default case isn't the last case in its statement group, move it to the end.
         if (idx != defaultStatementGroup.size() - 1) {
-          int caseEnd = getStartPosition(getLast(defaultStatementGroup).getStatements().get(0));
+          int caseEnd = getStartPosition(getLast(defaultStatementGroup).getStatements().getFirst());
           int cutStart = getStartPosition(defaultTree);
           int cutEnd = state.getEndPosition(defaultTree);
           replacement =
@@ -96,7 +97,7 @@ public class SwitchDefault extends BugChecker implements SwitchTreeMatcher {
         // If the last statement group falls out of the switch, add a `break;` before moving
         // the default to the end.
         CaseTree last = getLast(tree.getCases());
-        if (last.getExpression() == null || Reachability.canCompleteNormally(last)) {
+        if (isSwitchDefault(last) || Reachability.canFallThrough(last)) {
           replacement = "break;\n" + replacement;
         }
         fix.replace(start, end, "").postfixWith(getLast(tree.getCases()), replacement);
@@ -105,18 +106,22 @@ public class SwitchDefault extends BugChecker implements SwitchTreeMatcher {
       // If the default case isn't the last case in its statement group, move it to the end.
       fix.delete(defaultTree);
       CaseTree lastCase = getLast(defaultStatementGroup);
-      if (!lastCase.getStatements().isEmpty()) {
-        fix.prefixWith(lastCase.getStatements().get(0), state.getSourceForNode(defaultTree));
+      if (!isNullOrEmpty(lastCase.getStatements())) {
+        fix.prefixWith(lastCase.getStatements().getFirst(), state.getSourceForNode(defaultTree));
       } else {
         fix.postfixWith(lastCase, state.getSourceForNode(defaultTree));
       }
     } else {
       return NO_MATCH;
     }
-    Description.Builder description = buildDescription(defaultStatementGroup.get(0));
+    Description.Builder description = buildDescription(defaultStatementGroup.getFirst());
     if (!fix.isEmpty()) {
       description.addFix(fix.build());
     }
     return description.build();
+  }
+
+  private static <T> boolean isNullOrEmpty(@Nullable List<T> elementList) {
+    return elementList == null || elementList.isEmpty();
   }
 }

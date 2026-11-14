@@ -21,13 +21,20 @@ import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.hasArgumentWithValue;
 import static com.google.errorprone.matchers.Matchers.isType;
 import static com.google.errorprone.matchers.Matchers.stringLiteral;
+import static com.google.errorprone.util.AnnotationNames.SUPPRESS_WARNINGS_ANNOTATION;
+import static com.google.errorprone.util.MoreAnnotations.getStrings;
+import static java.util.stream.Collectors.toList;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.bugpatterns.BugChecker.AnnotationTreeMatcher;
+import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AnnotationTree;
 import java.util.List;
+import javax.lang.model.element.AnnotationMirror;
 
 /**
  * Find uses of SuppressWarnings with "deprecated".
@@ -35,31 +42,31 @@ import java.util.List;
  * @author sjnickerson@google.com (Simon Nickerson)
  */
 @BugPattern(
-    name = "SuppressWarningsDeprecated",
     summary = "Suppressing \"deprecated\" is probably a typo for \"deprecation\"",
     severity = ERROR)
-public class SuppressWarningsDeprecated extends AbstractSuppressWarningsMatcher {
+public class SuppressWarningsDeprecated extends BugChecker implements AnnotationTreeMatcher {
 
-  @SuppressWarnings("varargs")
   private static final Matcher<AnnotationTree> matcher =
       allOf(
-          isType("java.lang.SuppressWarnings"),
+          isType(SUPPRESS_WARNINGS_ANNOTATION),
           hasArgumentWithValue("value", stringLiteral("deprecated")));
 
   @Override
   public final Description matchAnnotation(AnnotationTree annotationTree, VisitorState state) {
-    if (matcher.matches(annotationTree, state)) {
-      return describeMatch(annotationTree, getSuggestedFix(annotationTree));
+    if (!matcher.matches(annotationTree, state)) {
+      return Description.NO_MATCH;
     }
-    return Description.NO_MATCH;
-  }
 
-  @Override
-  protected void processSuppressWarningsValues(List<String> values) {
-    for (int i = 0; i < values.size(); i++) {
-      if (values.get(i).equals("deprecated")) {
-        values.set(i, "deprecation");
-      }
-    }
+    AnnotationMirror mirror = ASTHelpers.getAnnotationMirror(annotationTree);
+    List<String> values =
+        getStrings(mirror, "value").stream()
+            .map(v -> v.equals("deprecated") ? "deprecation" : v)
+            .map(state::getConstantExpression)
+            .collect(toList());
+
+    return describeMatch(
+        annotationTree,
+        SuggestedFixes.updateAnnotationArgumentValues(annotationTree, state, "value", values)
+            .build());
   }
 }

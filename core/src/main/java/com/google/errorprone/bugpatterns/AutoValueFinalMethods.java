@@ -16,13 +16,16 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.not;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.AnnotationNames.AUTO_VALUE_ANNOTATION;
+import static java.util.stream.Collectors.joining;
 
-import com.google.common.base.Joiner;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
@@ -31,13 +34,8 @@ import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.Tree;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
 import javax.lang.model.element.Modifier;
 
 /**
@@ -46,7 +44,6 @@ import javax.lang.model.element.Modifier;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "AutoValueFinalMethods",
     summary =
         "Make toString(), hashCode() and equals() final in AutoValue classes"
             + ", so it is clear to readers that AutoValue is not overriding them",
@@ -69,37 +66,33 @@ public class AutoValueFinalMethods extends BugChecker implements ClassTreeMatche
 
   @Override
   public Description matchClass(ClassTree tree, VisitorState state) {
-    if (!ASTHelpers.hasAnnotation(tree, "com.google.auto.value.AutoValue", state)) {
+    if (!hasAnnotation(tree, AUTO_VALUE_ANNOTATION, state)) {
       return NO_MATCH;
     }
-    SuggestedFix.Builder fix = SuggestedFix.builder();
-    List<String> matchedMethods = new ArrayList<>();
-    MethodTree firstMatchedMethod = null;
-    for (Tree memberTree : tree.getMembers()) {
-      if (!(memberTree instanceof MethodTree)) {
-        continue;
-      }
-      MethodTree method = (MethodTree) memberTree;
-      if (METHOD_MATCHER.matches(method, state)) {
-        Optional<SuggestedFix> optionalSuggestedFix =
-            SuggestedFixes.addModifiers(method, state, Modifier.FINAL);
-        if (optionalSuggestedFix.isPresent()) {
-          matchedMethods.add(method.getName().toString());
-          fix.merge(optionalSuggestedFix.get());
-          if (firstMatchedMethod == null) {
-            firstMatchedMethod = method;
-          }
-        }
-      }
+    var candidateMethods =
+        tree.getMembers().stream()
+            .filter(t ->
+                t instanceof MethodTree methodTree
+                    && METHOD_MATCHER.matches(methodTree, state)
+                    && !isSuppressed(t, state))
+            .map(t -> (MethodTree) t)
+            .collect(toImmutableList());
+
+    var fix =
+        candidateMethods.stream()
+            .flatMap(t -> SuggestedFixes.addModifiers(t, state, Modifier.FINAL).stream())
+            .reduce(SuggestedFix.emptyFix(), SuggestedFix::merge);
+
+    if (fix.isEmpty()) {
+      return NO_MATCH;
     }
-    if (!fix.isEmpty()) {
-      String message =
-          String.format(
-              "Make %s final in AutoValue classes, "
-                  + "so it is clear to readers that AutoValue is not overriding them",
-              Joiner.on(", ").join(matchedMethods));
-      return buildDescription(firstMatchedMethod).setMessage(message).addFix(fix.build()).build();
-    }
-    return NO_MATCH;
+    return buildDescription(candidateMethods.getFirst())
+        .setMessage(
+            String.format(
+                "Make %s final in AutoValue classes, "
+                    + "so it is clear to readers that AutoValue is not overriding them",
+                candidateMethods.stream().map(t -> t.getName().toString()).collect(joining(", "))))
+        .addFix(fix)
+        .build();
   }
 }

@@ -38,7 +38,6 @@ import com.sun.source.util.TreeScanner;
  * @author siyuanl@google.com (Siyuan Liu)
  */
 @BugPattern(
-    name = "ToStringReturnsNull",
     summary = "An implementation of Object.toString() should never return null.",
     severity = WARNING)
 public class ToStringReturnsNull extends BugChecker implements MethodTreeMatcher {
@@ -75,15 +74,11 @@ public class ToStringReturnsNull extends BugChecker implements MethodTreeMatcher
     private static class ReturnExpressionScanner extends BooleanScanner {
       @Override
       public Boolean scan(Tree tree, Void unused) {
-        switch (tree.getKind()) {
-          case NULL_LITERAL:
-            return true;
-          case PARENTHESIZED:
-          case CONDITIONAL_EXPRESSION:
-            return super.scan(tree, unused);
-          default:
-            return false;
-        }
+        return switch (tree.getKind()) {
+          case NULL_LITERAL -> true;
+          case PARENTHESIZED, CONDITIONAL_EXPRESSION -> super.scan(tree, null);
+          default -> false;
+        };
       }
     }
   }
@@ -91,7 +86,7 @@ public class ToStringReturnsNull extends BugChecker implements MethodTreeMatcher
   private abstract static class BooleanScanner extends TreeScanner<Boolean, Void> {
     @Override
     public Boolean scan(Tree tree, Void unused) {
-      return Boolean.TRUE.equals(super.scan(tree, unused));
+      return Boolean.TRUE.equals(super.scan(tree, null));
     }
 
     @Override

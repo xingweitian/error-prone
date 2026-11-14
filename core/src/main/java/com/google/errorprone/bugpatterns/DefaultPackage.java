@@ -31,10 +31,7 @@ import com.sun.source.tree.CompilationUnitTree;
  *
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
-@BugPattern(
-    name = "DefaultPackage",
-    summary = "Java classes shouldn't use default package",
-    severity = WARNING)
+@BugPattern(summary = "Java classes shouldn't use default package", severity = WARNING)
 public final class DefaultPackage extends BugChecker implements CompilationUnitTreeMatcher {
 
   @Override
@@ -42,13 +39,13 @@ public final class DefaultPackage extends BugChecker implements CompilationUnitT
     if (state.errorProneOptions().isTestOnlyTarget()) {
       return Description.NO_MATCH;
     }
-    if (tree.getTypeDecls().stream().anyMatch(s -> isSuppressed(s))) {
+    if (tree.getTypeDecls().stream().anyMatch(s -> isSuppressed(s, state))) {
       return Description.NO_MATCH;
     }
     if (tree.getTypeDecls().stream()
         .map(ASTHelpers::getSymbol)
         .filter(x -> x != null)
-        .anyMatch(s -> !ASTHelpers.getGeneratedBy(s, state).isEmpty())) {
+        .anyMatch(s -> !ASTHelpers.getGeneratedBy(s).isEmpty())) {
       return Description.NO_MATCH;
     }
     if (tree.getPackageName() != null) {

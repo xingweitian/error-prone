@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
@@ -24,6 +25,7 @@ import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.matchers.Matchers.staticEqualsInvocation;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
 import static com.google.errorprone.matchers.Matchers.toType;
+import static com.google.errorprone.util.ASTHelpers.getGeneratedBy;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getReceiverType;
 import static com.google.errorprone.util.ASTHelpers.getType;
@@ -32,20 +34,23 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MemberReferenceTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
-import com.google.errorprone.bugpatterns.TypeCompatibilityUtils.TypeCompatibilityReport;
+import com.google.errorprone.bugpatterns.TypeCompatibility.TypeCompatibilityReport;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.Signatures;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Type;
+import javax.inject.Inject;
 
-/** @author avenet@google.com (Arnaud J. Venet) */
+/**
+ * @author avenet@google.com (Arnaud J. Venet)
+ */
 @BugPattern(
-    name = "EqualsIncompatibleType",
     summary = "An equality test between objects with incompatible types always returns false",
     severity = WARNING)
 public class EqualsIncompatibleType extends BugChecker
@@ -54,6 +59,9 @@ public class EqualsIncompatibleType extends BugChecker
 
   private static final Matcher<ExpressionTree> INSTANCE_EQUALS_MATCHER = instanceEqualsInvocation();
 
+  private static final Matcher<ExpressionTree> IS_EQUAL_MATCHER =
+      staticMethod().onClass("java.util.function.Predicate").named("isEqual");
+
   private static final Matcher<Tree> ASSERT_FALSE_MATCHER =
       toType(
           MethodInvocationTree.class,
@@ -61,66 +69,85 @@ public class EqualsIncompatibleType extends BugChecker
               instanceMethod().anyClass().named("assertFalse"),
               staticMethod().anyClass().named("assertFalse")));
 
+  private final TypeCompatibility typeCompatibility;
+
+  @Inject
+  EqualsIncompatibleType(TypeCompatibility typeCompatibility) {
+    this.typeCompatibility = typeCompatibility;
+  }
+
   @Override
   public Description matchMethodInvocation(
-      MethodInvocationTree invocationTree, final VisitorState state) {
-    if (!STATIC_EQUALS_MATCHER.matches(invocationTree, state)
-        && !INSTANCE_EQUALS_MATCHER.matches(invocationTree, state)) {
-      return NO_MATCH;
-    }
-
-    // This is the type of the object on which the java.lang.Object.equals() method
-    // is called, either directly or indirectly via a static utility method. In the latter,
-    // it is the type of the first argument to the static method.
-    Type receiverType;
-    // This is the type of the argument to the java.lang.Object.equals() method.
-    // In case a static utility method is used, it is the type of the second argument
-    // to this method.
-    Type argumentType;
-
+      MethodInvocationTree invocationTree, VisitorState state) {
     if (STATIC_EQUALS_MATCHER.matches(invocationTree, state)) {
-      receiverType = getType(invocationTree.getArguments().get(0));
-      argumentType = getType(invocationTree.getArguments().get(1));
-    } else {
-      receiverType = getReceiverType(invocationTree);
-      argumentType = getType(invocationTree.getArguments().get(0));
+      return match(
+          invocationTree,
+          getType(invocationTree.getArguments().get(0)),
+          getType(invocationTree.getArguments().get(1)),
+          state);
+    }
+    if (INSTANCE_EQUALS_MATCHER.matches(invocationTree, state)) {
+      return match(
+          invocationTree,
+          getReceiverType(invocationTree),
+          getType(invocationTree.getArguments().get(0)),
+          state);
+    }
+    if (IS_EQUAL_MATCHER.matches(invocationTree, state)) {
+      Type targetType = TargetType.targetType(state).type();
+      if (targetType.getTypeArguments().size() != 1) {
+        return NO_MATCH;
+      }
+      return match(
+          invocationTree,
+          getType(invocationTree.getArguments().get(0)),
+          state.getTypes().wildLowerBound(getOnlyElement(targetType.getTypeArguments())),
+          state);
     }
 
-    return handle(invocationTree, receiverType, argumentType, state);
+    return NO_MATCH;
   }
 
   @Override
   public Description matchMemberReference(MemberReferenceTree tree, VisitorState state) {
-    if (!STATIC_EQUALS_MATCHER.matches(tree, state)
-        && !INSTANCE_EQUALS_MATCHER.matches(tree, state)) {
-      return NO_MATCH;
-    }
-
-    Type type = state.getTypes().findDescriptorType(getType(tree));
-    Type receiverType;
-    Type argumentType;
-
     if (STATIC_EQUALS_MATCHER.matches(tree, state)) {
-      receiverType = type.getParameterTypes().get(0);
-      argumentType = type.getParameterTypes().get(1);
-    } else {
-      receiverType = getType(getReceiver(tree));
-      argumentType = type.getParameterTypes().get(0);
+      Type type = state.getTypes().findDescriptorType(getType(tree));
+      return match(tree, type.getParameterTypes().get(0), type.getParameterTypes().get(1), state);
     }
-    return handle(tree, receiverType, argumentType, state);
+    if (INSTANCE_EQUALS_MATCHER.matches(tree, state)) {
+      Type type = state.getTypes().findDescriptorType(getType(tree));
+      return match(tree, getType(getReceiver(tree)), type.getParameterTypes().get(0), state);
+    }
+    if (IS_EQUAL_MATCHER.matches(tree, state)) {
+      Type type = state.getTypes().findDescriptorType(getType(tree));
+      if (type.getReturnType().getTypeArguments().size() != 1) {
+        return NO_MATCH;
+      }
+      return match(
+          tree,
+          getOnlyElement(type.getReturnType().getTypeArguments()),
+          type.getParameterTypes().get(0),
+          state);
+    }
+
+    return NO_MATCH;
   }
 
-  private Description handle(
+  private Description match(
       ExpressionTree invocationTree, Type receiverType, Type argumentType, VisitorState state) {
     TypeCompatibilityReport compatibilityReport =
-        TypeCompatibilityUtils.compatibilityOfTypes(receiverType, argumentType, state);
-    if (compatibilityReport.compatible()) {
+        typeCompatibility.compatibilityOfTypes(receiverType, argumentType, state);
+    if (compatibilityReport.isCompatible()) {
       return NO_MATCH;
     }
 
     // Ignore callsites wrapped inside assertFalse:
     // assertFalse(objOfReceiverType.equals(objOfArgumentType))
     if (ASSERT_FALSE_MATCHER.matches(state.getPath().getParentPath().getLeaf(), state)) {
+      return NO_MATCH;
+    }
+
+    if (getGeneratedBy(state).contains("com.google.auto.value.processor.AutoValueProcessor")) {
       return NO_MATCH;
     }
 
@@ -135,12 +162,13 @@ public class EqualsIncompatibleType extends BugChecker
     return buildDescription(invocationTree)
         .setMessage(
             getMessage(
-                invocationTree,
-                receiverType,
-                argumentType,
-                compatibilityReport.lhs(),
-                compatibilityReport.rhs(),
-                state))
+                    invocationTree,
+                    receiverType,
+                    argumentType,
+                    compatibilityReport.lhs(),
+                    compatibilityReport.rhs(),
+                    state)
+                + compatibilityReport.extraReason())
         .build();
   }
 
@@ -174,7 +202,7 @@ public class EqualsIncompatibleType extends BugChecker
         + " are incompatible.";
   }
 
-  private static class TypeStringPair {
+  private static final class TypeStringPair {
     private String receiverTypeString;
     private String argumentTypeString;
 
@@ -195,5 +223,4 @@ public class EqualsIncompatibleType extends BugChecker
       return argumentTypeString;
     }
   }
-
 }

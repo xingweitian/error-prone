@@ -15,9 +15,8 @@
  */
 package com.google.errorprone.annotations.concurrent;
 
-import static javax.lang.model.element.Modifier.FINAL;
-
 import com.google.errorprone.annotations.IncompatibleModifiers;
+import com.google.errorprone.annotations.Modifier;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -33,7 +32,7 @@ import java.lang.annotation.Target;
  *
  * <pre>{@code
  * private final String source;
- * {@literal @}LazyInit private String data;
+ * @LazyInit private String data;
  *
  * public String getData() {
  *   String local = data;
@@ -49,7 +48,7 @@ import java.lang.annotation.Target;
  * }</pre>
  *
  * <p>The need for using the {@code local} variable is detailed in
- * http://jeremymanson.blogspot.com/2008/12/benign-data-races-in-java.html (see, particularly, the
+ * https://jeremymanson.blogspot.com/2008/12/benign-data-races-in-java.html (see, particularly, the
  * part after "Now, let's break the code").
  *
  * <p>Also note that {@code LazyInit} must not be used on 64-bit primitives ({@code long}s and
@@ -61,7 +60,7 @@ import java.lang.annotation.Target;
  * unless you really understand this <b>and</b> you really need the performance benefits of
  * introducing the data race, do not use this construct.
  */
-@IncompatibleModifiers({FINAL})
+@IncompatibleModifiers(modifier = {Modifier.FINAL})
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
 public @interface LazyInit {}

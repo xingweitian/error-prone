@@ -19,10 +19,9 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_DURATIONS_UTIL;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_TIMESTAMPS_UTIL;
 import static com.sun.source.tree.Tree.Kind.CLASS;
-import static com.sun.source.tree.Tree.Kind.IDENTIFIER;
-import static com.sun.source.tree.Tree.Kind.MEMBER_SELECT;
-import static com.sun.source.tree.Tree.Kind.METHOD_INVOCATION;
 import static javax.lang.model.element.Modifier.STATIC;
 
 import com.google.common.base.Preconditions;
@@ -38,6 +37,7 @@ import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.ParenthesizedTree;
@@ -48,6 +48,7 @@ import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
+import org.jspecify.annotations.Nullable;
 
 /**
  * TODO(eaftan): Consider cases where the parent is not a statement or there is no parent?
@@ -55,7 +56,7 @@ import com.sun.tools.javac.code.Type;
  * @author eaftan@google.com (Eddie Aftandilian)
  * @author scottjohnson@google.com (Scott Johnson)
  */
-@BugPattern(name = "SelfAssignment", summary = "Variable assigned to itself", severity = ERROR)
+@BugPattern(summary = "Variable assigned to itself", severity = ERROR)
 public class SelfAssignment extends BugChecker
     implements AssignmentTreeMatcher, VariableTreeMatcher {
   private static final Matcher<MethodInvocationTree> NON_NULL_MATCHER =
@@ -66,15 +67,14 @@ public class SelfAssignment extends BugChecker
               .onClass("com.google.common.time.Durations")
               .namedAnyOf("checkNotNegative", "checkPositive"),
           staticMethod()
-              .onClass("com.google.protobuf.util.Durations")
+              .onClass(PROTO_DURATIONS_UTIL)
               .namedAnyOf("checkNotNegative", "checkPositive", "checkValid"),
-          staticMethod().onClass("com.google.protobuf.util.Timestamps").named("checkValid"));
+          staticMethod().onClass(PROTO_TIMESTAMPS_UTIL).named("checkValid"));
 
   @Override
   public Description matchAssignment(AssignmentTree tree, VisitorState state) {
-    ExpressionTree expression = stripNullCheck(tree.getExpression(), state);
     // TODO(cushon): consider handling assignment expressions too, i.e. `x = y = x`
-    expression = skipCast(expression);
+    ExpressionTree expression = skipCast(stripNullCheck(tree.getExpression(), state));
     if (ASTHelpers.sameVariable(tree.getVariable(), expression)) {
       return describeForAssignment(tree, state);
     }
@@ -88,13 +88,12 @@ public class SelfAssignment extends BugChecker
 
     // must be a static class variable with member select initializer
     if (initializer == null
-        || initializer.getKind() != MEMBER_SELECT
+        || !(initializer instanceof MemberSelectTree rhs)
         || parent.getKind() != CLASS
         || !tree.getModifiers().getFlags().contains(STATIC)) {
       return Description.NO_MATCH;
     }
 
-    MemberSelectTree rhs = (MemberSelectTree) initializer;
     Symbol rhsClass = ASTHelpers.getSymbol(rhs.getExpression());
     Symbol lhsClass = ASTHelpers.getSymbol(parent);
     if (rhsClass != null
@@ -119,8 +118,8 @@ public class SelfAssignment extends BugChecker
       }
 
       @Override
-      protected ExpressionTree defaultAction(Tree node, Void unused) {
-        return node instanceof ExpressionTree ? (ExpressionTree) node : null;
+      protected @Nullable ExpressionTree defaultAction(Tree node, Void unused) {
+        return node instanceof ExpressionTree expressionTree ? expressionTree : null;
       }
     }.visit(expression, null);
   }
@@ -130,10 +129,9 @@ public class SelfAssignment extends BugChecker
    * otherwise returns that parameter.
    */
   private static ExpressionTree stripNullCheck(ExpressionTree expression, VisitorState state) {
-    if (expression != null && expression.getKind() == METHOD_INVOCATION) {
-      MethodInvocationTree methodInvocation = (MethodInvocationTree) expression;
+    if (expression != null && expression instanceof MethodInvocationTree methodInvocation) {
       if (NON_NULL_MATCHER.matches(methodInvocation, state)) {
-        return methodInvocation.getArguments().get(0);
+        return methodInvocation.getArguments().getFirst();
       }
     }
     return expression;
@@ -179,7 +177,7 @@ public class SelfAssignment extends BugChecker
     ExpressionTree rhs = assignmentTree.getExpression();
 
     // if this is a method invocation, they must be calling checkNotNull()
-    if (assignmentTree.getExpression().getKind() == METHOD_INVOCATION) {
+    if (assignmentTree.getExpression() instanceof MethodInvocationTree) {
       // change the default fix to be "checkNotNull(x)" instead of "x = checkNotNull(x)"
       fix = SuggestedFix.replace(assignmentTree, state.getSourceForNode(rhs));
       // new rhs is first argument to checkNotNull()
@@ -188,21 +186,21 @@ public class SelfAssignment extends BugChecker
     rhs = skipCast(rhs);
 
     ImmutableList<Fix> exploratoryFieldFixes = ImmutableList.of();
-    if (lhs.getKind() == MEMBER_SELECT) {
+    if (lhs instanceof MemberSelectTree) {
       // find a method parameter of the same type and similar name and suggest it
       // as the rhs
 
       // rhs should be either identifier or field access
-      Preconditions.checkState(rhs.getKind() == IDENTIFIER || rhs.getKind() == MEMBER_SELECT);
+      Preconditions.checkState(rhs instanceof IdentifierTree || rhs instanceof MemberSelectTree);
 
       Type rhsType = ASTHelpers.getType(rhs);
       exploratoryFieldFixes =
           ReplacementVariableFinder.fixesByReplacingExpressionWithMethodParameter(
               rhs, varDecl -> ASTHelpers.isSameType(rhsType, varDecl.type, state), state);
-    } else if (rhs.getKind() == IDENTIFIER) {
+    } else if (rhs instanceof IdentifierTree) {
       // find a field of the same type and similar name and suggest it as the lhs
       // lhs should be identifier
-      Preconditions.checkState(lhs.getKind() == IDENTIFIER);
+      Preconditions.checkState(lhs instanceof IdentifierTree);
 
       Type lhsType = ASTHelpers.getType(lhs);
       exploratoryFieldFixes =

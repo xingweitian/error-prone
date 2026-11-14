@@ -24,20 +24,17 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CatchTreeMatcher;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.CatchTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "EmptyCatch",
     summary = "Caught exceptions should not be ignored",
     severity = WARNING,
     tags = BugPattern.StandardTags.STYLE,
     documentSuppression = false,
     linkType = CUSTOM,
-    link = "https://google.github.io/styleguide/javaguide.html#s6.2-caught-exceptions"
-    )
+    link = "https://google.github.io/styleguide/javaguide.html#s6.2-caught-exceptions")
 public class EmptyCatch extends BugChecker implements CatchTreeMatcher {
 
   @Override
@@ -47,12 +44,6 @@ public class EmptyCatch extends BugChecker implements CatchTreeMatcher {
       return NO_MATCH;
     }
     if (state.getTokensForNode(block).stream().anyMatch(t -> !t.comments().isEmpty())) {
-      return NO_MATCH;
-    }
-    if (ASTHelpers.isJUnitTestCode(state)) {
-      return NO_MATCH;
-    }
-    if (ASTHelpers.isTestNgTestCode(state)) {
       return NO_MATCH;
     }
     return describeMatch(tree);

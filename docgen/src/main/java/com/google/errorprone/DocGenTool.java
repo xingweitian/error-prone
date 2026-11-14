@@ -35,7 +35,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.StreamSupport;
 
 /**
@@ -70,6 +72,9 @@ public final class DocGenTool {
         description = "The base url for links to bugpatterns",
         arity = 1)
     private String baseUrl = null;
+
+    @Parameter(names = "-ignore", description = "Check name to ignore")
+    private Set<String> ignore = new HashSet<>();
   }
 
   enum Target {
@@ -86,7 +91,7 @@ public final class DocGenTool {
 
   public static void main(String[] args) throws IOException {
     Options options = new Options();
-    new JCommander(options, args);
+    new JCommander(options).parse(args);
 
     Path bugPatterns = Paths.get(options.bugPatterns);
     if (!Files.exists(bugPatterns)) {
@@ -109,7 +114,8 @@ public final class DocGenTool {
             explanationDir,
             options.target == Target.EXTERNAL,
             options.baseUrl,
-                input -> input.severity);
+            options.ignore,
+            input -> input.severity);
     try (Writer w =
         Files.newBufferedWriter(wikiDir.resolve("bugpatterns.md"), StandardCharsets.UTF_8)) {
       List<BugPatternInstance> patterns =
@@ -120,11 +126,7 @@ public final class DocGenTool {
 
   private static ImmutableSet<String> enabledCheckNames() {
     return StreamSupport.stream(
-            Iterables.concat(
-                    ENABLED_ERRORS,
-                    ENABLED_WARNINGS)
-                .spliterator(),
-            false)
+            Iterables.concat(ENABLED_ERRORS, ENABLED_WARNINGS).spliterator(), false)
         .map(BugCheckerInfo::canonicalName)
         .collect(toImmutableSet());
   }

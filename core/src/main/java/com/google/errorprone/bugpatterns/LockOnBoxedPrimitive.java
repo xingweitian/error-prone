@@ -24,7 +24,6 @@ import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.stripParentheses;
 
-import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.VisitorState;
@@ -47,25 +46,21 @@ import javax.lang.model.element.ElementKind;
 
 /** Detects locks on boxed primitives. */
 @BugPattern(
-    name = "LockOnBoxedPrimitive",
     summary =
         "It is dangerous to use a boxed primitive as a lock as it can unintentionally lead to"
             + " sharing a lock with another piece of code.",
-    severity = SeverityLevel.WARNING)
+    severity = SeverityLevel.ERROR)
 public class LockOnBoxedPrimitive extends BugChecker
     implements SynchronizedTreeMatcher, MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> LOCKING_METHOD =
       anyOf(
+          instanceMethod().anyClass().named("wait").withParametersOfType(Suppliers.LONG_TYPE),
           instanceMethod()
               .anyClass()
               .named("wait")
-              .withParametersOfType(ImmutableList.of(Suppliers.LONG_TYPE)),
-          instanceMethod()
-              .anyClass()
-              .named("wait")
-              .withParametersOfType(ImmutableList.of(Suppliers.LONG_TYPE, Suppliers.INT_TYPE)),
-          instanceMethod().anyClass().namedAnyOf("wait", "notify", "notifyAll").withParameters());
+              .withParametersOfType(Suppliers.LONG_TYPE, Suppliers.INT_TYPE),
+          instanceMethod().anyClass().namedAnyOf("wait", "notify", "notifyAll").withNoParameters());
 
   private static final Matcher<ExpressionTree> BOXED_PRIMITIVE = isBoxedPrimitiveType();
 
@@ -112,7 +107,7 @@ public class LockOnBoxedPrimitive extends BugChecker
         if (lock.equals(getSymbol(expression))) {
           fix.replace(expression, lockName);
         }
-        return super.visitSynchronized(node, aVoid);
+        return super.visitSynchronized(node, null);
       }
     }.scan(state.getPath().getCompilationUnit(), null);
     return fix.build();

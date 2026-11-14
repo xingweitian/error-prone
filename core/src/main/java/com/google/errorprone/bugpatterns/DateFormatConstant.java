@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.fixes.SuggestedFixes.renameVariable;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 
@@ -28,22 +29,22 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
-import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
+import com.sun.tools.javac.code.Type;
 import java.util.Objects;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "DateFormatConstant",
     summary = "DateFormat is not thread-safe, and should not be used as a constant field.",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
@@ -55,7 +56,7 @@ public class DateFormatConstant extends BugChecker implements VariableTreeMatche
       return NO_MATCH;
     }
     VarSymbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null || sym.getKind() != ElementKind.FIELD) {
+    if (sym.getKind() != ElementKind.FIELD) {
       return NO_MATCH;
     }
     String name = sym.getSimpleName().toString();
@@ -65,7 +66,7 @@ public class DateFormatConstant extends BugChecker implements VariableTreeMatche
     if (!name.equals(Ascii.toUpperCase(name))) {
       return NO_MATCH;
     }
-    if (!isSubtype(getType(tree), state.getTypeFromString("java.text.DateFormat"), state)) {
+    if (!isSubtype(getType(tree), JAVA_TEXT_DATEFORMAT.get(state), state)) {
       return NO_MATCH;
     }
     SuggestedFix rename =
@@ -79,11 +80,10 @@ public class DateFormatConstant extends BugChecker implements VariableTreeMatche
         .build();
   }
 
-  private static Fix threadLocalFix(
-      VariableTree tree, VisitorState state, final VarSymbol sym, SuggestedFix rename) {
+  private static SuggestedFix threadLocalFix(
+      VariableTree tree, VisitorState state, VarSymbol sym, SuggestedFix rename) {
     SuggestedFix.Builder fix =
-        SuggestedFix.builder()
-            .merge(rename)
+        rename.toBuilder()
             .replace(
                 tree.getType(),
                 String.format("ThreadLocal<%s>", state.getSourceForNode(tree.getType())))
@@ -103,4 +103,6 @@ public class DateFormatConstant extends BugChecker implements VariableTreeMatche
         null);
     return fix.build();
   }
+
+  private static final Supplier<Type> JAVA_TEXT_DATEFORMAT = typeFromString("java.text.DateFormat");
 }

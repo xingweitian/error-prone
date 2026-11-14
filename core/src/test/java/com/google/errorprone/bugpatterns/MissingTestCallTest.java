@@ -36,28 +36,33 @@ public final class MissingTestCallTest {
     helper
         .addSourceLines(
             "Case.java",
-            "import com.google.common.testing.EqualsTester;",
-            "import com.google.errorprone.BugCheckerRefactoringTestHelper;",
-            "import com.google.errorprone.CompilationTestHelper;",
-            "import org.junit.Test;",
-            "class Case {",
-            "  @Test",
-            "  // BUG: Diagnostic contains:",
-            "  void test() {",
-            "    new EqualsTester().addEqualityGroup(this, this);",
-            "    hashCode();",
-            "  }",
-            "  @Test",
-            "  // BUG: Diagnostic contains:",
-            "  void test2(CompilationTestHelper helper) {",
-            "    helper.addSourceFile(\"Foo.java\");",
-            "  }",
-            "  @Test",
-            "  // BUG: Diagnostic contains:",
-            "  void test3(BugCheckerRefactoringTestHelper helper) {",
-            "    helper.addInput(\"Foo.java\");",
-            "  }",
-            "}")
+            """
+            import com.google.common.testing.EqualsTester;
+            import com.google.errorprone.BugCheckerRefactoringTestHelper;
+            import com.google.errorprone.CompilationTestHelper;
+            import org.junit.Test;
+
+            class Case {
+              @Test
+              // BUG: Diagnostic contains:
+              void test() {
+                new EqualsTester().addEqualityGroup(this, this);
+                hashCode();
+              }
+
+              @Test
+              // BUG: Diagnostic contains:
+              void test2(CompilationTestHelper helper) {
+                helper.addSourceFile("testdata/Foo.java");
+              }
+
+              @Test
+              // BUG: Diagnostic contains:
+              void test3(BugCheckerRefactoringTestHelper helper) {
+                helper.addInput("testdata/Foo.java");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -66,21 +71,51 @@ public final class MissingTestCallTest {
     helper
         .addSourceLines(
             "Case.java",
-            "import com.google.common.testing.EqualsTester;",
-            "import com.google.errorprone.CompilationTestHelper;",
-            "import org.junit.Test;",
-            "class Case {",
-            "  CompilationTestHelper helper;",
-            "  @Test",
-            "  void test() {",
-            "    new EqualsTester().addEqualityGroup(this, this).testEquals();",
-            "  }",
-            "  @Test",
-            "  void doesNotMatchIfNotAtEnd() {",
-            "    helper.addSourceFile(\"Foo.java\");",
-            "    hashCode();",
-            "  }",
-            "}")
+            """
+            import com.google.common.testing.EqualsTester;
+            import com.google.errorprone.CompilationTestHelper;
+            import org.junit.Test;
+
+            class Case {
+              CompilationTestHelper helper;
+
+              @Test
+              void test() {
+                new EqualsTester().addEqualityGroup(this, this).testEquals();
+              }
+
+              @Test
+              void doesNotMatchIfNotAtEnd() {
+                helper.addSourceFile("testdata/Foo.java");
+                hashCode();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negative_memberReference() {
+    helper
+        .addSourceLines(
+            "Case.java",
+            """
+            import static org.junit.Assert.assertThrows;
+
+            import com.google.common.testing.EqualsTester;
+            import com.google.errorprone.CompilationTestHelper;
+            import org.junit.Test;
+
+            class Case {
+              CompilationTestHelper helper;
+
+              @Test
+              void test() {
+                var equalsTester = new EqualsTester().addEqualityGroup(this, this);
+                assertThrows(AssertionError.class, equalsTester::testEquals);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -89,13 +124,17 @@ public final class MissingTestCallTest {
     helper
         .addSourceLines(
             "Case.java",
-            "import com.google.common.testing.EqualsTester;",
-            "class Case {",
-            "  private EqualsTester et;",
-            "  void add() {",
-            "    et.addEqualityGroup(this, this);",
-            "  }",
-            "}")
+            """
+            import com.google.common.testing.EqualsTester;
+
+            class Case {
+              private EqualsTester et;
+
+              void add() {
+                et.addEqualityGroup(this, this);
+              }
+            }
+            """)
         .doTest();
   }
 }

@@ -19,15 +19,15 @@ package com.google.errorprone.dataflow;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Sets.intersection;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableMap;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.annotation.Nullable;
-import org.checkerframework.shaded.dataflow.analysis.AbstractValue;
-import org.checkerframework.shaded.dataflow.analysis.Store;
-import org.checkerframework.shaded.dataflow.cfg.visualize.CFGVisualizer;
-import org.checkerframework.shaded.dataflow.expression.JavaExpression;
+import org.checkerframework.errorprone.dataflow.analysis.AbstractValue;
+import org.checkerframework.errorprone.dataflow.analysis.Store;
+import org.checkerframework.errorprone.dataflow.cfg.visualize.CFGVisualizer;
+import org.checkerframework.errorprone.dataflow.expression.JavaExpression;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable map from local variables or heap access paths to their {@link AbstractValue}
@@ -37,28 +37,17 @@ import org.checkerframework.shaded.dataflow.expression.JavaExpression;
  *
  * @author bennostein@google.com (Benno Stein)
  */
-@AutoValue
-public abstract class AccessPathStore<V extends AbstractValue<V>>
+public record AccessPathStore<V extends AbstractValue<V>>(ImmutableMap<AccessPath, V> heap)
     implements Store<AccessPathStore<V>>, AccessPathValues<V> {
-
-  public abstract ImmutableMap<AccessPath, V> heap();
-
-  private static <V extends AbstractValue<V>> AccessPathStore<V> create(
-      ImmutableMap<AccessPath, V> heap) {
-    return new AutoValue_AccessPathStore<>(heap);
-  }
-
   @SuppressWarnings({"unchecked", "rawtypes"}) // fully variant
-  private static final AccessPathStore<?> EMPTY =
-      AccessPathStore.<AbstractValue>create(ImmutableMap.of());
+  private static final AccessPathStore<?> EMPTY = new AccessPathStore(ImmutableMap.of());
 
   @SuppressWarnings("unchecked") // fully variant
   public static <V extends AbstractValue<V>> AccessPathStore<V> empty() {
     return (AccessPathStore<V>) EMPTY;
   }
 
-  @Nullable
-  private V getInformation(AccessPath ap) {
+  private @Nullable V getInformation(AccessPath ap) {
     return heap().get(checkNotNull(ap));
   }
 
@@ -84,7 +73,7 @@ public abstract class AccessPathStore<V extends AbstractValue<V>>
     for (AccessPath aPath : intersection(heap().keySet(), other.heap().keySet())) {
       resultHeap.put(aPath, heap().get(aPath).leastUpperBound(other.heap().get(aPath)));
     }
-    return AccessPathStore.create(resultHeap.build());
+    return new AccessPathStore<>(resultHeap.buildOrThrow());
   }
 
   @Override
@@ -102,6 +91,7 @@ public abstract class AccessPathStore<V extends AbstractValue<V>>
   public String visualize(CFGVisualizer<?, AccessPathStore<V>, ?> cfgVisualizer) {
     throw new UnsupportedOperationException("DOT output not supported");
   }
+
   /**
    * Builder for {@link AccessPathStore} instances. To obtain an instance, obtain a {@link
    * AccessPathStore} (such as {@link AccessPathStore#empty()}), and call {@link
@@ -114,13 +104,14 @@ public abstract class AccessPathStore<V extends AbstractValue<V>>
       this.heap = new LinkedHashMap<>(prototype.heap());
     }
 
+    @CanIgnoreReturnValue
     public Builder<V> setInformation(AccessPath aPath, V value) {
       heap.put(checkNotNull(aPath), checkNotNull(value));
       return this;
     }
 
     public AccessPathStore<V> build() {
-      return AccessPathStore.create(ImmutableMap.copyOf(heap));
+      return new AccessPathStore<>(ImmutableMap.copyOf(heap));
     }
   }
 }

@@ -18,11 +18,12 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.util.ASTHelpers.getAnnotationWithSimpleName;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static com.google.errorprone.util.ASTHelpers.isConsideredFinal;
+import static com.google.errorprone.util.AnnotationNames.VAR_ANNOTATION;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.Var;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -34,7 +35,6 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Source;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeInfo;
@@ -55,10 +55,7 @@ public class VarChecker extends BugChecker implements VariableTreeMatcher {
   @Override
   public Description matchVariable(VariableTree tree, VisitorState state) {
     Symbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null) {
-      return Description.NO_MATCH;
-    }
-    if (ASTHelpers.hasAnnotation(sym, Var.class, state)) {
+    if (hasAnnotation(sym, VAR_ANNOTATION, state)) {
       if ((sym.flags() & Flags.EFFECTIVELY_FINAL) != 0) {
         return buildDescription(tree)
             .setMessage("@Var variable is never modified")
@@ -80,36 +77,29 @@ public class VarChecker extends BugChecker implements VariableTreeMatcher {
       // TODO(cushon): consider requiring @Var if the index is modified in the body of the loop
       return Description.NO_MATCH;
     }
-    switch (sym.getKind()) {
-      case PARAMETER:
-      case LOCAL_VARIABLE:
-      case EXCEPTION_PARAMETER:
-      case RESOURCE_VARIABLE:
-        return handleLocalOrParam(tree, state, sym);
-      default:
-        return Description.NO_MATCH;
-    }
+    return switch (sym.getKind()) {
+      case PARAMETER, LOCAL_VARIABLE, EXCEPTION_PARAMETER, RESOURCE_VARIABLE, BINDING_VARIABLE ->
+          handleLocalOrParam(tree, state, sym);
+      default -> Description.NO_MATCH;
+    };
   }
 
   boolean forLoopVariable(VariableTree tree, TreePath path) {
     Tree parent = path.getParentPath().getLeaf();
-    if (!(parent instanceof ForLoopTree)) {
+    if (!(parent instanceof ForLoopTree forLoop)) {
       return false;
     }
-    ForLoopTree forLoop = (ForLoopTree) parent;
     return forLoop.getInitializer().contains(tree);
   }
 
   private Description handleLocalOrParam(VariableTree tree, VisitorState state, Symbol sym) {
     if (sym.getModifiers().contains(Modifier.FINAL)) {
-      if (Source.instance(state.context).compareTo(Source.lookup("1.8")) >= 0) {
-        // In Java 8, the final modifier is never necessary on locals/parameters because
-        // effectively final variables can be used anywhere a final variable is required.
-        Optional<SuggestedFix> fix = SuggestedFixes.removeModifiers(tree, state, Modifier.FINAL);
-        // The fix may not be present for TWR variables that were not explicitly final
-        if (fix.isPresent()) {
-          return buildDescription(tree).setMessage(UNNECESSARY_FINAL).addFix(fix.get()).build();
-        }
+      // The final modifier is never necessary on locals/parameters because the compiler recognizes
+      // them as "effectively final" where relevant.
+      Optional<SuggestedFix> fix = SuggestedFixes.removeModifiers(tree, state, Modifier.FINAL);
+      // The fix may not be present for TWR variables that were not explicitly final
+      if (fix.isPresent()) {
+        return buildDescription(tree).setMessage(UNNECESSARY_FINAL).addFix(fix.get()).build();
       }
       return Description.NO_MATCH;
     }
@@ -125,6 +115,6 @@ public class VarChecker extends BugChecker implements VariableTreeMatcher {
   }
 
   private static Fix addVarAnnotation(VariableTree tree) {
-    return SuggestedFix.builder().prefixWith(tree, "@Var ").addImport(Var.class.getName()).build();
+    return SuggestedFix.builder().prefixWith(tree, "@Var ").addImport(VAR_ANNOTATION).build();
   }
 }

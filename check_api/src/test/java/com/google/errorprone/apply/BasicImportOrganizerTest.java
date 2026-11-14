@@ -15,11 +15,10 @@
  */
 package com.google.errorprone.apply;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableList;
-import java.util.List;
-import java.util.stream.Collectors;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -28,7 +27,7 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class BasicImportOrganizerTest {
 
-  private static final List<ImportOrganizer.Import> IMPORTS =
+  private static final ImmutableList<ImportOrganizer.Import> IMPORTS =
       ImmutableList.of(
               "import com.android.blah",
               "import android.foo",
@@ -45,10 +44,10 @@ public class BasicImportOrganizerTest {
               "import static net.wilma.flintstone")
           .stream()
           .map(ImportOrganizer.Import::importOf)
-          .collect(Collectors.toList());
+          .collect(toImmutableList());
 
   @Test
-  public void testStaticFirstOrdering() {
+  public void staticFirstOrdering() {
     BasicImportOrganizer organizer = new BasicImportOrganizer(StaticOrder.STATIC_FIRST);
     ImportOrganizer.OrganizedImports organized = organizer.organizeImports(IMPORTS);
     assertThat(organized.asImportBlock())
@@ -70,7 +69,7 @@ public class BasicImportOrganizerTest {
   }
 
   @Test
-  public void testStaticLastOrdering() {
+  public void staticLastOrdering() {
     BasicImportOrganizer organizer = new BasicImportOrganizer(StaticOrder.STATIC_LAST);
     ImportOrganizer.OrganizedImports organized = organizer.organizeImports(IMPORTS);
     assertThat(organized.asImportBlock())

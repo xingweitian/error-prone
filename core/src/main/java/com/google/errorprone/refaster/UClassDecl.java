@@ -49,62 +49,56 @@ abstract class UClassDecl extends USimpleStatement implements ClassTree {
     return new AutoValue_UClassDecl(ImmutableList.copyOf(members));
   }
 
-  @AutoValue
-  abstract static class UnifierWithRemainingMembers {
+  private record UnifierWithRemainingMembers(
+      Unifier unifier, ImmutableList<UMethodDecl> remainingMembers) {
     static UnifierWithRemainingMembers create(
         Unifier unifier, Iterable<UMethodDecl> remainingMembers) {
-      return new AutoValue_UClassDecl_UnifierWithRemainingMembers(
-          unifier, ImmutableList.copyOf(remainingMembers));
+      return new UnifierWithRemainingMembers(unifier, ImmutableList.copyOf(remainingMembers));
     }
 
-    abstract Unifier unifier();
-
-    abstract ImmutableList<UMethodDecl> remainingMembers();
-
     static Function<Unifier, UnifierWithRemainingMembers> withRemaining(
-        final Iterable<UMethodDecl> remainingMembers) {
+        Iterable<UMethodDecl> remainingMembers) {
       return (Unifier unifier) -> create(unifier, remainingMembers);
     }
   }
 
   private static Function<UnifierWithRemainingMembers, Choice<UnifierWithRemainingMembers>> match(
-      final Tree tree) {
-    return (final UnifierWithRemainingMembers state) -> {
-      final ImmutableList<UMethodDecl> currentMembers = state.remainingMembers();
+      Tree tree) {
+    return (UnifierWithRemainingMembers state) -> {
+      ImmutableList<UMethodDecl> currentMembers = state.remainingMembers();
       Choice<Integer> methodChoice =
           Choice.from(
               ContiguousSet.create(
                   Range.closedOpen(0, currentMembers.size()), DiscreteDomain.integers()));
-      return methodChoice.thenChoose(
-          (Integer i) -> {
-            ImmutableList<UMethodDecl> remainingMembers =
-                ImmutableList.<UMethodDecl>builder()
-                    .addAll(currentMembers.subList(0, i))
-                    .addAll(currentMembers.subList(i + 1, currentMembers.size()))
-                    .build();
-            UMethodDecl chosenMethod = currentMembers.get(i);
-            Unifier unifier = state.unifier().fork();
-            /*
-             * If multiple methods use the same parameter name, preserve the last parameter
-             * name from the target code.  For example, given a @BeforeTemplate with
-             *
-             *    int get(int index) {...}
-             *    int set(int index, int value) {...}
-             *
-             * and target code with the lines
-             *
-             *    int get(int i) {...}
-             *    int set(int j) {...}
-             *
-             * then use "j" in place of index in the @AfterTemplates.
-             */
-            for (UVariableDecl param : chosenMethod.getParameters()) {
-              unifier.clearBinding(param.key());
-            }
-            return chosenMethod
-                .unify(tree, unifier)
-                .transform(UnifierWithRemainingMembers.withRemaining(remainingMembers));
-          });
+      return methodChoice.flatMap((Integer i) -> {
+        ImmutableList<UMethodDecl> remainingMembers =
+            ImmutableList.<UMethodDecl>builder()
+                .addAll(currentMembers.subList(0, i))
+                .addAll(currentMembers.subList(i + 1, currentMembers.size()))
+                .build();
+        UMethodDecl chosenMethod = currentMembers.get(i);
+        Unifier unifier = state.unifier().fork();
+        /*
+         * If multiple methods use the same parameter name, preserve the last parameter
+         * name from the target code.  For example, given a @BeforeTemplate with
+         *
+         *    int get(int index) {...}
+         *    int set(int index, int value) {...}
+         *
+         * and target code with the lines
+         *
+         *    int get(int i) {...}
+         *    int set(int j) {...}
+         *
+         * then use "j" in place of index in the @AfterTemplates.
+         */
+        for (UVariableDecl param : chosenMethod.getParameters()) {
+          unifier.clearBinding(param.key());
+        }
+        return chosenMethod
+            .unify(tree, unifier)
+            .map(UnifierWithRemainingMembers.withRemaining(remainingMembers));
+      });
     };
   }
 
@@ -113,15 +107,15 @@ abstract class UClassDecl extends USimpleStatement implements ClassTree {
     Choice<UnifierWithRemainingMembers> path =
         Choice.of(UnifierWithRemainingMembers.create(unifier, getMembers()));
     for (Tree targetMember : node.getMembers()) {
-      if (targetMember instanceof MethodTree
-          && ASTHelpers.isGeneratedConstructor((MethodTree) targetMember)) {
+      if (targetMember instanceof MethodTree methodTree
+          && ASTHelpers.isGeneratedConstructor(methodTree)) {
         // skip synthetic constructors
         continue;
       }
-      path = path.thenChoose(match(targetMember));
+      path = path.flatMap(match(targetMember));
     }
-    return path.condition(s -> s.remainingMembers().isEmpty())
-        .transform(UnifierWithRemainingMembers::unifier);
+    return path.filter(s -> s.remainingMembers().isEmpty())
+        .map(UnifierWithRemainingMembers::unifier);
   }
 
   @Override

@@ -36,18 +36,41 @@ public final class UnnecessarilyVisibleTest {
     helper
         .addInputLines(
             "Test.java",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  public Test() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              public Test() {}
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  Test() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              Test() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void annotationAppearsInFinding() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              // BUG: Diagnostic contains: annotated with @Inject
+              public Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -56,12 +79,15 @@ public final class UnnecessarilyVisibleTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  // BUG: Diagnostic contains: VisibleForTesting",
-            "  public Test() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              // BUG: Diagnostic contains: VisibleForTesting
+              public Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -70,14 +96,17 @@ public final class UnnecessarilyVisibleTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.inject.Provides;",
-            "class Test {",
-            "  @Provides",
-            "  // BUG: Diagnostic matches: X",
-            "  public int foo() {",
-            "    return 1;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+
+            class Test {
+              @Provides
+              // BUG: Diagnostic matches: X
+              public int foo() {
+                return 1;
+              }
+            }
+            """)
         .expectErrorMessage("X", msg -> !msg.contains("VisibleForTesting"))
         .doTest();
   }
@@ -87,18 +116,24 @@ public final class UnnecessarilyVisibleTest {
     helper
         .addInputLines(
             "Test.java",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  protected Test() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              protected Test() {}
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  Test() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -107,22 +142,28 @@ public final class UnnecessarilyVisibleTest {
     helper
         .addInputLines(
             "Test.java",
-            "import com.google.inject.Provides;",
-            "class Test {",
-            "  @Provides",
-            "  public int foo() {",
-            "    return 1;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+
+            class Test {
+              @Provides
+              public int foo() {
+                return 1;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import com.google.inject.Provides;",
-            "class Test {",
-            "  @Provides",
-            "  int foo() {",
-            "    return 1;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+
+            class Test {
+              @Provides
+              int foo() {
+                return 1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -130,12 +171,14 @@ public final class UnnecessarilyVisibleTest {
   public void unannotated_noFinding() {
     helper
         .addInputLines(
-            "Test.java", //
-            "class Test {",
-            "  public int foo() {",
-            "    return 1;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              public int foo() {
+                return 1;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -144,14 +187,17 @@ public final class UnnecessarilyVisibleTest {
   public void visibleForTesting_noFinding() {
     helper
         .addInputLines(
-            "Test.java", //
-            "import com.google.common.annotations.VisibleForTesting;",
-            "import javax.inject.Inject;",
-            "class Test {",
-            "  @Inject",
-            "  @VisibleForTesting",
-            "  public Test() {}",
-            "}")
+            "Test.java",
+            """
+            import com.google.common.annotations.VisibleForTesting;
+            import javax.inject.Inject;
+
+            class Test {
+              @Inject
+              @VisibleForTesting
+              public Test() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -160,18 +206,23 @@ public final class UnnecessarilyVisibleTest {
   public void overridesPublicMethod_noFinding() {
     helper
         .addInputLines(
-            "A.java", //
-            "class A {",
-            "  public void foo() {}",
-            "}")
+            "A.java",
+            """
+            class A {
+              public void foo() {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
-            "Test.java", //
-            "import com.google.inject.Provides;",
-            "class Test extends A {",
-            "  @Provides",
-            "  public void foo() {}",
-            "}")
+            "Test.java",
+            """
+            import com.google.inject.Provides;
+
+            class Test extends A {
+              @Provides
+              public void foo() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }

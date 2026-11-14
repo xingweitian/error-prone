@@ -35,9 +35,10 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 
-/** @author jdesprez@google.com (Julien Desprez) */
+/**
+ * @author jdesprez@google.com (Julien Desprez)
+ */
 @BugPattern(
-    name = "JUnit4ClassUsedInJUnit3",
     summary =
         "Some JUnit4 construct cannot be used in a JUnit3 context. Convert your class to JUnit4 "
             + "style to use them.",
@@ -65,10 +66,7 @@ public class JUnit4ClassUsedInJUnit3 extends BugChecker
     if (!enclosingClass(isJUnit3TestClass).matches(tree, state)) {
       return NO_MATCH;
     }
-    // If we are inside a JUnit3 test class some annotation should not appear.
-    if (isType("org.junit.Ignore").matches(tree, state)) {
-      return makeDescription("@Ignore", tree);
-    }
+    // If we are inside a JUnit3 test class some annotations should not appear.
     if (isType("org.junit.Rule").matches(tree, state)) {
       return makeDescription("@Rule", tree);
     }

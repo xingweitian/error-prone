@@ -25,6 +25,8 @@ import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.AnnotationValue;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.DeclaredType;
 
 /** A serialization-friendly POJO of the information in a {@link BugPattern}. */
 public final class BugPatternInstance {
@@ -45,7 +47,8 @@ public final class BugPatternInstance {
     instance.className = element.toString();
 
     BugPattern annotation = element.getAnnotation(BugPattern.class);
-    instance.name = annotation.name();
+    instance.name =
+        annotation.name().isEmpty() ? element.getSimpleName().toString() : annotation.name();
     instance.altNames = annotation.altNames();
     instance.tags = annotation.tags();
     instance.severity = annotation.severity();
@@ -70,7 +73,9 @@ public final class BugPatternInstance {
 
   private static Map<String, Object> getAnnotation(Element element, String name) {
     for (AnnotationMirror mirror : element.getAnnotationMirrors()) {
-      if (mirror.getAnnotationType().toString().equals(name)) {
+      if (((TypeElement) ((DeclaredType) mirror.getAnnotationType()).asElement())
+          .getQualifiedName()
+          .contentEquals(name)) {
         return annotationKeyValues(mirror);
       }
     }

@@ -28,6 +28,7 @@ import com.google.errorprone.bugpatterns.BugChecker.CompoundAssignmentTreeMatche
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.OperatorPrecedence;
 import com.sun.source.tree.CompoundAssignmentTree;
 import com.sun.source.tree.ConditionalExpressionTree;
@@ -36,11 +37,10 @@ import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.tree.JCTree.JCBinary;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "NarrowingCompoundAssignment",
     summary = "Compound assignments may hide dangerous casts",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
@@ -48,61 +48,37 @@ public class NarrowingCompoundAssignment extends BugChecker
     implements CompoundAssignmentTreeMatcher {
 
   static String assignmentToString(Tree.Kind kind) {
-    switch (kind) {
-      case MULTIPLY:
-        return "*";
-      case DIVIDE:
-        return "/";
-      case REMAINDER:
-        return "%";
-      case PLUS:
-        return "+";
-      case MINUS:
-        return "-";
-      case LEFT_SHIFT:
-        return "<<";
-      case AND:
-        return "&";
-      case XOR:
-        return "^";
-      case OR:
-        return "|";
-      case RIGHT_SHIFT:
-        return ">>";
-      case UNSIGNED_RIGHT_SHIFT:
-        return ">>>";
-      default:
-        throw new IllegalArgumentException("Unexpected operator assignment kind: " + kind);
-    }
+    return switch (kind) {
+      case MULTIPLY -> "*";
+      case DIVIDE -> "/";
+      case REMAINDER -> "%";
+      case PLUS -> "+";
+      case MINUS -> "-";
+      case LEFT_SHIFT -> "<<";
+      case AND -> "&";
+      case XOR -> "^";
+      case OR -> "|";
+      case RIGHT_SHIFT -> ">>";
+      case UNSIGNED_RIGHT_SHIFT -> ">>>";
+      default -> throw new IllegalArgumentException("Unexpected operator assignment kind: " + kind);
+    };
   }
 
   static Kind regularAssignmentFromCompound(Kind kind) {
-    switch (kind) {
-      case MULTIPLY_ASSIGNMENT:
-        return Kind.MULTIPLY;
-      case DIVIDE_ASSIGNMENT:
-        return Kind.DIVIDE;
-      case REMAINDER_ASSIGNMENT:
-        return Kind.REMAINDER;
-      case PLUS_ASSIGNMENT:
-        return Kind.PLUS;
-      case MINUS_ASSIGNMENT:
-        return Kind.MINUS;
-      case LEFT_SHIFT_ASSIGNMENT:
-        return Kind.LEFT_SHIFT;
-      case AND_ASSIGNMENT:
-        return Kind.AND;
-      case XOR_ASSIGNMENT:
-        return Kind.XOR;
-      case OR_ASSIGNMENT:
-        return Kind.OR;
-      case RIGHT_SHIFT_ASSIGNMENT:
-        return Kind.RIGHT_SHIFT;
-      case UNSIGNED_RIGHT_SHIFT_ASSIGNMENT:
-        return Kind.UNSIGNED_RIGHT_SHIFT;
-      default:
-        throw new IllegalArgumentException("Unexpected compound assignment kind: " + kind);
-    }
+    return switch (kind) {
+      case MULTIPLY_ASSIGNMENT -> Kind.MULTIPLY;
+      case DIVIDE_ASSIGNMENT -> Kind.DIVIDE;
+      case REMAINDER_ASSIGNMENT -> Kind.REMAINDER;
+      case PLUS_ASSIGNMENT -> Kind.PLUS;
+      case MINUS_ASSIGNMENT -> Kind.MINUS;
+      case LEFT_SHIFT_ASSIGNMENT -> Kind.LEFT_SHIFT;
+      case AND_ASSIGNMENT -> Kind.AND;
+      case XOR_ASSIGNMENT -> Kind.XOR;
+      case OR_ASSIGNMENT -> Kind.OR;
+      case RIGHT_SHIFT_ASSIGNMENT -> Kind.RIGHT_SHIFT;
+      case UNSIGNED_RIGHT_SHIFT_ASSIGNMENT -> Kind.UNSIGNED_RIGHT_SHIFT;
+      default -> throw new IllegalArgumentException("Unexpected compound assignment kind: " + kind);
+    };
   }
 
   @Override
@@ -121,8 +97,7 @@ public class NarrowingCompoundAssignment extends BugChecker
   }
 
   /** Classifies bad casts. */
-  @Nullable
-  private static String identifyBadCast(Type lhs, Type rhs, Types types) {
+  private static @Nullable String identifyBadCast(Type lhs, Type rhs, Types types) {
     if (!lhs.isPrimitive()) {
       return null;
     }
@@ -147,11 +122,16 @@ public class NarrowingCompoundAssignment extends BugChecker
       return Optional.absent();
     }
     switch (tree.getKind()) {
-      case RIGHT_SHIFT_ASSIGNMENT:
+      case RIGHT_SHIFT_ASSIGNMENT -> {
         // narrowing the result of a signed right shift does not lose information
         return Optional.absent();
-      default:
-        break;
+      }
+      case AND_ASSIGNMENT, XOR_ASSIGNMENT, OR_ASSIGNMENT -> {
+        if (twiddlingConstantBitsOk(tree)) {
+          return Optional.absent();
+        }
+      }
+      default -> {}
     }
     Kind regularAssignmentKind = regularAssignmentFromCompound(tree.getKind());
     String op = assignmentToString(regularAssignmentKind);
@@ -175,5 +155,23 @@ public class NarrowingCompoundAssignment extends BugChecker
     String castType = getType(tree.getVariable()).toString();
     String replacement = String.format("%s = (%s) (%s %s %s)", var, castType, var, op, expr);
     return Optional.of(SuggestedFix.replace(tree, replacement));
+  }
+
+  private static boolean twiddlingConstantBitsOk(CompoundAssignmentTree tree) {
+    int shift;
+    switch (ASTHelpers.getType(tree.getVariable()).getKind()) {
+      case BYTE -> shift = 8;
+      case SHORT -> shift = 16;
+      default -> {
+        return false;
+      }
+    }
+    Object constValue = ASTHelpers.constValue(tree.getExpression());
+    if (!(constValue instanceof Integer || constValue instanceof Long)) {
+      return false;
+    }
+    long constLong = ((Number) constValue).longValue();
+    long shifted = constLong >> shift;
+    return shifted == 0 || shifted == ~0;
   }
 }

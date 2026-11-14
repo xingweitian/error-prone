@@ -23,7 +23,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author epmjohnston@google.com (Emily P.M. Johnston) */
+/**
+ * @author epmjohnston@google.com (Emily P.M. Johnston)
+ */
 @RunWith(JUnit4.class)
 public class BundleDeserializationCastTest {
   private final CompilationTestHelper compilationHelper =
@@ -34,19 +36,22 @@ public class BundleDeserializationCastTest {
           .setArgs(ImmutableList.of("-XDandroidCompatible=true"));
 
   @Test
-  public void testPositiveCaseGetCustomList() {
+  public void positiveCaseGetCustomList() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.LinkedList;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    // BUG: Diagnostic matches: X",
-            "    LinkedList myList = (LinkedList) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.LinkedList;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                // BUG: Diagnostic matches: X
+                LinkedList myList = (LinkedList) bundle.getSerializable("key");
+              }
+            }
+            """)
         .expectErrorMessage(
             "X",
             Predicates.and(
@@ -56,19 +61,22 @@ public class BundleDeserializationCastTest {
   }
 
   @Test
-  public void testPositiveCaseGetCustomMap() {
+  public void positiveCaseGetCustomMap() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.Hashtable;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    // BUG: Diagnostic matches: X",
-            "    Hashtable myMap = (Hashtable) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.Hashtable;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                // BUG: Diagnostic matches: X
+                Hashtable myMap = (Hashtable) bundle.getSerializable("key");
+              }
+            }
+            """)
         .expectErrorMessage(
             "X",
             Predicates.and(
@@ -78,188 +86,228 @@ public class BundleDeserializationCastTest {
   }
 
   @Test
-  public void testNegativeCaseGetArrayList() {
+  public void negativeCaseGetArrayList() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.ArrayList;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    ArrayList<String> myList = (ArrayList<String>) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.ArrayList;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                ArrayList<String> myList = (ArrayList<String>) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetHashMap() {
+  public void negativeCaseGetHashMap() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.HashMap;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    HashMap myMap = (HashMap) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.HashMap;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                HashMap myMap = (HashMap) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetParcelableList() {
+  public void negativeCaseGetParcelableList() {
     compilationHelper
-        .addSourceFile("CustomParcelableList.java")
+        .addSourceFile("testdata/CustomParcelableList.java")
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.List;",
-            "import com.google.errorprone.bugpatterns.android.testdata.CustomParcelableList;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    CustomParcelableList myList =",
-            "        (CustomParcelableList) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import com.google.errorprone.bugpatterns.android.testdata.CustomParcelableList;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                CustomParcelableList myList = (CustomParcelableList) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseNoCast() {
+  public void negativeCaseNoCast() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseOtherCast() {
+  public void negativeCaseOtherCast() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.lang.Integer;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    Integer myObj = (Integer) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                Integer myObj = (Integer) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetList() {
+  public void negativeCaseGetList() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.List;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    List myList = (List) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.List;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                List myList = (List) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetMap() {
+  public void negativeCaseGetMap() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.Map;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    Map myMap = (Map) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.Map;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                Map myMap = (Map) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetPrimitive() {
+  public void negativeCaseGetPrimitive() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    int myInt = (int) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                int myInt = (int) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetPrimitiveArray() {
+  public void negativeCaseGetPrimitiveArray() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    int[] myArray = (int[]) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                int[] myArray = (int[]) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseGetReferenceArray() {
+  public void negativeCaseGetReferenceArray() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "import java.util.TreeMap;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    TreeMap[] myArray = (TreeMap[]) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+            import java.util.TreeMap;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                TreeMap[] myArray = (TreeMap[]) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCaseGetCustomCharSequenceArray() {
+  public void positiveCaseGetCustomCharSequenceArray() {
     compilationHelper
         .addSourceLines(
             "CustomCharSequence.java",
-            "public class CustomCharSequence implements CharSequence {",
-            "  @Override",
-            "  public int length() { return 0; }",
-            "  @Override",
-            "  public char charAt(int index) { return 0; }",
-            "  @Override",
-            "  public CharSequence subSequence(int start, int end) { return null; }",
-            "}")
+            """
+            public class CustomCharSequence implements CharSequence {
+              @Override
+              public int length() {
+                return 0;
+              }
+
+              @Override
+              public char charAt(int index) {
+                return 0;
+              }
+
+              @Override
+              public CharSequence subSequence(int start, int end) {
+                return null;
+              }
+            }
+            """)
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    // BUG: Diagnostic matches: X",
-            "    CustomCharSequence[] cs = (CustomCharSequence[]) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                // BUG: Diagnostic matches: X
+                CustomCharSequence[] cs = (CustomCharSequence[]) bundle.getSerializable("key");
+              }
+            }
+            """)
         .expectErrorMessage(
             "X",
             Predicates.and(
@@ -269,17 +317,20 @@ public class BundleDeserializationCastTest {
   }
 
   @Test
-  public void testNegativeCaseGetStringArray() {
+  public void negativeCaseGetStringArray() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import android.os.Bundle;",
-            "public class Test {",
-            "  void test() {",
-            "    Bundle bundle = new Bundle();",
-            "    String[] myArray = (String[]) bundle.getSerializable(\"key\");",
-            "  }",
-            "}")
+            """
+            import android.os.Bundle;
+
+            public class Test {
+              void test() {
+                Bundle bundle = new Bundle();
+                String[] myArray = (String[]) bundle.getSerializable("key");
+              }
+            }
+            """)
         .doTest();
   }
 }

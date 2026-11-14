@@ -16,10 +16,10 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.errorprone.BugPattern.LinkType.CUSTOM;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.allOf;
+import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.hasArgumentWithValue;
 import static com.google.errorprone.matchers.Matchers.isSameType;
 import static com.google.errorprone.matchers.Matchers.stringLiteral;
@@ -36,38 +36,38 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.ErrorProneComment;
 import com.google.errorprone.util.ErrorProneToken;
 import com.google.errorprone.util.ErrorProneTokens;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.LineMap;
 import com.sun.source.tree.Tree;
-import com.sun.tools.javac.parser.Tokens.Comment;
-import java.util.Optional;
 
 /**
  * Finds occurrences of {@code @SuppressWarnings} where there is definitely no explanation for why
  * it is safe.
  *
- * <p>The Google style guide mandates this for <em>all</em> suppressions; this is only matching on
- * {@code deprecation} as a trial.
+ * <p>The Google style guide mandates this for <em>all</em> suppressions; we're matching on a subset
+ * to start which seem important.
  */
 @BugPattern(
-    name = "SuppressWarningsWithoutExplanation",
     summary =
         "Use of @SuppressWarnings should be accompanied by a comment describing why the warning is"
             + " safe to ignore.",
     tags = BugPattern.StandardTags.STYLE,
-    severity = WARNING,
-    linkType = CUSTOM,
-    link = "https://google.github.io/styleguide/javaguide.html#s8.4.2-how-to-handle-a-warning"
-    )
+    severity = WARNING)
 public final class SuppressWarningsWithoutExplanation extends BugChecker
     implements CompilationUnitTreeMatcher {
   private static final Matcher<AnnotationTree> SUPPRESS_WARNINGS =
       allOf(
           isSameType(SuppressWarnings.class),
-          hasArgumentWithValue("value", stringLiteral("deprecation")));
+          hasArgumentWithValue(
+              "value",
+              anyOf(
+                  stringLiteral("deprecation"),
+                  stringLiteral("rawtypes"),
+                  stringLiteral("unchecked"))));
 
   private final boolean emitDummyFixes;
 
@@ -85,7 +85,7 @@ public final class SuppressWarningsWithoutExplanation extends BugChecker
       return NO_MATCH;
     }
     ImmutableRangeSet<Long> linesWithComments = linesWithComments(state);
-    new SuppressibleTreePathScanner<Void, Void>() {
+    new SuppressibleTreePathScanner<Void, Void>(state) {
       @Override
       public Void visitAnnotation(AnnotationTree annotationTree, Void unused) {
         if (!SUPPRESS_WARNINGS.matches(annotationTree, state)) {
@@ -104,8 +104,8 @@ public final class SuppressWarningsWithoutExplanation extends BugChecker
               describeMatch(
                   annotationTree,
                   emitDummyFixes
-                      ? Optional.of(SuggestedFix.postfixWith(annotationTree, " // Safe because..."))
-                      : Optional.empty()));
+                      ? SuggestedFix.postfixWith(annotationTree, " // Safe because...")
+                      : SuggestedFix.emptyFix()));
         }
         return super.visitAnnotation(annotationTree, null);
       }
@@ -118,7 +118,7 @@ public final class SuppressWarningsWithoutExplanation extends BugChecker
     ErrorProneTokens tokens = new ErrorProneTokens(state.getSourceCode().toString(), state.context);
     LineMap lineMap = tokens.getLineMap();
     for (ErrorProneToken token : tokens.getTokens()) {
-      for (Comment comment : token.comments()) {
+      for (ErrorProneComment comment : token.comments()) {
         lines.add(
             Range.closed(
                 lineMap.getLineNumber(comment.getSourcePos(0)),

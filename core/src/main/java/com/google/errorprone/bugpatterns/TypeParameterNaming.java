@@ -17,7 +17,9 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.common.base.Ascii;
 import com.google.common.base.Preconditions;
@@ -26,7 +28,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Streams;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.LinkType;
-import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.TypeParameterTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFixes;
@@ -42,11 +43,11 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.lang.model.element.Name;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 /**
  * Enforces type parameters match the google style guide.
@@ -55,15 +56,12 @@ import javax.lang.model.element.Name;
  * @author glorioso@google.com (Nick Glorioso)
  */
 @BugPattern(
-    name = "TypeParameterNaming",
     summary =
         "Type parameters must be a single letter with an optional numeric suffix,"
             + " or an UpperCamelCase name followed by the letter 'T'.",
     severity = SUGGESTION,
-    tags = StandardTags.STYLE,
     linkType = LinkType.CUSTOM,
-    link = "https://google.github.io/styleguide/javaguide.html#s5.2.8-type-variable-names"
-    )
+    link = "https://google.github.io/styleguide/javaguide.html#s5.2.8-type-variable-names")
 public class TypeParameterNaming extends BugChecker implements TypeParameterTreeMatcher {
 
   private static final Pattern TRAILING_DIGIT_EXTRACTOR = Pattern.compile("^(.*?)(\\d+)$");
@@ -189,16 +187,14 @@ public class TypeParameterNaming extends BugChecker implements TypeParameterTree
   private static List<TypeVariableSymbol> typeVariablesEnclosing(Symbol sym) {
     List<TypeVariableSymbol> typeVarScopes = new ArrayList<>();
     outer:
-    while (!sym.isStatic()) {
+    while (!isStatic(sym)) {
       sym = sym.owner;
       switch (sym.getKind()) {
-        case PACKAGE:
+        case PACKAGE -> {
           break outer;
-        case METHOD:
-        case CLASS:
-          typeVarScopes.addAll(0, sym.getTypeParameters());
-          break;
-        default: // fall out
+        }
+        case METHOD, CLASS -> typeVarScopes.addAll(0, sym.getTypeParameters());
+        default -> {}
       }
     }
     return typeVarScopes;
@@ -206,7 +202,7 @@ public class TypeParameterNaming extends BugChecker implements TypeParameterTree
 
   private static String suggestedSingleLetter(String id, Tree tree) {
     char firstLetter =
-        Ascii.toUpperCase(NamingConventions.splitToLowercaseTerms(id).get(0).charAt(0));
+        Ascii.toUpperCase(NamingConventions.splitToLowercaseTerms(id).getFirst().charAt(0));
     Symbol sym = ASTHelpers.getSymbol(tree);
     List<TypeVariableSymbol> enclosingTypeSymbols = typeVariablesEnclosing(sym);
 
@@ -225,6 +221,7 @@ public class TypeParameterNaming extends BugChecker implements TypeParameterTree
 
     return Character.toString(firstLetter);
   }
+
   // T -> T2
   // T2 -> T3
   // T -> T4 (if T2 and T3 already exist)
@@ -291,7 +288,7 @@ public class TypeParameterNaming extends BugChecker implements TypeParameterTree
 
     // UPPERCASE => UppercaseT
     if (tokens.size() == 1) {
-      String token = tokens.get(0);
+      String token = getOnlyElement(tokens);
       if (Ascii.toUpperCase(token).equals(identifier)) {
         return upperCamelToken(token) + "T";
       }

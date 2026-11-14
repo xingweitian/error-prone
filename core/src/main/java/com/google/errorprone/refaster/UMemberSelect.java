@@ -56,21 +56,24 @@ public abstract class UMemberSelect extends UExpression implements MemberSelectT
     if (ASTHelpers.getSymbol(fieldAccess) != null) {
       return getIdentifier()
           .unify(fieldAccess.getIdentifier(), unifier)
-          .thenChoose(unifications(getExpression(), fieldAccess.getExpression()))
-          .thenChoose(unifications(type(), ASTHelpers.getSymbol(fieldAccess).asType()));
+          .flatMap(unifications(getExpression(), fieldAccess.getExpression()))
+          .flatMap(unifications(type(), ASTHelpers.getSymbol(fieldAccess).asType()));
     }
     return Choice.none();
   }
 
   @Override
-  public Choice<Unifier> visitIdentifier(final IdentifierTree ident, Unifier unifier) {
+  public Choice<Unifier> visitIdentifier(IdentifierTree ident, Unifier unifier) {
     Symbol sym = ASTHelpers.getSymbol(ident);
-    if (sym != null && sym.owner.type != null) {
+    if (sym != null
+        && sym.owner != null
+        && sym.owner.type != null
+        && sym.owner.type.isReference()) {
       JCExpression thisIdent = unifier.thisExpression(sym.owner.type);
       return getIdentifier()
           .unify(ident.getName(), unifier)
-          .thenChoose(unifications(getExpression(), thisIdent))
-          .thenChoose(unifications(type(), sym.asType()));
+          .flatMap(unifications(getExpression(), thisIdent))
+          .flatMap(unifications(type(), sym.asType()));
     }
     return Choice.none();
   }

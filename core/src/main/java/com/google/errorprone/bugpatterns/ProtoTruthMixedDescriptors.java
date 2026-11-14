@@ -19,12 +19,14 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.matchers.ProtobufMatchers.GENERATED_MESSAGE;
+import static com.google.errorprone.matchers.ProtobufMatchers.MESSAGE;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
-import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
@@ -32,8 +34,6 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.suppliers.Supplier;
-import com.google.errorprone.suppliers.Suppliers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Symbol;
@@ -49,7 +49,6 @@ import java.util.Optional;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "ProtoTruthMixedDescriptors",
     summary =
         "The arguments passed to `ignoringFields` are inconsistent with the proto which is "
             + "the subject of the assertion.",
@@ -69,11 +68,6 @@ public final class ProtoTruthMixedDescriptors extends BugChecker
           .onClass("com.google.common.truth.extensions.proto.ProtoTruth")
           .named("assertThat");
 
-  private static final Supplier<Type> MESSAGE =
-      Suppliers.typeFromString("com.google.protobuf.Message");
-  private static final Supplier<Type> GENERATED_MESSAGE =
-      Suppliers.typeFromString("com.google.protobuf.GeneratedMessage");
-
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!IGNORING.matches(tree, state)) {
@@ -83,8 +77,7 @@ public final class ProtoTruthMixedDescriptors extends BugChecker
     ImmutableSet<TypeSymbol> types =
         arguments.stream()
             .map(t -> protoType(t, state))
-            .filter(Optional::isPresent)
-            .map(Optional::get)
+            .flatMap(Optional::stream)
             .collect(toImmutableSet());
     if (types.size() > 1) {
       return describeMatch(tree);
@@ -93,22 +86,17 @@ public final class ProtoTruthMixedDescriptors extends BugChecker
       return Description.NO_MATCH;
     }
     TypeSymbol type = getOnlyElement(types);
-    for (ExpressionTree receiver = getReceiver(tree);
-        receiver instanceof MethodInvocationTree;
-        receiver = getReceiver(receiver)) {
-      if (ASSERT_THAT.matches(receiver, state)) {
-        return validateReceiver(tree, (MethodInvocationTree) receiver, type, state);
-      }
-    }
-    return Description.NO_MATCH;
+    return streamReceivers(tree)
+        .filter(t -> ASSERT_THAT.matches(t, state))
+        .map(t -> validateReceiver(tree, (MethodInvocationTree) t, type, state))
+        .findFirst()
+        .orElse(Description.NO_MATCH);
   }
 
   // Tries to resolve the proto which owns the symbol at `tree`, or absent if there isn't one.
   private static Optional<TypeSymbol> protoType(ExpressionTree tree, VisitorState state) {
     Symbol symbol = getSymbol(tree);
-    if (symbol != null
-        && symbol.owner != null
-        && isSubtype(symbol.owner.type, MESSAGE.get(state), state)) {
+    if (symbol != null && symbol.owner != null && isSubtype(symbol.owner.type, MESSAGE, state)) {
       return Optional.of(symbol.owner.type.tsym);
     }
     return Optional.empty();
@@ -135,7 +123,7 @@ public final class ProtoTruthMixedDescriptors extends BugChecker
 
     return subjectType == null
             || subjectType.tsym.equals(type)
-            || !isSubtype(subjectType, GENERATED_MESSAGE.get(state), state)
+            || !isSubtype(subjectType, GENERATED_MESSAGE, state)
         ? Description.NO_MATCH
         : describeMatch(tree);
   }

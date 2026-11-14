@@ -30,20 +30,24 @@ public class XorPowerTest {
     BugCheckerRefactoringTestHelper.newInstance(XorPower.class, getClass())
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  static final int X = 2 ^ 16;",
-            "  static final int Y = 2 ^ 32;",
-            "  static final int Z = 2 ^ 31;",
-            "  static final int P = 10 ^ 6;",
-            "}")
+            """
+            class Test {
+              static final int X = 2 ^ 16;
+              static final int TOO_BIG = 2 ^ 32;
+              static final int Z = 2 ^ 31;
+              static final int P = 10 ^ 6;
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  static final int X = 1 << 16;",
-            "  static final int Y = 2 ^ 32;",
-            "  static final int Z = 1 << 31;",
-            "  static final int P = 1000000;",
-            "}")
+            """
+            class Test {
+              static final int X = 1 << 16;
+              static final int TOO_BIG = 2 ^ 32;
+              static final int Z = 1 << 31;
+              static final int P = 1000000;
+            }
+            """)
         .doTest();
   }
 
@@ -52,11 +56,67 @@ public class XorPowerTest {
     CompilationTestHelper.newInstance(XorPower.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  static final int X = 2 ^ 0x16;",
-            "  // BUG: Diagnostic contains:",
-            "  static final int Y = 2 ^ 32;",
-            "}")
+            """
+            class Test {
+              static final int X = 2 ^ 0x16;
+              // BUG: Diagnostic contains:
+              static final int Y = 2 ^ 32;
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveLongs() {
+    BugCheckerRefactoringTestHelper.newInstance(XorPower.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              static final long X = 2L ^ 16;
+              static final long Y = 2L ^ 32;
+              static final long Z = 2L ^ 31;
+              static final long TOO_BIG = 2L ^ 64;
+              static final long P = 10L ^ 6;
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              static final long X = 1L << 16;
+              static final long Y = 1L << 32;
+              static final long Z = 1L << 31;
+              static final long TOO_BIG = 2L ^ 64;
+              static final long P = 1000000L;
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void precedence() {
+    BugCheckerRefactoringTestHelper.newInstance(XorPower.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              void f(int i) {
+                int x = i * 2 ^ 16;
+                int y = i * 10 ^ 3;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              void f(int i) {
+                int x = i * (1 << 16);
+                int y = i * 1000;
+              }
+            }
+            """)
         .doTest();
   }
 }

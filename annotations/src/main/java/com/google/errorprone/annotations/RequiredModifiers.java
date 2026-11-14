@@ -21,22 +21,21 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import javax.lang.model.element.Modifier;
 
 /**
  * Annotation declaring that the target annotation requires all the specified modifiers. For
  * example, an annotation declared as:
  *
- * <pre>
- * {@literal @}RequiredModifiers(Modifier.PUBLIC)
- * {@literal @}interface MyAnnotation {}
- * </pre>
+ * <pre>{@code
+ * @RequiredModifiers(modifier = Modifier.PUBLIC)
+ * @interface MyAnnotation {}
+ * }</pre>
  *
  * <p>will be considered illegal when used on non-public elements such as:
  *
- * <pre>
- * {@literal @}MyAnnotation void foo() {}
- * </pre>
+ * <pre>{@code
+ * @MyAnnotation void foo() {}
+ * }</pre>
  *
  * @author benyu@google.com (Jige Yu)
  */
@@ -44,6 +43,7 @@ import javax.lang.model.element.Modifier;
 @Retention(RetentionPolicy.CLASS) // Element's source might not be available during analysis
 @Target(ElementType.ANNOTATION_TYPE)
 public @interface RequiredModifiers {
+
   /**
    * The required modifiers. The annotated element is illegal if any one or more of these modifiers
    * are absent.
@@ -51,5 +51,5 @@ public @interface RequiredModifiers {
    * <p>Empty array has the same effect as not applying this annotation at all; duplicates are
    * allowed but have no effect.
    */
-  Modifier[] value();
+  Modifier[] modifier() default {};
 }

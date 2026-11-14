@@ -20,15 +20,19 @@ import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.isSubtypeOf;
 import static com.google.errorprone.matchers.Matchers.not;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.ASTHelpers.streamSuperMethods;
+import static com.google.errorprone.util.AnnotationNames.CAN_IGNORE_RETURN_VALUE_ANNOTATION;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.errorprone.bugpatterns.threadsafety.ConstantExpressions;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MemberReferenceTree;
@@ -36,10 +40,11 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import com.sun.tools.javac.code.Type;
+import javax.inject.Inject;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} for details. */
 @BugPattern(
-    name = "RxReturnValueIgnored",
     summary =
         "Returned Rx objects must be checked. Ignoring a returned Rx value means it is never "
             + "scheduled for execution",
@@ -49,15 +54,15 @@ import com.sun.tools.javac.code.Symbol.MethodSymbol;
             + "observables may never execute. It also means the error case is not being handled",
     severity = WARNING)
 public final class RxReturnValueIgnored extends AbstractReturnValueIgnored {
+
   private static boolean hasCirvAnnotation(ExpressionTree tree, VisitorState state) {
     Symbol untypedSymbol = getSymbol(tree);
-    if (!(untypedSymbol instanceof MethodSymbol)) {
+    if (!(untypedSymbol instanceof MethodSymbol sym)) {
       return false;
     }
 
-    MethodSymbol sym = (MethodSymbol) untypedSymbol;
     // Directly has @CanIgnoreReturnValue
-    if (ASTHelpers.hasAnnotation(sym, CanIgnoreReturnValue.class, state)) {
+    if (hasAnnotation(sym, CAN_IGNORE_RETURN_VALUE_ANNOTATION, state)) {
       return true;
     }
 
@@ -65,11 +70,10 @@ public final class RxReturnValueIgnored extends AbstractReturnValueIgnored {
     // if the super-type returned the exact same type. This lets us catch issues where a
     // superclass was annotated with @CanIgnoreReturnValue but the parent did not intend to
     // return an Rx type
-    return ASTHelpers.findSuperMethods(sym, state.getTypes()).stream()
-        .anyMatch(
-            superSym ->
-                hasAnnotation(superSym, CanIgnoreReturnValue.class, state)
-                    && superSym.getReturnType().tsym.equals(sym.getReturnType().tsym));
+    return streamSuperMethods(sym, state.getTypes())
+        .anyMatch(superSym ->
+            hasAnnotation(superSym, CAN_IGNORE_RETURN_VALUE_ANNOTATION, state)
+                && superSym.getReturnType().tsym.equals(sym.getReturnType().tsym));
   }
 
   private static boolean isExemptedMethod(ExpressionTree tree, VisitorState state) {
@@ -79,7 +83,7 @@ public final class RxReturnValueIgnored extends AbstractReturnValueIgnored {
     }
 
     // Currently the only exempted method is Map.put().
-    return ASTHelpers.isSubtype(sym.owner.type, state.getTypeFromString("java.util.Map"), state)
+    return ASTHelpers.isSubtype(sym.owner.type, JAVA_UTIL_MAP.get(state), state)
         && sym.name.contentEquals("put");
   }
 
@@ -102,6 +106,11 @@ public final class RxReturnValueIgnored extends AbstractReturnValueIgnored {
                   RxReturnValueIgnored::hasCirvAnnotation,
                   RxReturnValueIgnored::isExemptedMethod)));
 
+  @Inject
+  RxReturnValueIgnored(ConstantExpressions constantExpressions) {
+    super(constantExpressions);
+  }
+
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     Description description = super.matchMethodInvocation(tree, state);
@@ -118,4 +127,6 @@ public final class RxReturnValueIgnored extends AbstractReturnValueIgnored {
   public Matcher<? super ExpressionTree> specializedMatcher() {
     return MATCHER;
   }
+
+  private static final Supplier<Type> JAVA_UTIL_MAP = typeFromString("java.util.Map");
 }

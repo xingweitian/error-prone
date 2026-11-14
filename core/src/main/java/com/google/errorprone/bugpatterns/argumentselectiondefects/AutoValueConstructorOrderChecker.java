@@ -40,11 +40,9 @@ import java.util.function.Function;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-@BugPattern(
-    name = "AutoValueConstructorOrderChecker",
-    summary = "Arguments to AutoValue constructor are in the wrong order",
-    severity = ERROR)
-public class AutoValueConstructorOrderChecker extends BugChecker implements NewClassTreeMatcher {
+@BugPattern(summary = "Arguments to AutoValue constructor are in the wrong order", severity = ERROR)
+public final class AutoValueConstructorOrderChecker extends BugChecker
+    implements NewClassTreeMatcher {
 
   private final ArgumentChangeFinder argumentChangeFinder =
       ArgumentChangeFinder.builder()
@@ -55,7 +53,7 @@ public class AutoValueConstructorOrderChecker extends BugChecker implements NewC
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
-    if (!Matchers.AUTOVALUE_CONSTRUCTOR.matches(tree, state)) {
+    if (!Matchers.isAutoValueConstructor(tree)) {
       return Description.NO_MATCH;
     }
 
@@ -72,16 +70,13 @@ public class AutoValueConstructorOrderChecker extends BugChecker implements NewC
   }
 
   private static Function<ParameterPair, Double> buildDistanceFunction() {
-    return new Function<ParameterPair, Double>() {
-      @Override
-      public Double apply(ParameterPair parameterPair) {
-        Parameter formal = parameterPair.formal();
-        Parameter actual = parameterPair.actual();
-        if (formal.isUnknownName() || actual.isUnknownName()) {
-          return formal.index() == actual.index() ? 0.0 : 1.0;
-        } else {
-          return formal.name().equals(actual.name()) ? 0.0 : 1.0;
-        }
+    return (ParameterPair parameterPair) -> {
+      Parameter formal = parameterPair.formal();
+      Parameter actual = parameterPair.actual();
+      if (formal.isUnknownName() || actual.isUnknownName()) {
+        return formal.index() == actual.index() ? 0.0 : 1.0;
+      } else {
+        return formal.name().equals(actual.name()) ? 0.0 : 1.0;
       }
     };
   }

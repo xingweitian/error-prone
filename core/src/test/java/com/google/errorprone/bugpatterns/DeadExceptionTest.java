@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 @RunWith(JUnit4.class)
 public class DeadExceptionTest {
 
@@ -29,13 +31,99 @@ public class DeadExceptionTest {
       CompilationTestHelper.newInstance(DeadException.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("DeadExceptionPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "DeadExceptionPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            public class DeadExceptionPositiveCases {
+              public void runtimeException() {
+                // BUG: Diagnostic contains: throw new RuntimeException
+                new RuntimeException("Not thrown, and reference lost");
+              }
+
+              public void error() {
+                // BUG: Diagnostic contains: throw new AssertionError
+                new AssertionError("Not thrown, and reference lost");
+              }
+
+              public void fixIsToDeleteTheFirstStatement() {
+                // BUG: Diagnostic contains: remove this line
+                new IllegalArgumentException("why is this here?");
+                int i = 1;
+                System.out.println("i = " + i);
+
+                if (true) {
+                  // BUG: Diagnostic contains: remove this line
+                  new RuntimeException("oops");
+                  System.out.println("another statement after exception");
+                }
+
+                switch (0) {
+                  default:
+                    // BUG: Diagnostic contains: remove this line
+                    new RuntimeException("oops");
+                    System.out.println("another statement after exception");
+                }
+              }
+
+              public void firstStatementWithNoSurroundingBlock() {
+                if (true)
+                  // BUG: Diagnostic contains: throw new InterruptedException
+                  new InterruptedException("this should be thrown");
+
+                if (true) return;
+                else
+                  // BUG: Diagnostic contains: throw new ArithmeticException
+                  new ArithmeticException("should also be thrown");
+
+                switch (4) {
+                  case 4:
+                    System.out.println("4");
+                    break;
+                  default:
+                    // BUG: Diagnostic contains: throw new IllegalArgumentException
+                    new IllegalArgumentException("should be thrown");
+                }
+              }
+
+              public void testLooksLikeAJunitTestMethod() {
+                // BUG: Diagnostic contains: throw new RuntimeException
+                new RuntimeException("Not thrown, and reference lost");
+              }
+
+              {
+                // BUG: Diagnostic contains: throw new Exception
+                new Exception();
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("DeadExceptionNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "DeadExceptionNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            public class DeadExceptionNegativeCases {
+              public void noError() {
+                Exception e = new RuntimeException("stored");
+                e = new UnsupportedOperationException("also stored");
+                throw new IllegalArgumentException("thrown");
+              }
+
+              public Exception returnsException() {
+                return new RuntimeException("returned");
+              }
+            }
+            """)
+        .doTest();
   }
 
   /**
@@ -43,7 +131,41 @@ public class DeadExceptionTest {
    * asserting that an exception is thrown in the constructor.
    */
   @Test
-  public void testNegativeCaseWhenExceptionsUnthrownInTests() {
-    compilationHelper.addSourceFile("DeadExceptionTestingNegativeCases.java").doTest();
+  public void negativeCaseWhenExceptionsUnthrownInTests() {
+    compilationHelper
+        .addSourceLines(
+            "DeadExceptionTestingNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import junit.framework.TestCase;
+            import org.junit.Test;
+
+            /**
+             * @author alexeagle@google.com (Alex Eagle)
+             */
+            public class DeadExceptionTestingNegativeCases extends TestCase {
+
+              public void testShouldAllowTestingOfExceptionConstructorSideEffects() {
+                try {
+                  new IllegalArgumentException((Throwable) null);
+                  fail();
+                } catch (NullPointerException e) {
+                  // expected
+                }
+              }
+
+              @Test
+              public void shouldAllowTestingOfExceptionConstructorSideEffects() {
+                try {
+                  new IllegalArgumentException((Throwable) null);
+                  fail();
+                } catch (NullPointerException e) {
+                  // expected
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 }

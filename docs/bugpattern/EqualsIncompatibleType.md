@@ -10,9 +10,9 @@ if (x.equals(y)) {
 }
 ```
 
-We understand that any `Integer` will *not* be equal to any `String`. However,
-the signature of the `equals` method accepts any Object, so the compiler will
-happily allow us to pass an Integer to the equals method. However, it will
+We understand that no `Integer` will be equal to any `String`. However, the
+signature of the `equals` method accepts any Object, so the compiler will
+happily allow us to pass an Integer to the equals method. That method will
 always return false, which is probably not what we intended.
 
 This check detects circumstances where the equals method is called when the two
@@ -146,6 +146,6 @@ if (set.contains(hi)) {
 }
 ```
 
-[equalstester]: http://static.javadoc.io/com.google.guava/guava-testlib/19.0/com/google/common/testing/EqualsTester.html
-[objeq]: https://docs.oracle.com/javase/7/docs/api/java/lang/Object.html#equals(java.lang.Object)
-[av]: https://github.com/google/auto/blob/master/value/userguide/index.md
+[equalstester]: https://www.javadoc.io/doc/com.google.guava/guava-testlib/latest/com/google/common/testing/EqualsTester.html
+[objeq]: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Object.html#equals(java.lang.Object)
+[av]: https://github.com/google/auto/blob/main/value/userguide/index.md

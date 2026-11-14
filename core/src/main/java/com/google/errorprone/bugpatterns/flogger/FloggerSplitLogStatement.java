@@ -26,6 +26,7 @@ import static com.google.errorprone.matchers.Matchers.isSubtypeOf;
 import static com.google.errorprone.matchers.Matchers.methodReturns;
 import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.Matchers.variableType;
+import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -40,7 +41,6 @@ import com.sun.source.tree.VariableTree;
 
 /** Bugpattern to prevent splitting flogger log invocations into multiple statements. */
 @BugPattern(
-    name = "FloggerSplitLogStatement",
     summary = "Splitting log statements and using Api instances directly breaks logging.",
     linkType = CUSTOM,
     link = "https://google.github.io/flogger/best_practice#no-split",
@@ -61,7 +61,7 @@ public final class FloggerSplitLogStatement extends BugChecker
       allOf(methodReturns(IS_LOGGER_API), CLASS_MATCHES);
 
   private static final Matcher<VariableTree> VARIABLE_MATCHES =
-      allOf(variableType(IS_LOGGER_API), CLASS_MATCHES);
+      allOf(variableType(isDescendantOf("com.google.common.flogger.LoggingApi")), CLASS_MATCHES);
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {

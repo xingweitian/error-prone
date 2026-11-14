@@ -23,6 +23,7 @@ import static com.google.errorprone.matchers.InjectMatchers.IS_SCOPING_ANNOTATIO
 import static com.google.errorprone.matchers.Matchers.annotations;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
@@ -57,12 +58,12 @@ public class MoreThanOneScopeAnnotationOnClass extends BugChecker implements Cla
     MultiMatchResult<AnnotationTree> scopeAnnotationResult =
         SCOPE_ANNOTATION_MATCHER.multiMatchResult(classTree, state);
     if (scopeAnnotationResult.matches() && !IS_DAGGER_COMPONENT.matches(classTree, state)) {
-      List<AnnotationTree> scopeAnnotations = scopeAnnotationResult.matchingNodes();
+      ImmutableList<AnnotationTree> scopeAnnotations = scopeAnnotationResult.matchingNodes();
       if (scopeAnnotations.size() > 1) {
         return buildDescription(classTree)
             .setMessage(
                 "This class is annotated with more than one scope annotation: "
-                    + annotationDebugString(scopeAnnotations)
+                    + annotationDebugString(scopeAnnotations, state)
                     + ". However, classes can only have one scope annotation applied to them. "
                     + "Please remove all but one of them.")
             .build();
@@ -71,7 +72,8 @@ public class MoreThanOneScopeAnnotationOnClass extends BugChecker implements Cla
     return Description.NO_MATCH;
   }
 
-  private static String annotationDebugString(List<AnnotationTree> scopeAnnotations) {
-    return Joiner.on(", ").join(scopeAnnotations);
+  private static String annotationDebugString(
+      List<AnnotationTree> scopeAnnotations, VisitorState state) {
+    return Joiner.on(", ").join(scopeAnnotations.stream().map(state::getSourceForNode).iterator());
   }
 }

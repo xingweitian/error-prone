@@ -17,12 +17,13 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.expressionStatement;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
+import static com.google.errorprone.util.ASTHelpers.findEnclosingMethodPath;
 import static java.util.stream.Collectors.joining;
 
 import com.google.common.collect.ImmutableList;
@@ -63,13 +64,11 @@ import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "DoubleBraceInitialization",
     summary =
         "Prefer collection factory methods or builders to the double-brace initialization"
             + " pattern.",
-    severity = WARNING)
+    severity = ERROR)
 public class DoubleBraceInitialization extends BugChecker implements NewClassTreeMatcher {
-
   @SuppressWarnings("ImmutableEnumChecker") // Matcher is immutable in practice
   enum CollectionTypes {
     MAP("Map", "put", "ImmutableMap"),
@@ -118,14 +117,13 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
           .anyMatch(a -> a.getKind() == Kind.NULL_LITERAL)) {
         return Optional.empty();
       }
-      List<String> args =
+      ImmutableList<String> args =
           arguments.stream()
-              .map(
-                  arg ->
-                      arg.stream()
-                          .map(ASTHelpers::stripParentheses)
-                          .map(state::getSourceForNode)
-                          .collect(joining(", ", "\n", "")))
+              .map(arg ->
+                  arg.stream()
+                      .map(ASTHelpers::stripParentheses)
+                      .map(state::getSourceForNode)
+                      .collect(joining(", ", "\n", "")))
               .collect(toImmutableList());
 
       // check the enclosing context: calls to Collections.unmodifiable* are now redundant, and
@@ -146,8 +144,7 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
         if (enclosing instanceof ParenthesizedTree) {
           continue;
         }
-        if (enclosing instanceof VariableTree) {
-          VariableTree enclosingVariable = (VariableTree) enclosing;
+        if (enclosing instanceof VariableTree enclosingVariable) {
           toReplace = enclosingVariable.getInitializer();
           typeTree = enclosingVariable.getType();
           VarSymbol symbol = ASTHelpers.getSymbol(enclosingVariable);
@@ -156,9 +153,11 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
                   && symbol.getModifiers().contains(Modifier.FINAL)
                   && symbol.getKind() == ElementKind.FIELD;
         }
-        if (enclosing instanceof ReturnTree) {
-          toReplace = ((ReturnTree) enclosing).getExpression();
-          MethodTree enclosingMethod = ASTHelpers.findEnclosingNode(path, MethodTree.class);
+        if (enclosing instanceof ReturnTree returnTree) {
+          toReplace = returnTree.getExpression();
+          TreePath enclosingMethodPath = findEnclosingMethodPath(path);
+          MethodTree enclosingMethod =
+              enclosingMethodPath == null ? null : (MethodTree) enclosingMethodPath.getLeaf();
           typeTree = enclosingMethod == null ? null : enclosingMethod.getReturnType();
         }
         break;
@@ -168,18 +167,17 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
       String replacement;
       if (immutableType.equals("ImmutableMap") && args.size() > 5) {
         String typeArguments =
-            tree.getIdentifier() instanceof ParameterizedTypeTree
-                ? ((ParameterizedTypeTree) tree.getIdentifier())
-                    .getTypeArguments().stream()
-                        .map(state::getSourceForNode)
-                        .collect(joining(", ", "<", ">"))
+            tree.getIdentifier() instanceof ParameterizedTypeTree parameterizedTypeTree
+                ? parameterizedTypeTree.getTypeArguments().stream()
+                    .map(state::getSourceForNode)
+                    .collect(joining(", ", "<", ">"))
                 : "";
         replacement =
             "ImmutableMap."
                 + typeArguments
                 + "builder()"
                 + args.stream().map(a -> ".put(" + a + ")").collect(joining(""))
-                + ".build()";
+                + ".buildOrThrow()";
       } else {
         replacement = args.stream().collect(joining(", ", factoryMethod + "(", ")"));
       }
@@ -189,8 +187,8 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
       if (unmodifiable != null || constant) {
         // there's an enclosing unmodifiable* call, or we're in the initializer of a constant,
         // so rewrite the variable's type to be immutable and drop the unmodifiable* method
-        if (typeTree instanceof ParameterizedTypeTree) {
-          typeTree = ((ParameterizedTypeTree) typeTree).getType();
+        if (typeTree instanceof ParameterizedTypeTree parameterizedTypeTree) {
+          typeTree = parameterizedTypeTree.getType();
         }
         if (typeTree != null) {
           fix.replace(typeTree, immutableType);
@@ -216,23 +214,22 @@ public class DoubleBraceInitialization extends BugChecker implements NewClassTre
     }
     ImmutableList<? extends Tree> members =
         body.getMembers().stream()
-            .filter(
-                m ->
-                    !(m instanceof MethodTree && ASTHelpers.isGeneratedConstructor((MethodTree) m)))
+            .filter(m ->
+                !(m instanceof MethodTree methodTree
+                    && ASTHelpers.isGeneratedConstructor(methodTree)))
             .collect(toImmutableList());
     if (members.size() != 1) {
       return NO_MATCH;
     }
     Tree member = Iterables.getOnlyElement(members);
-    if (!(member instanceof BlockTree)) {
+    if (!(member instanceof BlockTree block)) {
       return NO_MATCH;
     }
-    BlockTree block = (BlockTree) member;
     Optional<CollectionTypes> collectionType =
         Arrays.stream(CollectionTypes.values())
             .filter(type -> type.constructorMatcher.matches(tree, state))
             .findFirst();
-    if (!collectionType.isPresent()) {
+    if (collectionType.isEmpty()) {
       return NO_MATCH;
     }
     Description.Builder description = buildDescription(tree);

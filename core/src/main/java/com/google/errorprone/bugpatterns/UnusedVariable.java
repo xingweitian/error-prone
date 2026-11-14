@@ -20,42 +20,64 @@ import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getLast;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.matchers.JUnitMatchers.JUNIT4_TEST_ANNOTATION;
 import static com.google.errorprone.matchers.Matchers.SERIALIZATION_METHODS;
+import static com.google.errorprone.matchers.Matchers.anyOf;
+import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
+import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.canBeRemoved;
+import static com.google.errorprone.util.ASTHelpers.constValue;
+import static com.google.errorprone.util.ASTHelpers.findSuperMethods;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
+import static com.google.errorprone.util.ASTHelpers.isAbstract;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
+import static com.google.errorprone.util.AnnotationNames.AFTER_TEMPLATE_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.BEFORE_TEMPLATE_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.CAN_IGNORE_RETURN_VALUE_ANNOTATION;
 import static com.google.errorprone.util.SideEffectAnalysis.hasSideEffect;
 import static com.sun.source.tree.Tree.Kind.POSTFIX_DECREMENT;
 import static com.sun.source.tree.Tree.Kind.POSTFIX_INCREMENT;
 import static com.sun.source.tree.Tree.Kind.PREFIX_DECREMENT;
 import static com.sun.source.tree.Tree.Kind.PREFIX_INCREMENT;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Ascii;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimaps;
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
+import com.google.common.collect.Streams;
+import com.google.common.collect.TreeRangeSet;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.suppliers.Suppliers;
+import com.google.errorprone.matchers.InjectMatchers;
+import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
-import com.sun.source.tree.AnnotationTree;
+import com.google.errorprone.util.SourceVersion;
 import com.sun.source.tree.ArrayAccessTree;
 import com.sun.source.tree.AssignmentTree;
+import com.sun.source.tree.BindingPatternTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.CompoundAssignmentTree;
@@ -67,6 +89,7 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ForLoopTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.IfTree;
+import com.sun.source.tree.InstanceOfTree;
 import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
@@ -75,7 +98,6 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ReturnTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.TryTree;
 import com.sun.source.tree.UnaryTree;
 import com.sun.source.tree.VariableTree;
@@ -85,13 +107,10 @@ import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCAssign;
-import com.sun.tools.javac.tree.JCTree.JCAssignOp;
 import com.sun.tools.javac.util.Position;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -99,70 +118,92 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import javax.annotation.Nullable;
+import java.util.stream.Stream;
+import javax.inject.Inject;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.Name;
 import javax.lang.model.type.NullType;
+import javax.tools.JavaFileObject;
+import org.jspecify.annotations.Nullable;
 
 /** Bugpattern to detect unused declarations. */
 @BugPattern(
-    name = "UnusedVariable",
     altNames = {"unused", "UnusedParameters"},
     summary = "Unused.",
     severity = WARNING,
     documentSuppression = false)
 public final class UnusedVariable extends BugChecker implements CompilationUnitTreeMatcher {
-  private static final String EXEMPT_PREFIX = "unused";
+  private final ImmutableSet<String> exemptPrefixes;
 
-  private static final ImmutableSet<String> EXEMPT_NAMES = ImmutableSet.of("ignored");
+  private final ImmutableSet<String> exemptNames;
 
-  /**
-   * The set of annotation full names which exempt annotated element from being reported as unused.
-   */
-  private static final ImmutableSet<String> EXEMPTING_VARIABLE_ANNOTATIONS =
-      ImmutableSet.of(
-          "javax.persistence.Basic",
-          "javax.persistence.Column",
-          "javax.persistence.Id",
-          "javax.persistence.Version",
-          "javax.xml.bind.annotation.XmlElement",
-          "org.junit.Rule",
-          "org.openqa.selenium.support.FindAll",
-          "org.openqa.selenium.support.FindBy",
-          "org.openqa.selenium.support.FindBys");
+  // TODO(ghm): Find a sensible place to dedupe this with UnnecessarilyVisible.
+  private static final ImmutableSet<ClassName> ANNOTATIONS_INDICATING_PARAMETERS_SHOULD_BE_CHECKED =
+      Streams.concat(
+              Streams.concat(
+                      InjectMatchers.INJECT_ANNOTATIONS.stream(),
+                      InjectMatchers.PROVIDES_ANNOTATIONS.stream(),
+                      InjectMatchers.MULTIBINDINGS_ANNOTATIONS.stream())
+                  .map(ClassName::of),
+              Stream.of(
+                  AFTER_TEMPLATE_ANNOTATION,
+                  BEFORE_TEMPLATE_ANNOTATION,
+                  // Parameters on test methods imply the test is parameterised, and those
+                  // parameters should be used or removed.
+                  JUNIT4_TEST_ANNOTATION))
+          .collect(toImmutableSet());
 
   private final ImmutableSet<String> methodAnnotationsExemptingParameters;
 
   /** The set of types exempting a type that is extending or implementing them. */
-  private static final ImmutableSet<String> EXEMPTING_SUPER_TYPES =
-      ImmutableSet.of(
-          );
+  private static final ImmutableSet<ClassName> EXEMPTING_SUPER_TYPES = ImmutableSet.of();
 
   /** The set of types exempting a field of type extending them. */
-  private static final ImmutableSet<String> EXEMPTING_FIELD_SUPER_TYPES =
-      ImmutableSet.of("org.junit.rules.TestRule");
+  private static final ImmutableSet<ClassName> EXEMPTING_FIELD_SUPER_TYPES =
+      ImmutableSet.of(ClassName.of("org.junit.rules.TestRule"));
 
-  private static final ImmutableList<String> SPECIAL_FIELDS =
-      ImmutableList.of(
+  private static final ImmutableSet<String> SPECIAL_FIELDS =
+      ImmutableSet.of(
           "serialVersionUID",
           // TAG fields are used by convention in Android apps.
           "TAG");
 
+  private static final ImmutableSet<ClassName> FUNCTIONAL_INTERFACE_TYPES_TO_CHECK =
+      ImmutableSet.of(ClassName.of("java.util.Comparator"));
+
   private final boolean reportInjectedFields;
 
-  public UnusedVariable(ErrorProneFlags flags) {
-    ImmutableSet.Builder<String> methodAnnotationsExemptingParameters =
+  private final WellKnownKeep wellKnownKeep;
+
+  @Inject
+  UnusedVariable(ErrorProneFlags flags, WellKnownKeep wellKnownKeep) {
+    this.methodAnnotationsExemptingParameters =
         ImmutableSet.<String>builder()
-            .add("org.robolectric.annotation.Implementation");
-    flags
-        .getList("Unused:methodAnnotationsExemptingParameters")
-        .ifPresent(methodAnnotationsExemptingParameters::addAll);
-    this.methodAnnotationsExemptingParameters = methodAnnotationsExemptingParameters.build();
+            .add("com.google.common.eventbus.Subscribe")
+            .add("org.robolectric.annotation.Implementation")
+            .addAll(flags.getListOrEmpty("Unused:methodAnnotationsExemptingParameters"))
+            .build();
     this.reportInjectedFields = flags.getBoolean("Unused:ReportInjectedFields").orElse(false);
+
+    this.exemptNames =
+        ImmutableSet.<String>builder()
+            .add("ignored")
+            .add("") // `var _ = ...` is handled as an empty variable name
+            .addAll(flags.getListOrEmpty("Unused:exemptNames"))
+            .build();
+
+    this.exemptPrefixes =
+        ImmutableSet.<String>builder()
+            .add("unused")
+            .addAll(flags.getSetOrEmpty("Unused:exemptPrefixes"))
+            .build();
+
+    this.wellKnownKeep = wellKnownKeep;
   }
 
   @Override
@@ -173,7 +214,10 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       return Description.NO_MATCH;
     }
 
-    VariableFinder variableFinder = new VariableFinder(state);
+    ImmutableMultimap<MethodSymbol, MethodSymbol> superMethodsToOverrides =
+        getSuperMethodsToOverrides(tree, state);
+
+    VariableFinder variableFinder = new VariableFinder(state, superMethodsToOverrides);
     variableFinder.scan(state.getPath(), null);
 
     // Map of symbols to variable declarations. Initially this is a map of all of the local variable
@@ -191,7 +235,8 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
     // appropriate fixes for them.
     ListMultimap<Symbol, TreePath> usageSites = variableFinder.usageSites;
 
-    FilterUsedVariables filterUsedVariables = new FilterUsedVariables(unusedElements, usageSites);
+    FilterUsedVariables filterUsedVariables =
+        new FilterUsedVariables(unusedElements, usageSites, state);
     filterUsedVariables.scan(state.getPath(), null);
 
     // Keeps track of whether a symbol was _ever_ used (between reassignments).
@@ -224,34 +269,74 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       }
       Tree unused = specs.iterator().next().assignmentPath().getLeaf();
       VarSymbol symbol = (VarSymbol) unusedSymbol;
-      ImmutableList<SuggestedFix> fixes;
+      ImmutableList.Builder<SuggestedFix> fixes = ImmutableList.builder();
       if (symbol.getKind() == ElementKind.PARAMETER
           && !onlyCheckForReassignments.contains(unusedSymbol)
           && !isEverUsed.contains(unusedSymbol)) {
-        fixes = buildUnusedParameterFixes(symbol, allUsageSites, state);
+        fixes.addAll(buildUnusedParameterFixes(symbol, allUsageSites, state));
       } else {
-        fixes = buildUnusedVarFixes(symbol, allUsageSites, state);
+        fixes.addAll(buildUnusedVarFixes(symbol, allUsageSites, state));
+      }
+      if (suggestUnderscore(state, isEverUsed, unusedSymbol, specs, allUsageSites)) {
+        fixes.add(SuggestedFixes.renameVariable((VariableTree) unused, "_", state));
+      }
+      String message;
+      if (!isEverUsed.contains(symbol)) {
+        message =
+            String.format("The %s '%s' is never read.", describeVariable(symbol), symbol.name);
+      } else if (unused instanceof VariableTree && symbol.getKind() == ElementKind.PARAMETER) {
+        message = String.format("The parameter '%s' is reassigned before being read.", symbol.name);
+      } else {
+        message =
+            String.format(
+                "This assignment to the %s '%s' is never read.",
+                describeVariable(symbol), symbol.name);
       }
       state.reportMatch(
           buildDescription(unused)
-              .setMessage(
-                  String.format(
-                      "%s %s '%s' is never read.",
-                      isEverUsed.contains(symbol) ? "This assignment to the" : "The",
-                      describeVariable(symbol),
-                      symbol.name))
+              .setMessage(message)
               .addAllFixes(
-                  fixes.stream()
-                      .map(
-                          f ->
-                              SuggestedFix.builder()
-                                  .merge(makeFirstAssignmentDeclaration)
-                                  .merge(f)
-                                  .build())
+                  fixes.build().stream()
+                      .map(f -> SuggestedFix.merge(makeFirstAssignmentDeclaration, f))
                       .collect(toImmutableList()))
               .build());
     }
     return Description.NO_MATCH;
+  }
+
+  private static boolean suggestUnderscore(
+      VisitorState state,
+      Set<Symbol> isEverUsed,
+      Symbol symbol,
+      Collection<UnusedSpec> specs,
+      ImmutableList<TreePath> allUsageSites) {
+    TreePath unusedPath = specs.iterator().next().assignmentPath();
+    Tree unused = unusedPath.getLeaf();
+    if (!(unused instanceof VariableTree variableTree)) {
+      return false;
+    }
+    if (isEverUsed.contains(symbol) || specs.size() != 1 || allUsageSites.size() > 1) {
+      return false;
+    }
+    if (!SourceVersion.supportsUnnamedVariablesAndPatterns(state.context)) {
+      return false;
+    }
+    if (!allowsUnderscore((VarSymbol) symbol, unusedPath)) {
+      return false;
+    }
+    if (symbol.getKind().equals(ElementKind.LOCAL_VARIABLE)
+        && variableTree.getInitializer() == null) {
+      return false;
+    }
+    return true;
+  }
+
+  private static boolean allowsUnderscore(VarSymbol symbol, TreePath path) {
+    return switch (symbol.getKind()) {
+      case LOCAL_VARIABLE -> true;
+      case PARAMETER -> path.getParentPath().getLeaf() instanceof LambdaExpressionTree;
+      default -> false;
+    };
   }
 
   private static SuggestedFix makeAssignmentDeclaration(
@@ -267,31 +352,34 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
             .filter(tp -> tp.getLeaf() instanceof VariableTree)
             .findFirst()
             .map(tp -> (VariableTree) tp.getLeaf());
+
+    // Find the first reassignment which wasn't only used by an ultimately unused assignment. If
+    // there is one, it should become a variable declaration.
     Optional<AssignmentTree> reassignment =
         specs.stream()
             .map(UnusedSpec::terminatingAssignment)
-            .filter(Optional::isPresent)
-            .map(Optional::get)
-            .filter(a -> allUsageSites.stream().noneMatch(tp -> tp.getLeaf().equals(a)))
+            .flatMap(Streams::stream)
+            .filter(a ->
+                allUsageSites.stream()
+                    .noneMatch(tp ->
+                        tp.getLeaf() instanceof ExpressionStatementTree expressionStatementTree
+                            && expressionStatementTree.getExpression().equals(a)))
             .findFirst();
-    if (!removedVariableTree.isPresent() || !reassignment.isPresent()) {
-      return SuggestedFix.emptyFix();
+    if (removedVariableTree.isPresent() && reassignment.isPresent()) {
+      return SuggestedFix.prefixWith( // not needed if top-level statement
+          reassignment.get(), state.getSourceForNode(removedVariableTree.get().getType()) + " ");
     }
-    return SuggestedFix.prefixWith(
-        reassignment.get(), state.getSourceForNode(removedVariableTree.get().getType()) + " ");
+    return SuggestedFix.emptyFix();
   }
 
   private static String describeVariable(VarSymbol symbol) {
-    switch (symbol.getKind()) {
-      case FIELD:
-        return "field";
-      case LOCAL_VARIABLE:
-        return "local variable";
-      case PARAMETER:
-        return "parameter";
-      default:
-        return "variable";
-    }
+    return switch (symbol.getKind()) {
+      case FIELD -> "field";
+      case LOCAL_VARIABLE -> "local variable";
+      case PARAMETER -> "parameter";
+      case BINDING_VARIABLE -> "binding variable";
+      default -> "variable";
+    };
   }
 
   private static boolean hasNativeMethods(CompilationUnitTree tree) {
@@ -306,6 +394,23 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       }
     }.scan(tree, null);
     return hasAnyNativeMethods.get();
+  }
+
+  private static ImmutableMultimap<MethodSymbol, MethodSymbol> getSuperMethodsToOverrides(
+      CompilationUnitTree tree, VisitorState state) {
+    ImmutableMultimap.Builder<MethodSymbol, MethodSymbol> overrides = ImmutableMultimap.builder();
+    JavaFileObject sourceFile = tree.getSourceFile();
+    new TreeScanner<Void, Void>() {
+      @Override
+      public Void visitMethod(MethodTree tree, Void unused) {
+        MethodSymbol sym = getSymbol(tree);
+        findSuperMethods(getSymbol(tree), state.getTypes()).stream()
+            .filter(m -> sourceFile.equals(m.enclClass().sourcefile))
+            .forEach(m -> overrides.put(m, sym));
+        return null;
+      }
+    }.scan(tree, null);
+    return overrides.build();
   }
 
   // https://docs.oracle.com/javase/specs/jls/se11/html/jls-14.html#jls-ExpressionStatement
@@ -360,29 +465,38 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
     }
     ElementKind varKind = varSymbol.getKind();
     boolean encounteredSideEffects = false;
-    SuggestedFix.Builder fix = SuggestedFix.builder().setShortDescription("remove unused variable");
+    boolean preferToKeepSideEffects = false;
+    SuggestedFix.Builder keepSideEffectsFix =
+        SuggestedFix.builder().setShortDescription("remove unused variable");
     SuggestedFix.Builder removeSideEffectsFix =
         SuggestedFix.builder().setShortDescription("remove unused variable and any side effects");
     for (TreePath usagePath : usagePaths) {
       StatementTree statement = (StatementTree) usagePath.getLeaf();
-      if (statement.getKind() == Kind.VARIABLE) {
+      if (statement instanceof VariableTree variableTree) {
         if (getSymbol(statement).getKind() == ElementKind.PARAMETER) {
           continue;
         }
-        VariableTree variableTree = (VariableTree) statement;
         ExpressionTree initializer = variableTree.getInitializer();
         if (hasSideEffect(initializer) && TOP_LEVEL_EXPRESSIONS.contains(initializer.getKind())) {
           encounteredSideEffects = true;
-          if (varKind == ElementKind.FIELD) {
-            String newContent =
-                String.format(
-                    "%s{ %s; }",
-                    varSymbol.isStatic() ? "static " : "", state.getSourceForNode(initializer));
-            fix.merge(SuggestedFixes.replaceIncludingComments(usagePath, newContent, state));
-            removeSideEffectsFix.replace(statement, "");
-          } else {
-            fix.replace(statement, String.format("%s;", state.getSourceForNode(initializer)));
-            removeSideEffectsFix.replace(statement, "");
+          if (isCallToCanIgnoreReturnValueMethod(initializer, state)) {
+            preferToKeepSideEffects = true;
+          }
+          switch (varKind) {
+            case FIELD -> {
+              String newContent =
+                  String.format(
+                      "%s{ %s; }",
+                      isStatic(varSymbol) ? "static " : "", state.getSourceForNode(initializer));
+              keepSideEffectsFix.merge(
+                  SuggestedFixes.replaceIncludingComments(usagePath, newContent, state));
+              removeSideEffectsFix.replace(statement, "");
+            }
+            default -> {
+              keepSideEffectsFix.replace(
+                  statement, String.format("%s;", state.getSourceForNode(initializer)));
+              removeSideEffectsFix.replace(statement, "");
+            }
           }
         } else if (isEnhancedForLoopVar(usagePath)) {
           String modifiers =
@@ -397,57 +511,85 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
                   state.getSourceForNode(variableTree.getType()));
           // The new content for the second fix should be identical to the content for the first
           // fix in this case because we can't just remove the enhanced for loop variable.
-          fix.replace(variableTree, newContent);
+          keepSideEffectsFix.replace(variableTree, newContent);
           removeSideEffectsFix.replace(variableTree, newContent);
+        } else if (varKind == ElementKind.BINDING_VARIABLE) {
+          removeSideEffectsFix.replace(
+              variableTree, state.getSourceForNode(variableTree.getType()));
+          keepSideEffectsFix.replace(variableTree, state.getSourceForNode(variableTree.getType()));
         } else {
           String replacement = needsBlock(usagePath) ? "{}" : "";
-          fix.merge(SuggestedFixes.replaceIncludingComments(usagePath, replacement, state));
+          keepSideEffectsFix.merge(
+              SuggestedFixes.replaceIncludingComments(usagePath, replacement, state));
           removeSideEffectsFix.merge(
               SuggestedFixes.replaceIncludingComments(usagePath, replacement, state));
         }
         continue;
-      } else if (statement.getKind() == Kind.EXPRESSION_STATEMENT) {
-        JCTree tree = (JCTree) ((ExpressionStatementTree) statement).getExpression();
+      } else if (statement instanceof ExpressionStatementTree expressionStatementTree) {
+        ExpressionTree tree = expressionStatementTree.getExpression();
 
-        if (tree instanceof CompoundAssignmentTree) {
-          if (hasSideEffect(((CompoundAssignmentTree) tree).getExpression())) {
+        if (tree instanceof CompoundAssignmentTree compoundAssignmentTree) {
+          if (hasSideEffect(compoundAssignmentTree.getExpression())) {
             // If it's a compound assignment, there's no reason we'd want to remove the expression,
             // so don't set `encounteredSideEffects` based on this usage.
             SuggestedFix replacement =
                 SuggestedFix.replace(
-                    tree.getStartPosition(),
-                    ((JCAssignOp) tree).getExpression().getStartPosition(),
+                    getStartPosition(tree),
+                    getStartPosition(compoundAssignmentTree.getExpression()),
                     "");
-            fix.merge(replacement);
+            keepSideEffectsFix.merge(replacement);
             removeSideEffectsFix.merge(replacement);
             continue;
           }
-        } else if (tree instanceof AssignmentTree) {
-          if (hasSideEffect(((AssignmentTree) tree).getExpression())) {
+        } else if (tree instanceof AssignmentTree assignmentTree) {
+          var expression = assignmentTree.getExpression();
+          if (hasSideEffect(expression)) {
             encounteredSideEffects = true;
-            fix.replace(
-                tree.getStartPosition(), ((JCAssign) tree).getExpression().getStartPosition(), "");
+            if (isCallToCanIgnoreReturnValueMethod(expression, state)) {
+              preferToKeepSideEffects = true;
+            }
+            keepSideEffectsFix.replace(getStartPosition(tree), getStartPosition(expression), "");
             removeSideEffectsFix.replace(statement, "");
             continue;
           }
         }
       }
       String replacement = needsBlock(usagePath) ? "{}" : "";
-      fix.replace(statement, replacement);
+      keepSideEffectsFix.replace(statement, replacement);
       removeSideEffectsFix.replace(statement, replacement);
     }
-    return encounteredSideEffects
-        ? ImmutableList.of(removeSideEffectsFix.build(), fix.build())
-        : ImmutableList.of(fix.build());
+    if (preferToKeepSideEffects) {
+      return ImmutableList.of(keepSideEffectsFix.build(), removeSideEffectsFix.build());
+    } else if (encounteredSideEffects) {
+      return ImmutableList.of(removeSideEffectsFix.build(), keepSideEffectsFix.build());
+    } else {
+      /*
+       * When there are no side effects, both fixes make the same edit, so we want to produce only
+       * one. We pick the one that doesn't warn about removing the (nonexistent) side effects.
+       */
+      return ImmutableList.of(keepSideEffectsFix.build());
+    }
+  }
+
+  private static boolean isCallToCanIgnoreReturnValueMethod(
+      ExpressionTree tree, VisitorState state) {
+    return getSymbol(tree) instanceof MethodSymbol method
+        && hasAnnotation(method, CAN_IGNORE_RETURN_VALUE_ANNOTATION, state);
   }
 
   private static ImmutableList<SuggestedFix> buildUnusedParameterFixes(
       Symbol varSymbol, List<TreePath> usagePaths, VisitorState state) {
-    MethodSymbol methodSymbol = (MethodSymbol) varSymbol.owner;
+    if (!(varSymbol.owner instanceof MethodSymbol methodSymbol)
+        || !methodSymbol.params().contains(varSymbol)
+        || !canBeRemoved(varSymbol.owner, state)) {
+      // We're presumably in a lambda. Don't try to generate a fix.
+      return ImmutableList.of();
+    }
     int index = methodSymbol.params.indexOf(varSymbol);
-    SuggestedFix.Builder fix = SuggestedFix.builder();
+    RangeSet<Integer> deletions = TreeRangeSet.create();
     for (TreePath path : usagePaths) {
-      fix.delete(path.getLeaf());
+      deletions.add(
+          Range.closed(getStartPosition(path.getLeaf()), state.getEndPosition(path.getLeaf())));
     }
     new TreePathScanner<Void, Void>() {
       @Override
@@ -473,11 +615,11 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
         }
         if (trees.size() == 1) {
           Tree tree = getOnlyElement(trees);
-          if (getStartPosition(tree) == -1 || state.getEndPosition(tree) == -1) {
+          if (!hasExplicitSource(tree, state)) {
             // TODO(b/118437729): handle bogus source positions in enum declarations
             return;
           }
-          fix.delete(tree);
+          deletions.add(Range.closed(getStartPosition(tree), state.getEndPosition(tree)));
           return;
         }
         int startPos;
@@ -496,45 +638,29 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
           // TODO(b/118437729): handle bogus source positions in enum declarations
           return;
         }
-        fix.replace(startPos, endPos, "");
+        deletions.add(Range.closed(startPos, endPos));
       }
     }.scan(state.getPath().getCompilationUnit(), null);
+    SuggestedFix.Builder fix = SuggestedFix.builder();
+    deletions.asRanges().forEach(x -> fix.replace(x.lowerEndpoint(), x.upperEndpoint(), ""));
     return ImmutableList.of(fix.build());
   }
 
   private static boolean isEnhancedForLoopVar(TreePath variablePath) {
     Tree tree = variablePath.getLeaf();
     Tree parent = variablePath.getParentPath().getLeaf();
-    return parent instanceof EnhancedForLoopTree
-        && ((EnhancedForLoopTree) parent).getVariable() == tree;
+    return parent instanceof EnhancedForLoopTree enhancedForLoopTree
+        && enhancedForLoopTree.getVariable() == tree;
   }
 
-  /**
-   * Looks at the list of {@code annotations} and see if there is any annotation which exists {@code
-   * exemptingAnnotations}.
-   */
-  private static boolean exemptedByAnnotation(
-      List<? extends AnnotationTree> annotations, VisitorState state) {
-    for (AnnotationTree annotation : annotations) {
-      Type annotationType = ASTHelpers.getType(annotation);
-      if (annotationType == null) {
-        continue;
-      }
-      TypeSymbol tsym = annotationType.tsym;
-      if (EXEMPTING_VARIABLE_ANNOTATIONS.contains(tsym.getQualifiedName().toString())) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static boolean exemptedByName(Name name) {
+  private boolean exemptedByName(Name name) {
     String nameString = name.toString();
-    return Ascii.toLowerCase(nameString).startsWith(EXEMPT_PREFIX)
-        || EXEMPT_NAMES.contains(nameString);
+    String nameStringLower = Ascii.toLowerCase(nameString);
+    return exemptPrefixes.stream().anyMatch(nameStringLower::startsWith)
+        || exemptNames.contains(nameString);
   }
 
-  private class VariableFinder extends TreePathScanner<Void, Void> {
+  private final class VariableFinder extends TreePathScanner<Void, Void> {
     private final Map<Symbol, TreePath> unusedElements = new HashMap<>();
 
     private final Set<Symbol> onlyCheckForReassignments = new HashSet<>();
@@ -542,63 +668,111 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
     private final ListMultimap<Symbol, TreePath> usageSites = ArrayListMultimap.create();
 
     private final VisitorState state;
+    private final ImmutableMultimap<MethodSymbol, MethodSymbol> superMethodsToOverrides;
 
-    private VariableFinder(VisitorState state) {
+    private VariableFinder(
+        VisitorState state, ImmutableMultimap<MethodSymbol, MethodSymbol> superMethodsToOverrides) {
       this.state = state;
+      this.superMethodsToOverrides = superMethodsToOverrides;
     }
 
     @Override
     public Void visitVariable(VariableTree variableTree, Void unused) {
+      handleVariable(variableTree);
+      return super.visitVariable(variableTree, null);
+    }
+
+    private void handleVariable(VariableTree variableTree) {
       if (exemptedByName(variableTree.getName())) {
-        return null;
+        return;
       }
-      if (isSuppressed(variableTree)) {
-        return null;
+      if (isSuppressed(variableTree, state)) {
+        return;
       }
       VarSymbol symbol = getSymbol(variableTree);
-      if (symbol == null) {
-        return null;
+      var parent = getCurrentPath().getParentPath().getLeaf();
+      if (parent instanceof LambdaExpressionTree) {
+        if (FUNCTIONAL_INTERFACE_TYPES_TO_CHECK.stream()
+            .anyMatch(t -> isSubtype(getType(parent), t, state))) {
+          unusedElements.put(symbol, getCurrentPath());
+          usageSites.put(symbol, getCurrentPath());
+        }
+        return;
+      }
+      if (symbol.getKind() == ElementKind.FIELD
+          && symbol.getSimpleName().contentEquals("CREATOR")
+          && isSubtype(symbol.type, PARCELABLE_CREATOR, state)) {
+        return;
       }
       if (symbol.getKind() == ElementKind.FIELD
           && exemptedFieldBySuperType(getType(variableTree), state)) {
-        return null;
+        return;
       }
-      super.visitVariable(variableTree, null);
       // Return if the element is exempted by an annotation.
-      if (exemptedByAnnotation(variableTree.getModifiers().getAnnotations(), state)) {
-        return null;
+      if (wellKnownKeep.shouldKeep(variableTree)) {
+        return;
       }
       switch (symbol.getKind()) {
-        case FIELD:
+        case FIELD -> {
           // We are only interested in private fields and those which are not special.
           if (isFieldEligibleForChecking(variableTree, symbol)) {
             unusedElements.put(symbol, getCurrentPath());
             usageSites.put(symbol, getCurrentPath());
           }
-          break;
-        case LOCAL_VARIABLE:
+        }
+        case LOCAL_VARIABLE -> {
+          if (isInsideRefasterTemplate(getCurrentPath())) {
+            return;
+          }
           unusedElements.put(symbol, getCurrentPath());
           usageSites.put(symbol, getCurrentPath());
-          break;
-        case PARAMETER:
+        }
+        case BINDING_VARIABLE -> {
+          if (isInsideRefasterTemplate(getCurrentPath())) {
+            return;
+          }
+          if (parent instanceof BindingPatternTree
+              && getCurrentPath().getParentPath().getParentPath().getLeaf()
+                  instanceof InstanceOfTree) {
+            unusedElements.put(symbol, getCurrentPath());
+            usageSites.put(symbol, getCurrentPath());
+          }
+        }
+        case PARAMETER -> {
           // ignore the receiver parameter
           if (variableTree.getName().contentEquals("this")) {
-            return null;
+            return;
+          }
+          // Ignore if parameter is part of canonical record constructor; tree does not seem
+          // to contain usage in that case, but parameter is always used implicitly
+          // For compact canonical constructor parameters don't have record flag so need to
+          // check constructor flags (`symbol.owner`) instead
+          if (hasRecordFlag(symbol.owner)) {
+            return;
           }
           unusedElements.put(symbol, getCurrentPath());
           if (!isParameterSubjectToAnalysis(symbol)) {
             onlyCheckForReassignments.add(symbol);
           }
-          break;
-        default:
-          break;
+        }
+        default -> {}
       }
-      return null;
+    }
+
+    private boolean isInsideRefasterTemplate(TreePath path) {
+      for (Tree node : path) {
+        if (node instanceof MethodTree methodTree) {
+          if (hasAnnotation(methodTree, BEFORE_TEMPLATE_ANNOTATION, state)
+              || hasAnnotation(methodTree, AFTER_TEMPLATE_ANNOTATION, state)) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
 
     private boolean exemptedFieldBySuperType(Type type, VisitorState state) {
-      return EXEMPTING_FIELD_SUPER_TYPES.stream()
-          .anyMatch(t -> isSubtype(type, state.getTypeFromString(t), state));
+      return EXEMPTING_FIELD_SUPER_TYPES.stream().anyMatch(t -> isSubtype(type, t, state));
     }
 
     private boolean isFieldEligibleForChecking(VariableTree variableTree, VarSymbol symbol) {
@@ -607,8 +781,16 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
           && ASTHelpers.hasDirectAnnotationWithSimpleName(variableTree, "Inject")) {
         return true;
       }
-      return variableTree.getModifiers().getFlags().contains(Modifier.PRIVATE)
-          && !SPECIAL_FIELDS.contains(symbol.getSimpleName().toString());
+      if (hasRecordFlag(symbol)) {
+        return false;
+      }
+      return canBeRemoved(symbol) && !SPECIAL_FIELDS.contains(symbol.getSimpleName().toString());
+    }
+
+    private static final long RECORD_FLAG = 1L << 61;
+
+    private boolean hasRecordFlag(Symbol symbol) {
+      return (symbol.flags() & RECORD_FLAG) == RECORD_FLAG;
     }
 
     /** Returns whether {@code sym} can be removed without updating call sites in other files. */
@@ -616,13 +798,43 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       checkArgument(sym.getKind() == ElementKind.PARAMETER);
       Symbol enclosingMethod = sym.owner;
 
-      for (String annotationName : methodAnnotationsExemptingParameters) {
-        if (ASTHelpers.hasAnnotation(enclosingMethod, annotationName, state)) {
-          return false;
-        }
+      if (!(enclosingMethod instanceof MethodSymbol methodSymbol)
+          || isAbstract(methodSymbol)
+          || superMethodsToOverrides.containsKey(enclosingMethod)) {
+        return false;
       }
 
-      return enclosingMethod.getModifiers().contains(Modifier.PRIVATE);
+      if (methodAnnotationsExemptingParameters.stream()
+          .anyMatch(anno -> hasAnnotation(enclosingMethod, anno, state))) {
+        return false;
+      }
+
+      if (ANNOTATIONS_INDICATING_PARAMETERS_SHOULD_BE_CHECKED.stream()
+          .anyMatch(a -> hasAnnotation(enclosingMethod, a, state))) {
+        return true;
+      }
+
+      if (enclosingMethod.owner instanceof ClassSymbol
+          && !isAbstract(methodSymbol)
+          && FUNCTIONAL_INTERFACE_TYPES_TO_CHECK.stream()
+              .map(t -> t.type(state))
+              .filter(Objects::nonNull)
+              .anyMatch(t ->
+                  isSubtype(enclosingMethod.owner.type, t, state)
+                      && isFunctionalInterfaceMethod(t, enclosingMethod, state))) {
+        return true;
+      }
+
+      return canBeRemoved(enclosingMethod, state);
+    }
+
+    private boolean isFunctionalInterfaceMethod(
+        Type functionalInterfaceType, Symbol method, VisitorState state) {
+      var functionalInterfaceMethod =
+          state.getTypes().findDescriptorSymbol(functionalInterfaceType.asElement());
+      return method.getSimpleName().contentEquals(functionalInterfaceMethod.getSimpleName())
+          && method.overrides(
+              functionalInterfaceMethod, method.owner.type.tsym, state.getTypes(), true);
     }
 
     @Override
@@ -636,20 +848,13 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
 
     @Override
     public Void visitClass(ClassTree tree, Void unused) {
-      if (isSuppressed(tree)) {
+      if (isSuppressed(tree, state)) {
         return null;
       }
-      if (EXEMPTING_SUPER_TYPES.stream()
-          .anyMatch(t -> isSubtype(getType(tree), Suppliers.typeFromString(t).get(state), state))) {
+      if (EXEMPTING_SUPER_TYPES.stream().anyMatch(t -> isSubtype(getType(tree), t, state))) {
         return null;
       }
       return super.visitClass(tree, null);
-    }
-
-    @Override
-    public Void visitLambdaExpression(LambdaExpressionTree node, Void unused) {
-      // skip lambda parameters
-      return scan(node.getBody(), null);
     }
 
     @Override
@@ -657,7 +862,7 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       if (SERIALIZATION_METHODS.matches(tree, state)) {
         return scan(tree.getBody(), null);
       }
-      return isSuppressed(tree) ? null : super.visitMethod(tree, unused);
+      return isSuppressed(tree, state) ? null : super.visitMethod(tree, null);
     }
   }
 
@@ -687,16 +892,44 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
 
     private final ImmutableMap<Symbol, TreePath> declarationSites;
 
+    private final VisitorState state;
+
+    /**
+     * Methods which look up a field by name (via a class literal and a string constant) and return
+     * a handle through which it is subsequently read and written. A field whose only accesses go
+     * through such a handle has no direct references in source, but is nonetheless used.
+     */
+    private static final Matcher<ExpressionTree> REFLECTIVE_FIELD_LOOKUP =
+        anyOf(
+            instanceMethod()
+                .onDescendantOf("java.lang.invoke.MethodHandles.Lookup")
+                .namedAnyOf(
+                    "findVarHandle",
+                    "findStaticVarHandle",
+                    "findGetter",
+                    "findSetter",
+                    "findStaticGetter",
+                    "findStaticSetter"),
+            staticMethod()
+                .onClassAny(
+                    "java.util.concurrent.atomic.AtomicIntegerFieldUpdater",
+                    "java.util.concurrent.atomic.AtomicLongFieldUpdater",
+                    "java.util.concurrent.atomic.AtomicReferenceFieldUpdater")
+                .named("newUpdater"));
+
     private FilterUsedVariables(
-        Map<Symbol, TreePath> unusedElements, ListMultimap<Symbol, TreePath> usageSites) {
+        Map<Symbol, TreePath> unusedElements,
+        ListMultimap<Symbol, TreePath> usageSites,
+        VisitorState state) {
       this.unusedElements = unusedElements;
       this.usageSites = usageSites;
       this.declarationSites = ImmutableMap.copyOf(unusedElements);
+      this.state = state;
     }
 
     private boolean isInExpressionStatementTree() {
       Tree parent = getCurrentPath().getParentPath().getLeaf();
-      return parent != null && parent.getKind() == Kind.EXPRESSION_STATEMENT;
+      return parent instanceof ExpressionStatementTree;
     }
 
     private boolean isUsed(@Nullable Symbol symbol) {
@@ -778,7 +1011,7 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       if (!(parent instanceof StatementTree)) {
         return;
       }
-      if (tree.getVariable().getKind() != Kind.IDENTIFIER) {
+      if (!(tree.getVariable() instanceof IdentifierTree)) {
         return;
       }
       if (ASTHelpers.findEnclosingNode(getCurrentPath(), ForLoopTree.class) != null) {
@@ -823,8 +1056,8 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       if (assignmentSite.getParentPath().getLeaf() instanceof EnhancedForLoopTree) {
         return Iterables.size(assignmentSite) + 1;
       }
-      if (assignmentSite.getLeaf() instanceof VariableTree) {
-        VarSymbol symbol = getSymbol((VariableTree) assignmentSite.getLeaf());
+      if (assignmentSite.getLeaf() instanceof VariableTree variableTree) {
+        VarSymbol symbol = getSymbol(variableTree);
         if (symbol.getKind() == ElementKind.PARAMETER) {
           return Iterables.size(assignmentSite) + 1;
         }
@@ -853,9 +1086,7 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
     public Void visitMemberReference(MemberReferenceTree tree, Void unused) {
       super.visitMemberReference(tree, null);
       MethodSymbol symbol = getSymbol(tree);
-      if (symbol != null) {
-        symbol.getParameters().forEach(unusedElements::remove);
-      }
+      symbol.getParameters().forEach(unusedElements::remove);
       return null;
     }
 
@@ -926,40 +1157,71 @@ public final class UnusedVariable extends BugChecker implements CompilationUnitT
       inMethodCall++;
       super.visitMethodInvocation(tree, null);
       inMethodCall--;
+      if (REFLECTIVE_FIELD_LOOKUP.matches(tree, state)) {
+        markReflectivelyLookedUpFieldAsUsed(tree);
+      }
       return null;
+    }
+
+    /**
+     * Given an invocation like {@code lookup.findVarHandle(Foo.class, "bar", int.class)} or {@code
+     * AtomicIntegerFieldUpdater.newUpdater(Foo.class, "bar")}, finds the field {@code Foo.bar} and
+     * treats it as used, since all subsequent reads and writes happen through the returned handle.
+     */
+    private void markReflectivelyLookedUpFieldAsUsed(MethodInvocationTree tree) {
+      List<? extends ExpressionTree> arguments = tree.getArguments();
+      if (arguments.isEmpty()
+          || !(arguments.get(0) instanceof MemberSelectTree memberSelect)
+          || !memberSelect.getIdentifier().contentEquals("class")
+          || !(getSymbol(memberSelect.getExpression()) instanceof ClassSymbol owner)) {
+        return;
+      }
+      String fieldName = null;
+      for (ExpressionTree argument : arguments.subList(1, arguments.size())) {
+        fieldName = constValue(argument, String.class);
+        if (fieldName != null) {
+          break;
+        }
+      }
+      if (fieldName == null) {
+        return;
+      }
+      String finalFieldName = fieldName;
+      unusedElements
+          .keySet()
+          .removeIf(symbol ->
+              symbol.getKind() == ElementKind.FIELD
+                  && symbol.owner.equals(owner)
+                  && symbol.getSimpleName().contentEquals(finalFieldName));
     }
   }
 
-  @AutoValue
-  abstract static class UnusedSpec {
-    /** {@link Symbol} of the unsued element. */
-    abstract Symbol symbol();
-
-    /** {@link VariableTree} or {@link AssignmentTree} for the original assignment site. */
-    abstract TreePath assignmentPath();
-
-    /**
-     * All the usage sites of this variable that we claim are unused (including the initial
-     * declaration/assignment).
-     */
-    abstract ImmutableList<TreePath> usageSites();
-
-    /**
-     * If this usage chain was terminated by an unconditional reassignment, the corresponding {@link
-     * AssignmentTree}.
-     */
-    abstract Optional<AssignmentTree> terminatingAssignment();
-
+  /**
+   * @param symbol {@link Symbol} of the unused element.
+   * @param assignmentPath {@link VariableTree} or {@link AssignmentTree} for the original
+   *     assignment site.
+   * @param usageSites All the usage sites of this variable that we claim are unused (including the
+   *     initial declaration/assignment).
+   * @param terminatingAssignment If this usage chain was terminated by an unconditional
+   *     reassignment, the corresponding {@link AssignmentTree}.
+   */
+  private record UnusedSpec(
+      Symbol symbol,
+      TreePath assignmentPath,
+      ImmutableList<TreePath> usageSites,
+      Optional<AssignmentTree> terminatingAssignment) {
     private static UnusedSpec of(
         Symbol symbol,
         TreePath assignmentPath,
         Iterable<TreePath> treePaths,
         @Nullable AssignmentTree assignmentTree) {
-      return new AutoValue_UnusedVariable_UnusedSpec(
+      return new UnusedSpec(
           symbol,
           assignmentPath,
           ImmutableList.copyOf(treePaths),
           Optional.ofNullable(assignmentTree));
     }
   }
+
+  private static final ClassName PARCELABLE_CREATOR = ClassName.of("android.os.Parcelable.Creator");
 }

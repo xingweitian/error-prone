@@ -28,29 +28,41 @@ public class MissingSuperCallTest {
       CompilationTestHelper.newInstance(MissingSuperCall.class, getClass())
           .addSourceLines(
               "android/support/annotation/CallSuper.java",
-              "package android.support.annotation;",
-              "import static java.lang.annotation.ElementType.METHOD;",
-              "import java.lang.annotation.Target;",
-              "@Target({METHOD})",
-              "public @interface CallSuper {}");
+              """
+              package android.support.annotation;
+
+              import static java.lang.annotation.ElementType.METHOD;
+
+              import java.lang.annotation.Target;
+
+              @Target({METHOD})
+              public @interface CallSuper {}
+              """);
 
   @Test
   public void android() {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -59,22 +71,32 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "androidx/annotation/CallSuper.java",
-            "package androidx.annotation;",
-            "public @interface CallSuper {}")
+            """
+            package androidx.annotation;
+
+            public @interface CallSuper {}
+            """)
         .addSourceLines(
             "Super.java",
-            "import androidx.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "}")
+            """
+            import androidx.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -83,18 +105,25 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public class Super {",
-            "  @OverridingMethodsMustInvokeSuper public void doIt() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public class Super {
+              @OverridingMethodsMustInvokeSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with",
-            "  // @OverridingMethodsMustInvokeSuper, but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with
+              // @OverridingMethodsMustInvokeSuper, but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -103,18 +132,25 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import com.google.errorprone.annotations.OverridingMethodsMustInvokeSuper;",
-            "public class Super {",
-            "  @OverridingMethodsMustInvokeSuper public void doIt() {}",
-            "}")
+            """
+            import com.google.errorprone.annotations.OverridingMethodsMustInvokeSuper;
+
+            public class Super {
+              @OverridingMethodsMustInvokeSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with",
-            "  // @OverridingMethodsMustInvokeSuper, but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with
+              // @OverridingMethodsMustInvokeSuper, but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -123,22 +159,32 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "edu/umd/cs/findbugs/annotations/OverrideMustInvoke.java",
-            "package edu.umd.cs.findbugs.annotations;",
-            "public @interface OverrideMustInvoke {}")
+            """
+            package edu.umd.cs.findbugs.annotations;
+
+            public @interface OverrideMustInvoke {}
+            """)
         .addSourceLines(
             "Super.java",
-            "import edu.umd.cs.findbugs.annotations.OverrideMustInvoke;",
-            "public class Super {",
-            "  @OverrideMustInvoke public void doIt() {}",
-            "}")
+            """
+            import edu.umd.cs.findbugs.annotations.OverrideMustInvoke;
+
+            public class Super {
+              @OverrideMustInvoke
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @OverrideMustInvoke,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @OverrideMustInvoke,
+              // but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -147,17 +193,24 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  @Override public void doIt() {",
-            "    super.doIt();",
-            "  }",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              public void doIt() {
+                super.doIt();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -166,20 +219,28 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public Object doIt() {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public Object doIt() {
+                return null;
+              }
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "import java.util.Objects;",
-            "public class Sub extends Super {",
-            "  @Override public Object doIt() {",
-            "    return Objects.requireNonNull(super.doIt());",
-            "  }",
-            "}")
+            """
+            import java.util.Objects;
+
+            public class Sub extends Super {
+              @Override
+              public Object doIt() {
+                return Objects.requireNonNull(super.doIt());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -188,18 +249,24 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public interface Super {",
-            "  @CallSuper default void doIt() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public interface Super {
+              @CallSuper
+              default void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "import java.util.Objects;",
-            "public class Sub implements Super {",
-            "  @Override public void doIt() {",
-            "    Super.super.doIt();",
-            "  }",
-            "}")
+            """
+            public class Sub implements Super {
+              @Override
+              public void doIt() {
+                Super.super.doIt();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -208,23 +275,34 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "a/b/c/SuperSuper.java",
-            "package a.b.c;",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public class SuperSuper {",
-            "  @OverridingMethodsMustInvokeSuper public void doIt() {}",
-            "}")
+            """
+            package a.b.c;
+
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public class SuperSuper {
+              @OverridingMethodsMustInvokeSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
-            "Super.java", //
-            "import a.b.c.SuperSuper;",
-            "public class Super extends SuperSuper {}")
+            "Super.java",
+            """
+            import a.b.c.SuperSuper;
+
+            public class Super extends SuperSuper {}
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides a.b.c.SuperSuper#doIt, which is annotated with",
-            "  // @OverridingMethodsMustInvokeSuper, but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides a.b.c.SuperSuper#doIt, which is annotated with
+              // @OverridingMethodsMustInvokeSuper, but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -233,12 +311,18 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "AbstractClass.java",
-            "import android.support.annotation.CallSuper;",
-            "public abstract class AbstractClass {",
-            "  // BUG: Diagnostic contains: @CallSuper cannot be applied to an abstract method",
-            "  @CallSuper public abstract void bad();",
-            "  @CallSuper public void ok() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public abstract class AbstractClass {
+              // BUG: Diagnostic contains: @CallSuper cannot be applied to an abstract method
+              @CallSuper
+              public abstract void bad();
+
+              @CallSuper
+              public void ok() {}
+            }
+            """)
         .doTest();
   }
 
@@ -247,13 +331,19 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "AbstractClass.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public abstract class AbstractClass {",
-            "  // BUG: Diagnostic contains:",
-            "  // @OverridingMethodsMustInvokeSuper cannot be applied to an abstract method",
-            "  @OverridingMethodsMustInvokeSuper public abstract void bad();",
-            "  @OverridingMethodsMustInvokeSuper public void ok() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public abstract class AbstractClass {
+              // BUG: Diagnostic contains:
+              // @OverridingMethodsMustInvokeSuper cannot be applied to an abstract method
+              @OverridingMethodsMustInvokeSuper
+              public abstract void bad();
+
+              @OverridingMethodsMustInvokeSuper
+              public void ok() {}
+            }
+            """)
         .doTest();
   }
 
@@ -262,17 +352,26 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "edu/umd/cs/findbugs/annotations/OverrideMustInvoke.java",
-            "package edu.umd.cs.findbugs.annotations;",
-            "public @interface OverrideMustInvoke {}")
+            """
+            package edu.umd.cs.findbugs.annotations;
+
+            public @interface OverrideMustInvoke {}
+            """)
         .addSourceLines(
             "AbstractClass.java",
-            "import edu.umd.cs.findbugs.annotations.OverrideMustInvoke;",
-            "public abstract class AbstractClass {",
-            "  // BUG: Diagnostic contains:",
-            "  // @OverrideMustInvoke cannot be applied to an abstract method",
-            "  @OverrideMustInvoke public abstract void bad();",
-            "  @OverrideMustInvoke public void ok() {}",
-            "}")
+            """
+            import edu.umd.cs.findbugs.annotations.OverrideMustInvoke;
+
+            public abstract class AbstractClass {
+              // BUG: Diagnostic contains:
+              // @OverrideMustInvoke cannot be applied to an abstract method
+              @OverrideMustInvoke
+              public abstract void bad();
+
+              @OverrideMustInvoke
+              public void ok() {}
+            }
+            """)
         .doTest();
   }
 
@@ -281,13 +380,19 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "MyInterface.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "interface MyInterface {",
-            "  // BUG: Diagnostic contains:",
-            "  // @OverridingMethodsMustInvokeSuper cannot be applied to an abstract method",
-            "  @OverridingMethodsMustInvokeSuper void bad();",
-            "  @OverridingMethodsMustInvokeSuper default void ok() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            interface MyInterface {
+              // BUG: Diagnostic contains:
+              // @OverridingMethodsMustInvokeSuper cannot be applied to an abstract method
+              @OverridingMethodsMustInvokeSuper
+              void bad();
+
+              @OverridingMethodsMustInvokeSuper
+              default void ok() {}
+            }
+            """)
         .doTest();
   }
 
@@ -296,18 +401,25 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "MyInterface.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "interface MyInterface {",
-            "  @OverridingMethodsMustInvokeSuper default void doIt() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            interface MyInterface {
+              @OverridingMethodsMustInvokeSuper
+              default void doIt() {}
+            }
+            """)
         .addSourceLines(
             "MyImplementation.java",
-            "public class MyImplementation implements MyInterface {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides MyInterface#doIt, which is annotated with",
-            "  // @OverridingMethodsMustInvokeSuper, but does not call the super method",
-            "  @Override public void doIt() {}",
-            "}")
+            """
+            public class MyImplementation implements MyInterface {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides MyInterface#doIt, which is annotated with
+              // @OverridingMethodsMustInvokeSuper, but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -316,21 +428,28 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public class Super {",
-            "  @OverridingMethodsMustInvokeSuper public void doIt() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public class Super {
+              @OverridingMethodsMustInvokeSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public class Sub extends Super {",
-            "  @OverridingMethodsMustInvokeSuper",
-            "  @Override",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with",
-            "  // @OverridingMethodsMustInvokeSuper, but does not call the super method",
-            "  public void doIt() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public class Sub extends Super {
+              @OverridingMethodsMustInvokeSuper
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with
+              // @OverridingMethodsMustInvokeSuper, but does not call the super method
+              public void doIt() {}
+            }
+            """)
         .doTest();
   }
 
@@ -339,15 +458,22 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import javax.annotation.OverridingMethodsMustInvokeSuper;",
-            "public class Super {",
-            "  @OverridingMethodsMustInvokeSuper public void doIt() {}",
-            "}")
+            """
+            import javax.annotation.OverridingMethodsMustInvokeSuper;
+
+            public class Super {
+              @OverridingMethodsMustInvokeSuper
+              public void doIt() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public abstract class Sub extends Super {",
-            "  @Override public abstract void doIt();",
-            "}")
+            """
+            public abstract class Sub extends Super {
+              @Override
+              public abstract void doIt();
+            }
+            """)
         .doTest();
   }
 
@@ -356,21 +482,29 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "  public void wrongToCall() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+
+              public void wrongToCall() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {",
-            "    super.wrongToCall();",
-            "  }",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {
+                super.wrongToCall();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -379,25 +513,34 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "  public void wrongToCall() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+
+              public void wrongToCall() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {",
-            "    new Super() {",
-            "      @Override public void doIt() {",
-            "        super.doIt();",
-            "      }",
-            "    };",
-            "  }",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {
+                new Super() {
+                  @Override
+                  public void doIt() {
+                    super.doIt();
+                  }
+                };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -406,21 +549,29 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "  public void wrongToCall() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+
+              public void wrongToCall() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {",
-            "    Runnable r = () -> super.doIt();",
-            "  }",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {
+                Runnable r = () -> super.doIt();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -429,21 +580,29 @@ public class MissingSuperCallTest {
     compilationHelper
         .addSourceLines(
             "Super.java",
-            "import android.support.annotation.CallSuper;",
-            "public class Super {",
-            "  @CallSuper public void doIt() {}",
-            "  public void wrongToCall() {}",
-            "}")
+            """
+            import android.support.annotation.CallSuper;
+
+            public class Super {
+              @CallSuper
+              public void doIt() {}
+
+              public void wrongToCall() {}
+            }
+            """)
         .addSourceLines(
             "Sub.java",
-            "public class Sub extends Super {",
-            "  // BUG: Diagnostic contains:",
-            "  // This method overrides Super#doIt, which is annotated with @CallSuper,",
-            "  // but does not call the super method",
-            "  @Override public void doIt() {",
-            "    Runnable r = super::doIt;",
-            "  }",
-            "}")
+            """
+            public class Sub extends Super {
+              @Override
+              // BUG: Diagnostic contains:
+              // This method overrides Super#doIt, which is annotated with @CallSuper,
+              // but does not call the super method
+              public void doIt() {
+                Runnable r = super::doIt;
+              }
+            }
+            """)
         .doTest();
   }
 }

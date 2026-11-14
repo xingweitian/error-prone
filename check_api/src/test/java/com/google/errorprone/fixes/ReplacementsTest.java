@@ -61,32 +61,29 @@ public class ReplacementsTest {
   }
 
   private static final Function<Replacement, Range<Integer>> AS_RANGES =
-      new Function<Replacement, Range<Integer>>() {
-        @Override
-        public Range<Integer> apply(Replacement replacement) {
-          return replacement.range();
-        }
+      (Replacement replacement) -> {
+        return replacement.range();
       };
 
   @Test
-  public void descending() {
+  public void ascending() {
     assertThat(
             Iterables.transform(
                 new Replacements()
                     .add(Replacement.create(0, 0, "hello"))
                     .add(Replacement.create(0, 1, "hello"))
-                    .descending(),
+                    .ascending(),
                 AS_RANGES))
-        .containsExactly(Range.closedOpen(0, 1), Range.closedOpen(0, 0))
+        .containsExactly(Range.closedOpen(0, 0), Range.closedOpen(0, 1))
         .inOrder();
     assertThat(
             Iterables.transform(
                 new Replacements()
                     .add(Replacement.create(0, 1, "hello"))
                     .add(Replacement.create(0, 0, "hello"))
-                    .descending(),
+                    .ascending(),
                 AS_RANGES))
-        .containsExactly(Range.closedOpen(0, 1), Range.closedOpen(0, 0))
+        .containsExactly(Range.closedOpen(0, 0), Range.closedOpen(0, 1))
         .inOrder();
   }
 
@@ -150,10 +147,30 @@ public class ReplacementsTest {
   public void multipleInsertionsAreDeduplicated() {
     assertThat(
             new Replacements()
-                .add(Replacement.create(42, 42, "hello;"))
-                .add(Replacement.create(42, 42, "hello;"))
+                .add(Replacement.create(42, 42, "@Nullable"))
+                .add(Replacement.create(42, 42, "@Nullable"))
                 .descending())
-        .containsExactly(Replacement.create(42, 42, "hello;"));
+        .containsExactly(Replacement.create(42, 42, "@Nullable"));
+  }
+
+  @Test
+  public void duplicateInsertionsNotCoalesced() {
+    assertThat(
+            new Replacements()
+                .add(Replacement.create(42, 42, "@Nullable"), CoalescePolicy.REPLACEMENT_FIRST)
+                .add(Replacement.create(42, 42, "@Nullable"), CoalescePolicy.REPLACEMENT_FIRST)
+                .descending())
+        .containsExactly(Replacement.create(42, 42, "@Nullable"));
+  }
+
+  @Test
+  public void duplicateInsertionsCanBeKept() {
+    assertThat(
+            new Replacements()
+                .add(Replacement.create(5, 5, "}"), CoalescePolicy.KEEP_ONLY_IDENTICAL_INSERTS)
+                .add(Replacement.create(5, 5, "}"), CoalescePolicy.KEEP_ONLY_IDENTICAL_INSERTS)
+                .descending())
+        .containsExactly(Replacement.create(5, 5, "}}"));
   }
 
   @Test

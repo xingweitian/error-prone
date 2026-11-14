@@ -18,7 +18,6 @@ package com.google.errorprone.bugpatterns.overloading;
 
 import static java.util.Comparator.comparingInt;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.sun.source.tree.MethodTree;
@@ -87,7 +86,7 @@ class ParameterTrie {
     private final NavigableSet<Parameter> inputParameters;
     private final List<Parameter> outputParameters;
 
-    public ParameterTrieExtender(MethodTree methodTree) {
+    ParameterTrieExtender(MethodTree methodTree) {
       this.methodTree = methodTree;
 
       this.inputParameters = new TreeSet<>(comparingInt(Parameter::position));
@@ -100,7 +99,7 @@ class ParameterTrie {
      * <p>If any {@link ParameterOrderingViolation} is found during the extension procedure, it is
      * reported in the result.
      */
-    public Optional<ParameterOrderingViolation> execute(ParameterTrie trie) {
+    Optional<ParameterOrderingViolation> execute(ParameterTrie trie) {
       Preconditions.checkArgument(trie != null);
 
       initialize();
@@ -134,7 +133,7 @@ class ParameterTrie {
       Preconditions.checkArgument(trie != null);
 
       for (Parameter parameter : inputParameters) {
-        if (parameter.tree().isVarArgs() || !trie.children.containsKey(parameter.name())) {
+        if (parameter.tree().varArgs() || !trie.children.containsKey(parameter.name())) {
           continue;
         }
 
@@ -171,7 +170,7 @@ class ParameterTrie {
       outputParameters.add(parameter);
 
       ParameterTrie allocatedTrie = new ParameterTrie();
-      if (!parameter.tree().isVarArgs()) {
+      if (!parameter.tree().varArgs()) {
         trie.children.put(parameter.name(), allocatedTrie);
       }
       expand(allocatedTrie);
@@ -226,20 +225,14 @@ class ParameterTrie {
    * A class used to represent a {@link ParameterTree} (which is essentially just a {@link
    * com.sun.source.tree.VariableTree} and its original position within the {@link MethodTree}.
    */
-  @AutoValue
-  abstract static class Parameter {
-
-    public abstract ParameterTree tree();
-
-    public abstract int position();
-
-    public Name name() {
-      return tree().getName();
+  private record Parameter(ParameterTree tree, int position) {
+    Name name() {
+      return this.tree().name();
     }
 
-    public static Parameter create(MethodTree methodTree, int position) {
+    static Parameter create(MethodTree methodTree, int position) {
       ParameterTree parameterTree = ParameterTree.create(methodTree.getParameters().get(position));
-      return new AutoValue_ParameterTrie_Parameter(parameterTree, position);
+      return new Parameter(parameterTree, position);
     }
   }
 

@@ -17,8 +17,8 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getLast;
-import static com.google.common.collect.Iterables.getOnlyElement;
-import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.fixes.SuggestedFixes.qualifyType;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
@@ -43,15 +43,14 @@ import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
 import com.sun.tools.javac.tree.JCTree.Tag;
 import java.util.Collection;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "TestExceptionChecker",
     summary =
         "Using @Test(expected=...) is discouraged, since the test will pass if *any* statement in"
             + " the test method throws the expected exception",
-    severity = WARNING)
+    severity = ERROR)
 public class TestExceptionChecker extends BugChecker implements MethodTreeMatcher {
 
   @Override
@@ -82,11 +81,7 @@ public class TestExceptionChecker extends BugChecker implements MethodTreeMatche
       MethodTree tree, VisitorState state, JCExpression expectedException, SuggestedFix baseFix) {
     return describeMatch(
         tree,
-        buildFix(
-            state,
-            SuggestedFix.builder().merge(baseFix),
-            expectedException,
-            tree.getBody().getStatements()));
+        buildFix(state, baseFix.toBuilder(), expectedException, tree.getBody().getStatements()));
   }
 
   private static SuggestedFix buildFix(
@@ -101,15 +96,15 @@ public class TestExceptionChecker extends BugChecker implements MethodTreeMatche
     StringBuilder prefix = new StringBuilder();
     prefix.append(
         String.format("assertThrows(%s, () -> ", state.getSourceForNode(expectedException)));
-    if (statements.size() == 1 && getOnlyElement(statements) instanceof ExpressionStatementTree) {
-      ExpressionTree expression =
-          ((ExpressionStatementTree) getOnlyElement(statements)).getExpression();
+    StatementTree last = getLast(statements);
+    if (last instanceof ExpressionStatementTree expressionStatementTree) {
+      ExpressionTree expression = expressionStatementTree.getExpression();
       fix.prefixWith(expression, prefix.toString());
       fix.postfixWith(expression, ")");
     } else {
       prefix.append(" {");
-      fix.prefixWith(statements.iterator().next(), prefix.toString());
-      fix.postfixWith(getLast(statements), "});");
+      fix.prefixWith(last, prefix.toString());
+      fix.postfixWith(last, "});");
     }
     return fix.build();
   }
@@ -118,10 +113,9 @@ public class TestExceptionChecker extends BugChecker implements MethodTreeMatche
    * Searches the annotation list for {@code @Test(expected=...)}. If found, deletes the exception
    * attribute from the annotation, and returns its value.
    */
-  @Nullable
-  private static JCExpression deleteExpectedException(
+  private static @Nullable JCExpression deleteExpectedException(
       SuggestedFix.Builder fix, List<JCAnnotation> annotations, VisitorState state) {
-    Type testAnnotation = state.getTypeFromString(JUnitMatchers.JUNIT4_TEST_ANNOTATION);
+    Type testAnnotation = JUnitMatchers.JUNIT4_TEST_ANNOTATION.type(state);
     for (JCAnnotation annotationTree : annotations) {
       if (!ASTHelpers.isSameType(testAnnotation, annotationTree.type, state)) {
         continue;
@@ -135,7 +129,9 @@ public class TestExceptionChecker extends BugChecker implements MethodTreeMatche
         if (assign.lhs.hasTag(Tag.IDENT)
             && ((JCIdent) assign.lhs).getName().contentEquals("expected")) {
           if (arguments.size() == 1) {
-            fix.replace(annotationTree, "@Test");
+            fix.replace(
+                annotationTree,
+                "@" + qualifyType(state, fix, JUnitMatchers.JUNIT4_TEST_ANNOTATION));
           } else {
             removeFromList(fix, state, arguments, assign);
           }
@@ -151,10 +147,7 @@ public class TestExceptionChecker extends BugChecker implements MethodTreeMatche
       SuggestedFix.Builder fix, VisitorState state, List<? extends Tree> arguments, Tree tree) {
     int idx = arguments.indexOf(tree);
     if (idx == arguments.size() - 1) {
-      fix.replace(
-          state.getEndPosition(arguments.get(arguments.size() - 1)),
-          state.getEndPosition(tree),
-          "");
+      fix.replace(state.getEndPosition(arguments.getLast()), state.getEndPosition(tree), "");
     } else {
       fix.replace(getStartPosition(tree), getStartPosition(arguments.get(idx + 1)), "");
     }

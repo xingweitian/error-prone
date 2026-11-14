@@ -16,6 +16,8 @@
 
 package com.google.errorprone;
 
+import static java.util.Objects.requireNonNull;
+
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.sun.tools.javac.util.Context;
@@ -24,7 +26,6 @@ import com.sun.tools.javac.util.JCDiagnostic;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticType;
 import com.sun.tools.javac.util.Log;
-import java.lang.reflect.Method;
 import javax.tools.JavaFileObject;
 
 /**
@@ -43,36 +44,12 @@ public class ErrorProneError extends Error {
     super(
         formatMessage(checkName, source, pos, cause),
         cause,
-        /*enableSuppression=*/ true,
-        /*writableStackTrace=*/ false);
+        /* enableSuppression= */ true,
+        /* writableStackTrace= */ false);
     this.checkName = checkName;
     this.cause = cause;
     this.pos = pos;
-    this.source = source;
-  }
-
-  /** @deprecated prefer {@link #logFatalError(Log, Context)} */
-  @Deprecated
-  public void logFatalError(Log log) {
-    String version = ErrorProneVersion.loadVersionFromPom().or("unknown version");
-    JavaFileObject prev = log.currentSourceFile();
-    try {
-      log.useSource(source);
-      // use reflection since this overload of error doesn't exist in JDK >= 11
-      Method m =
-          Log.class.getMethod("error", DiagnosticPosition.class, String.class, Object[].class);
-      m.invoke(
-          log,
-          pos,
-          "error.prone.crash",
-          Throwables.getStackTraceAsString(cause),
-          version,
-          checkName);
-    } catch (ReflectiveOperationException e) {
-      throw new LinkageError(e.getMessage(), e);
-    } finally {
-      log.useSource(prev);
-    }
+    this.source = requireNonNull(source);
   }
 
   public void logFatalError(Log log, Context context) {
@@ -96,8 +73,8 @@ public class ErrorProneError extends Error {
 
   private static String formatMessage(
       String checkName, JavaFileObject file, DiagnosticPosition pos, Throwable cause) {
-    DiagnosticSource source = new DiagnosticSource(file, /*log=*/ null);
-    int column = source.getColumnNumber(pos.getStartPosition(), /*expandTabs=*/ true);
+    DiagnosticSource source = new DiagnosticSource(file, /* log= */ null);
+    int column = source.getColumnNumber(pos.getStartPosition(), /* expandTabs= */ true);
     int line = source.getLineNumber(pos.getStartPosition());
     String snippet = source.getLine(pos.getStartPosition());
     StringBuilder sb = new StringBuilder();

@@ -26,7 +26,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author deminguyen@google.com (Demi Nguyen) */
+/**
+ * @author deminguyen@google.com (Demi Nguyen)
+ */
 @RunWith(JUnit4.class)
 public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest {
 
@@ -34,12 +36,14 @@ public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest 
   public void shouldMatch() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String testToString() {",
-        "    Object obj = new Object();",
-        "    return obj.toString();",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String testToString() {
+            Object obj = new Object();
+            return obj.toString();
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ true, Matchers.methodReturnsNonNull()));
   }
@@ -48,19 +52,23 @@ public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest 
   public void shouldMatchDescendants() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String testThisToString() {",
-        "    return toString();",
-        "  }",
-        "  public String testInstanceToString() {",
-        "    Object o = new Object();",
-        "    return o.toString();",
-        "  }",
-        "  public String testStringToString() {",
-        "    String str = \"a string\";",
-        "    return str.toString();",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String testThisToString() {
+            return toString();
+          }
+
+          public String testInstanceToString() {
+            Object o = new Object();
+            return o.toString();
+          }
+
+          public String testStringToString() {
+            String str = "a string";
+            return str.toString();
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ true, Matchers.methodReturnsNonNull()));
   }
@@ -69,14 +77,17 @@ public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest 
   public void shouldMatchBareOverride() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String toString() {",
-        "    return \"a string\";",
-        "  }",
-        "  public String testToString() {",
-        "    return toString();",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String toString() {
+            return "a string";
+          }
+
+          public String testToString() {
+            return toString();
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ true, Matchers.methodReturnsNonNull()));
   }
@@ -85,20 +96,23 @@ public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest 
   public void shouldNotMatchWhenMethodNameDiffers() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String ToString() {",
-        "    return \"match should be case sensitive\";",
-        "  }",
-        "  public String testMethodWithDifferentCase() {",
-        "    return ToString();",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String ToString() {
+            return "match should be case sensitive";
+          }
+
+          public String testMethodWithDifferentCase() {
+            return ToString();
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ false, Matchers.methodReturnsNonNull()));
   }
 
   @Test
-  public void shoudlNotMatchWhenMethodSignatureDiffers() {
+  public void shouldNotMatchWhenMethodSignatureDiffers() {
     writeFile(
         "A.java",
         "  public String toString(int i) {",
@@ -110,8 +124,7 @@ public class MethodReturnsNonNullToStringTest extends CompilerBasedAbstractTest 
         "}");
   }
 
-  private Scanner methodInvocationMatches(
-      final boolean shouldMatch, final Matcher<ExpressionTree> toMatch) {
+  private Scanner methodInvocationMatches(boolean shouldMatch, Matcher<ExpressionTree> toMatch) {
     return new Scanner() {
       @Override
       public Void visitMethodInvocation(MethodInvocationTree node, VisitorState visitorState) {

@@ -18,7 +18,7 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 
-import com.google.auto.value.AutoValue;
+import com.google.auto.value.AutoBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableTable;
 import com.google.errorprone.BugPattern;
@@ -43,19 +43,12 @@ import com.sun.tools.javac.util.Name;
     severity = SeverityLevel.ERROR)
 public class DangerousLiteralNullChecker extends BugChecker implements LiteralTreeMatcher {
 
-  @AutoValue
-  abstract static class NullReplacementRule {
-    abstract Name klass();
-
-    abstract Name method();
-
-    abstract String replacementBody();
-
+  record NullReplacementRule(Name klass, Name method, String replacementBody) {
     private static Builder builder() {
-      return new AutoValue_DangerousLiteralNullChecker_NullReplacementRule.Builder();
+      return new AutoBuilder_DangerousLiteralNullChecker_NullReplacementRule_Builder();
     }
 
-    @AutoValue.Builder
+    @AutoBuilder
     abstract static class Builder {
       abstract Builder setKlass(Name klass);
 
@@ -68,29 +61,27 @@ public class DangerousLiteralNullChecker extends BugChecker implements LiteralTr
   }
 
   private static final Supplier<ImmutableList<NullReplacementRule>> RULES =
-      VisitorState.memoize(
-          state ->
-              ImmutableList.of(
-                  NullReplacementRule.builder()
-                      .setKlass(state.getName("java.util.Optional"))
-                      .setMethod(state.getName("orElseGet"))
-                      .setReplacementBody("orElse(null)")
-                      .build(),
-                  NullReplacementRule.builder()
-                      .setKlass(state.getName("java.util.Optional"))
-                      .setMethod(state.getName("orElseThrow"))
-                      .setReplacementBody("orElseThrow(NullPointerException::new)")
-                      .build()));
+      VisitorState.memoize(state ->
+          ImmutableList.of(
+              NullReplacementRule.builder()
+                  .setKlass(state.getName("java.util.Optional"))
+                  .setMethod(state.getName("orElseGet"))
+                  .setReplacementBody("orElse(null)")
+                  .build(),
+              NullReplacementRule.builder()
+                  .setKlass(state.getName("java.util.Optional"))
+                  .setMethod(state.getName("orElseThrow"))
+                  .setReplacementBody("orElseThrow(NullPointerException::new)")
+                  .build()));
 
   private static final Supplier<ImmutableTable<Name, Name, String>> RULE_LOOKUP =
-      VisitorState.memoize(
-          state -> {
-            ImmutableTable.Builder<Name, Name, String> builder = ImmutableTable.builder();
-            for (NullReplacementRule rule : RULES.get(state)) {
-              builder.put(rule.klass(), rule.method(), rule.replacementBody());
-            }
-            return builder.build();
-          });
+      VisitorState.memoize(state -> {
+        ImmutableTable.Builder<Name, Name, String> builder = ImmutableTable.builder();
+        for (NullReplacementRule rule : RULES.get(state)) {
+          builder.put(rule.klass(), rule.method(), rule.replacementBody());
+        }
+        return builder.buildOrThrow();
+      });
 
   @Override
   public Description matchLiteral(LiteralTree tree, VisitorState state) {
@@ -98,17 +89,13 @@ public class DangerousLiteralNullChecker extends BugChecker implements LiteralTr
       return NO_MATCH;
     }
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (!(parent instanceof MethodInvocationTree)) {
+    if (!(parent instanceof MethodInvocationTree invocation)) {
       return NO_MATCH;
     }
-    MethodInvocationTree invocation = (MethodInvocationTree) parent;
     if (invocation.getArguments().size() != 1) {
       return NO_MATCH;
     }
     MethodSymbol sym = ASTHelpers.getSymbol(invocation);
-    if (sym == null) {
-      return NO_MATCH;
-    }
     String newBody = RULE_LOOKUP.get(state).get(sym.owner.getQualifiedName(), sym.name);
     if (newBody == null) {
       return NO_MATCH;

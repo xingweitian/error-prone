@@ -15,29 +15,27 @@
  */
 package com.google.errorprone.dataflow;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
-import com.google.errorprone.util.MoreAnnotations;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
-import javax.annotation.Nullable;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
-import org.checkerframework.shaded.dataflow.cfg.node.AssignmentNode;
-import org.checkerframework.shaded.dataflow.cfg.node.FieldAccessNode;
-import org.checkerframework.shaded.dataflow.cfg.node.LocalVariableNode;
-import org.checkerframework.shaded.dataflow.cfg.node.Node;
-import org.checkerframework.shaded.dataflow.cfg.node.VariableDeclarationNode;
-import org.checkerframework.shaded.javacutil.TreeUtils;
+import javax.lang.model.element.TypeElement;
+import org.checkerframework.errorprone.dataflow.cfg.node.AssignmentNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.FieldAccessNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.LocalVariableNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.Node;
+import org.checkerframework.errorprone.dataflow.cfg.node.VariableDeclarationNode;
+import org.checkerframework.errorprone.javacutil.TreeUtils;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A sequence of field names or autovalue accessors, along with a receiver: either a variable or a
@@ -56,20 +54,9 @@ import org.checkerframework.shaded.javacutil.TreeUtils;
  * local variable {@code x} is represented by {base = Some x, fields = "foo" :: "foo()" :: nil}
  *
  * @author bennostein@google.com (Benno Stein)
+ * @param base If present, base of access path is contained Element; if absent, base is `this`
  */
-@AutoValue
-public abstract class AccessPath {
-
-  /** If present, base of access path is contained Element; if absent, base is `this` */
-  @Nullable
-  public abstract Element base();
-
-  public abstract ImmutableList<String> path();
-
-  private static AccessPath create(@Nullable Element base, ImmutableList<String> path) {
-    return new AutoValue_AccessPath(base, path);
-  }
-
+public record AccessPath(@Nullable Element base, ImmutableList<String> path) {
   /**
    * Check whether {@code tree} is an AutoValue accessor. A tree is an AutoValue accessor iff:
    *
@@ -91,8 +78,8 @@ public abstract class AccessPath {
     // methodSelect is always either a field access (e.g. `obj.foo()`) or identifier (e.g. `foo()`)
     JCExpression methodSelect = invocationTree.getMethodSelect();
     Type rcvrType =
-        (methodSelect instanceof JCFieldAccess)
-            ? ((JCFieldAccess) methodSelect).selected.type
+        methodSelect instanceof JCFieldAccess jCFieldAccess
+            ? jCFieldAccess.selected.type
             : ((JCIdent) methodSelect).sym.owner.type;
 
     return invocationTree.getArguments().isEmpty() // 0 arguments
@@ -101,9 +88,11 @@ public abstract class AccessPath {
         && // class, not interface
         rcvrType.tsym.getKind() == ElementKind.CLASS
         && // annotated @AutoValue
-        MoreAnnotations.getDeclarationAndTypeAttributes(rcvrType.tsym)
-            .map(Object::toString)
-            .anyMatch("@com.google.auto.value.AutoValue"::equals);
+        rcvrType.tsym.getAnnotationMirrors().stream()
+            .anyMatch(a ->
+                ((TypeElement) a.getAnnotationType().asElement())
+                    .getQualifiedName()
+                    .contentEquals("com.google.auto.value.AutoValue"));
   }
 
   /**
@@ -111,8 +100,7 @@ public abstract class AccessPath {
    * otherwise (for example, when the receiver of the field access contains an array access or
    * non-AutoValue method call.
    */
-  @Nullable
-  public static AccessPath fromFieldAccess(FieldAccessNode fieldAccess) {
+  public static @Nullable AccessPath fromFieldAccess(FieldAccessNode fieldAccess) {
     ImmutableList.Builder<String> pathBuilder = ImmutableList.builder();
 
     Tree tree = fieldAccess.getTree();
@@ -127,51 +115,47 @@ public abstract class AccessPath {
         pathBuilder.add(TreeUtils.getMethodName(tree) + "()");
       }
 
-      if (tree.getKind() == Kind.IDENTIFIER) {
+      if (tree instanceof IdentifierTree) {
         // Implicit `this` receiver
-        return AccessPath.create(/*base=*/ null, pathBuilder.build());
+        return new AccessPath(null, pathBuilder.build());
       }
 
       tree = ((MemberSelectTree) tree).getExpression();
     }
 
     // Explicit `this` receiver
-    if (tree.getKind() == Kind.IDENTIFIER
-        && ((IdentifierTree) tree).getName().contentEquals("this")) {
-      return AccessPath.create(/*base=*/ null, pathBuilder.build());
+    if (tree instanceof IdentifierTree id && id.getName().contentEquals("this")) {
+      return new AccessPath(null, pathBuilder.build());
     }
 
     // Local variable receiver
-    if (tree.getKind() == Kind.IDENTIFIER) {
-      return AccessPath.create(TreeUtils.elementFromTree(tree), pathBuilder.build());
+    if (tree instanceof IdentifierTree) {
+      return new AccessPath(TreeUtils.elementFromTree(tree), pathBuilder.build());
     }
 
     return null;
   }
 
   public static AccessPath fromLocalVariable(LocalVariableNode node) {
-    return AccessPath.create(node.getElement(), ImmutableList.of());
+    return new AccessPath(node.getElement(), ImmutableList.of());
   }
 
   public static AccessPath fromVariableDecl(VariableDeclarationNode node) {
-    return AccessPath.create(TreeUtils.elementFromDeclaration(node.getTree()), ImmutableList.of());
+    return new AccessPath(TreeUtils.elementFromDeclaration(node.getTree()), ImmutableList.of());
   }
 
   /**
    * Returns an AccessPath representing {@code node} if {@code node} is representable as an access
    * path and null otherwise
    */
-  @Nullable
-  public static AccessPath fromNodeIfTrackable(Node node) {
-    if (node instanceof LocalVariableNode) {
-      return fromLocalVariable((LocalVariableNode) node);
-    } else if (node instanceof VariableDeclarationNode) {
-      return fromVariableDecl((VariableDeclarationNode) node);
-    } else if (node instanceof FieldAccessNode) {
-      return fromFieldAccess((FieldAccessNode) node);
-    } else if (node instanceof AssignmentNode) {
-      return fromNodeIfTrackable(((AssignmentNode) node).getTarget());
-    }
-    return null;
+  public static @Nullable AccessPath fromNodeIfTrackable(Node node) {
+    return switch (node) {
+      case LocalVariableNode localVariableNode -> fromLocalVariable(localVariableNode);
+      case VariableDeclarationNode variableDeclarationNode ->
+          fromVariableDecl(variableDeclarationNode);
+      case FieldAccessNode fieldAccessNode -> fromFieldAccess(fieldAccessNode);
+      case AssignmentNode assignmentNode -> fromNodeIfTrackable(assignmentNode.getTarget());
+      default -> null;
+    };
   }
 }

@@ -20,6 +20,7 @@ import static com.google.errorprone.refaster.Unifier.unifications;
 
 import com.google.auto.value.AutoValue;
 import com.sun.source.tree.EnhancedForLoopTree;
+import com.sun.source.tree.Tree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCEnhancedForLoop;
 
@@ -30,6 +31,9 @@ import com.sun.tools.javac.tree.JCTree.JCEnhancedForLoop;
  */
 @AutoValue
 abstract class UEnhancedForLoop extends USimpleStatement implements EnhancedForLoopTree {
+
+  private static final long serialVersionUID = 0;
+
   public static UEnhancedForLoop create(
       UVariableDecl variable, UExpression elements, UStatement statement) {
     return new AutoValue_UEnhancedForLoop(variable, elements, (USimpleStatement) statement);
@@ -43,6 +47,11 @@ abstract class UEnhancedForLoop extends USimpleStatement implements EnhancedForL
 
   @Override
   public abstract USimpleStatement getStatement();
+
+  // TODO(cushon): support record patterns in enhanced for
+  public Tree getVariableOrRecordPattern() {
+    return getVariable();
+  }
 
   @Override
   public <R, D> R accept(TreeVisitor<R, D> visitor, D data) {
@@ -68,7 +77,7 @@ abstract class UEnhancedForLoop extends USimpleStatement implements EnhancedForL
   public Choice<Unifier> visitEnhancedForLoop(EnhancedForLoopTree loop, Unifier unifier) {
     return getVariable()
         .unify(loop.getVariable(), unifier)
-        .thenChoose(unifications(getExpression(), loop.getExpression()))
-        .thenChoose(unifications(getStatement(), loop.getStatement()));
+        .flatMap(unifications(getExpression(), loop.getExpression()))
+        .flatMap(unifications(getStatement(), loop.getStatement()));
   }
 }

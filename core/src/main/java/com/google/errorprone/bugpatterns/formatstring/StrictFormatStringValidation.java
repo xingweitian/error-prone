@@ -17,16 +17,20 @@
 package com.google.errorprone.bugpatterns.formatstring;
 
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.constValue;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static com.google.errorprone.util.ASTHelpers.isConsideredFinal;
+import static com.google.errorprone.util.ASTHelpers.isSameType;
+import static com.google.errorprone.util.AnnotationNames.FORMAT_METHOD_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.FORMAT_STRING_ANNOTATION;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.FormatMethod;
-import com.google.errorprone.annotations.FormatString;
 import com.google.errorprone.bugpatterns.formatstring.FormatStringValidation.ValidationResult;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
@@ -38,20 +42,19 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import java.util.List;
-import javax.annotation.Nullable;
 import javax.lang.model.element.ElementKind;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Format string validation utility that fails on more cases than {@link FormatStringValidation} to
  * enforce strict format string checking.
  */
-public class StrictFormatStringValidation {
+public final class StrictFormatStringValidation {
 
   private static final Matcher<ExpressionTree> MOCKITO_MATCHERS =
       staticMethod().onClassAny("org.mockito.Matchers", "org.mockito.ArgumentMatchers");
 
-  @Nullable
-  public static ValidationResult validate(
+  public static @Nullable ValidationResult validate(
       ExpressionTree formatStringTree, List<? extends ExpressionTree> args, VisitorState state) {
     if (MOCKITO_MATCHERS.matches(formatStringTree, state)) {
       // Mockito matchers do not pass standard @FormatString requirements, but we allow them so
@@ -73,10 +76,9 @@ public class StrictFormatStringValidation {
 
     // The format string is not a compile time constant. Check if it is an @FormatString method
     // parameter or is in an @FormatMethod method.
-    Symbol formatStringSymbol = ASTHelpers.getSymbol(formatStringTree);
+    Symbol formatStringSymbol = getSymbol(formatStringTree);
     if (!(formatStringSymbol instanceof VarSymbol)) {
       return ValidationResult.create(
-          null,
           String.format(
               "Format strings must be either literals or variables. Other expressions"
                   + " are not valid.\n"
@@ -86,7 +88,7 @@ public class StrictFormatStringValidation {
 
     if (!isConsideredFinal(formatStringSymbol)) {
       return ValidationResult.create(
-          null, "All variables passed as @FormatString must be final or effectively final");
+          "All variables passed as @FormatString must be final or effectively final");
     }
 
     if (formatStringSymbol.getKind() == ElementKind.PARAMETER) {
@@ -100,14 +102,13 @@ public class StrictFormatStringValidation {
   }
 
   /** Helps {@code validate()} validate a format string that is declared as a method parameter. */
-  private static ValidationResult validateFormatStringParameter(
+  private static @Nullable ValidationResult validateFormatStringParameter(
       ExpressionTree formatStringTree,
       Symbol formatStringSymbol,
       List<? extends ExpressionTree> args,
       VisitorState state) {
     if (!isFormatStringParameter(formatStringSymbol, state)) {
       return ValidationResult.create(
-          null,
           String.format(
               "Format strings must be compile time constants or parameters annotated "
                   + "@FormatString: %s",
@@ -127,13 +128,12 @@ public class StrictFormatStringValidation {
     Types types = state.getTypes();
     ImmutableList.Builder<Type> calleeFormatArgTypesBuilder = ImmutableList.builder();
     for (ExpressionTree formatArgExpression : args) {
-      calleeFormatArgTypesBuilder.add(types.erasure(ASTHelpers.getType(formatArgExpression)));
+      calleeFormatArgTypesBuilder.add(types.erasure(getType(formatArgExpression)));
     }
     ImmutableList<Type> calleeFormatArgTypes = calleeFormatArgTypesBuilder.build();
 
     if (ownerFormatArgTypes.size() != calleeFormatArgTypes.size()) {
       return ValidationResult.create(
-          null,
           String.format(
               "The number of format arguments passed "
                   + "with an @FormatString must match the number of format arguments in the "
@@ -142,10 +142,8 @@ public class StrictFormatStringValidation {
               calleeFormatArgTypes.size(), ownerFormatArgTypes.size()));
     } else {
       for (int i = 0; i < calleeFormatArgTypes.size(); i++) {
-        if (!ASTHelpers.isSameType(
-            ownerFormatArgTypes.get(i), calleeFormatArgTypes.get(i), state)) {
+        if (!isSameType(ownerFormatArgTypes.get(i), calleeFormatArgTypes.get(i), state)) {
           return ValidationResult.create(
-              null,
               String.format(
                   "The format argument types passed "
                       + "with an @FormatString must match the types of the format arguments in "
@@ -167,12 +165,11 @@ public class StrictFormatStringValidation {
    */
   private static ValidationResult validateFormatStringVariable(
       ExpressionTree formatStringTree,
-      final Symbol formatStringSymbol,
-      final List<? extends ExpressionTree> args,
-      final VisitorState state) {
+      Symbol formatStringSymbol,
+      List<? extends ExpressionTree> args,
+      VisitorState state) {
     if (formatStringSymbol.getKind() != ElementKind.LOCAL_VARIABLE) {
       return ValidationResult.create(
-          null,
           String.format(
               "Variables used as format strings that are not local variables must be compile time"
                   + " constants.\n%s is neither a local variable nor a compile time constant.",
@@ -184,7 +181,7 @@ public class StrictFormatStringValidation {
     // that case.
     Symbol owner = formatStringSymbol.owner;
     TreePath path = TreePath.getPath(state.getPath(), formatStringTree);
-    while (path != null && ASTHelpers.getSymbol(path.getLeaf()) != owner) {
+    while (path != null && getSymbol(path.getLeaf()) != owner) {
       path = path.getParentPath();
     }
 
@@ -205,10 +202,9 @@ public class StrictFormatStringValidation {
                 new TreeScanner<ValidationResult, Void>() {
                   @Override
                   public ValidationResult visitVariable(VariableTree node, Void unused) {
-                    if (ASTHelpers.getSymbol(node) == formatStringSymbol) {
+                    if (getSymbol(node) == formatStringSymbol) {
                       if (node.getInitializer() == null) {
                         return ValidationResult.create(
-                            null,
                             String.format(
                                 "Variables used as format strings must be initialized when they are"
                                     + " declared.\nInvalid declaration: %s",
@@ -216,11 +212,12 @@ public class StrictFormatStringValidation {
                       }
                       return validateStringFromAssignment(node, node.getInitializer(), args, state);
                     }
-                    return super.visitVariable(node, unused);
+                    return super.visitVariable(node, null);
                   }
 
                   @Override
-                  public ValidationResult reduce(ValidationResult r1, ValidationResult r2) {
+                  public @Nullable ValidationResult reduce(
+                      ValidationResult r1, ValidationResult r2) {
                     if (r1 == null && r2 == null) {
                       return null;
                     }
@@ -237,10 +234,9 @@ public class StrictFormatStringValidation {
       ExpressionTree formatStringRhs,
       List<? extends ExpressionTree> args,
       VisitorState state) {
-    String value = ASTHelpers.constValue(formatStringRhs, String.class);
+    String value = constValue(formatStringRhs, String.class);
     if (value == null) {
       return ValidationResult.create(
-          null,
           String.format(
               "Local format string variables must only be assigned to compile time constant values."
                   + " Invalid format string assignment: %s",
@@ -268,31 +264,30 @@ public class StrictFormatStringValidation {
     Type stringType = state.getSymtab().stringType;
 
     // The input symbol must be a String and a parameter of a @FormatMethod to be a @FormatString.
-    if (!ASTHelpers.isSameType(formatString.type, stringType, state)
-        || !(formatString.owner instanceof MethodSymbol)
-        || !ASTHelpers.hasAnnotation(formatString.owner, FormatMethod.class, state)) {
+    if (!isSameType(formatString.type, stringType, state)
+        || !(formatString.owner instanceof MethodSymbol owner)
+        || !hasAnnotation(formatString.owner, FORMAT_METHOD_ANNOTATION, state)) {
       return false;
     }
 
     // If the format string is annotated @FormatString in a @FormatMethod, it is a format string.
-    if (ASTHelpers.hasAnnotation(formatString, FormatString.class, state)) {
+    if (hasAnnotation(formatString, FORMAT_STRING_ANNOTATION, state)) {
       return true;
     }
 
     // Check if format string is the first string with no @FormatString params in the @FormatMethod.
-    MethodSymbol owner = (MethodSymbol) formatString.owner;
     boolean formatStringFound = false;
     for (Symbol param : owner.getParameters()) {
       if (param == formatString) {
         formatStringFound = true;
       }
 
-      if (ASTHelpers.isSameType(param.type, stringType, state)) {
+      if (isSameType(param.type, stringType, state)) {
         // If this is a String parameter before the input Symbol, then the input symbol can't be the
         // format string since it wasn't annotated @FormatString.
         if (!formatStringFound) {
           return false;
-        } else if (ASTHelpers.hasAnnotation(param, FormatString.class, state)) {
+        } else if (hasAnnotation(param, FORMAT_STRING_ANNOTATION, state)) {
           return false;
         }
       }

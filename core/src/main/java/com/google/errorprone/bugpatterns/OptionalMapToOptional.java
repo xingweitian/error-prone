@@ -29,18 +29,16 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.predicates.TypePredicate;
 import com.google.errorprone.predicates.TypePredicates;
-import com.google.errorprone.util.ASTHelpers;
-import com.google.errorprone.util.ASTHelpers.TargetType;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.util.List;
+import java.util.List;
 
 /** Matches {@code Optional#map} mapping to another {@code Optional}. */
 @BugPattern(
-    name = "OptionalMapToOptional",
     summary = "Mapping to another Optional will yield a nested Optional. Did you mean flatMap?",
     severity = WARNING)
 public final class OptionalMapToOptional extends BugChecker implements MethodInvocationTreeMatcher {
@@ -75,13 +73,13 @@ public final class OptionalMapToOptional extends BugChecker implements MethodInv
     // Heuristic: if another Optional instance method is invoked on this, it's usually clear what's
     // going on, unless that method is `isPresent()`.
     if (path.getParentPath().getLeaf() instanceof MemberSelectTree
-        && path.getParentPath().getParentPath().getLeaf() instanceof MethodInvocationTree
-        && ANYTHING_BUT_ISPRESENT.matches(
-            (MethodInvocationTree) path.getParentPath().getParentPath().getLeaf(), state)) {
+        && path.getParentPath().getParentPath().getLeaf()
+            instanceof MethodInvocationTree methodInvocationTree
+        && ANYTHING_BUT_ISPRESENT.matches(methodInvocationTree, state)) {
       return NO_MATCH;
     }
     TargetType targetType =
-        ASTHelpers.targetType(
+        TargetType.targetType(
             state.withPath(new TreePath(state.getPath(), tree.getArguments().get(0))));
     if (targetType == null) {
       return NO_MATCH;

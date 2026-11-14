@@ -25,7 +25,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author eaftan@google.com (Eddie Aftandilian) */
+/**
+ * @author eaftan@google.com (Eddie Aftandilian)
+ */
 @RunWith(JUnit4.class)
 public class BugPatternValidatorTest {
 
@@ -68,7 +70,7 @@ public class BugPatternValidatorTest {
         explanation = "linkType none but includes link",
         severity = SeverityLevel.ERROR,
         linkType = LinkType.NONE,
-        link = "http://foo")
+        link = "https://foo")
     final class BugPatternTestClass {}
 
     BugPattern annotation = BugPatternTestClass.class.getAnnotation(BugPattern.class);
@@ -83,7 +85,7 @@ public class BugPatternValidatorTest {
         explanation = "linkType custom and includes link",
         severity = SeverityLevel.ERROR,
         linkType = LinkType.CUSTOM,
-        link = "http://foo")
+        link = "https://foo")
     final class BugPatternTestClass {}
 
     BugPattern annotation = BugPatternTestClass.class.getAnnotation(BugPattern.class);

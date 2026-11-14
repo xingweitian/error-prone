@@ -17,17 +17,19 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.fixes.SuggestedFixes.qualifyType;
+import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.isSubtypeOf;
+import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.Matchers.nothing;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasImplicitType;
 import static com.google.errorprone.util.ASTHelpers.methodCanBeOverridden;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.ImmutableCollection;
@@ -75,7 +77,6 @@ import javax.lang.model.type.TypeKind;
  * others.
  */
 @BugPattern(
-    name = "MixedMutabilityReturnType",
     summary =
         "This method returns both mutable and immutable collections or maps from different "
             + "paths. This may be confusing for users of the method.",
@@ -90,16 +91,16 @@ public final class MixedMutabilityReturnType extends BugChecker
 
   private static final Matcher<ExpressionTree> EMPTY_INITIALIZER =
       anyOf(
-          constructor().forClass("java.util.ArrayList").withParameters(),
-          constructor().forClass("java.util.HashMap").withParameters(),
+          constructor().forClass("java.util.ArrayList").withNoParameters(),
+          constructor().forClass("java.util.HashMap").withNoParameters(),
           staticMethod()
               .onClass("com.google.common.collect.Lists")
               .namedAnyOf("newArrayList", "newLinkedList")
-              .withParameters(),
+              .withNoParameters(),
           staticMethod()
               .onClass("com.google.common.collect.Sets")
               .namedAnyOf("newHashSet", "newLinkedHashSet")
-              .withParameters());
+              .withNoParameters());
 
   private static final Matcher<ExpressionTree> IMMUTABLE =
       anyOf(
@@ -129,7 +130,7 @@ public final class MixedMutabilityReturnType extends BugChecker
                       .onDescendantOf(BiMap.class.getName())
                       .namedAnyOf("put", "putAll"),
                   nothing()),
-          isSubtypeOf(Map.class),
+          allOf(isSubtypeOf(Map.class), not(isSubtypeOf(BiMap.class))),
               TypeDetails.of(
                   "com.google.common.collect.ImmutableMap",
                   instanceMethod().onDescendantOf(Map.class.getName()).namedAnyOf("put", "putAll"),
@@ -180,7 +181,7 @@ public final class MixedMutabilityReturnType extends BugChecker
           mutable.add(symbol);
         }
       }
-      return super.visitVariable(variableTree, unused);
+      return super.visitVariable(variableTree, null);
     }
   }
 
@@ -192,6 +193,7 @@ public final class MixedMutabilityReturnType extends BugChecker
 
     private ReturnTypesScanner(
         VisitorState state, Set<VarSymbol> immutable, Set<VarSymbol> mutable) {
+      super(state);
       this.state = state;
       this.immutable = immutable;
       this.mutable = mutable;
@@ -200,7 +202,7 @@ public final class MixedMutabilityReturnType extends BugChecker
     @Override
     public Void visitMethod(MethodTree methodTree, Void unused) {
       if (!RETURNS_COLLECTION.matches(methodTree.getReturnType(), state)) {
-        return super.visitMethod(methodTree, unused);
+        return super.visitMethod(methodTree, null);
       }
       MethodScanner scanner = new MethodScanner();
       scanner.scan(getCurrentPath(), null);
@@ -217,7 +219,7 @@ public final class MixedMutabilityReturnType extends BugChecker
                         state))
                 .build());
       }
-      return super.visitMethod(methodTree, unused);
+      return super.visitMethod(methodTree, null);
     }
 
     private final class MethodScanner extends TreePathScanner<Void, Void> {
@@ -317,7 +319,7 @@ public final class MixedMutabilityReturnType extends BugChecker
           anyBuilderFixes |= !returnTypeFixer.failed;
           simpleFix.merge(simple);
           fixWithBuilders.merge(returnTypeFixer.failed ? simple : returnTypeFixer.fix.build());
-          continue;
+          break;
         }
         if (IMMUTABLE_FACTORY.matches(expression, state)) {
           SuggestedFix.Builder fix = SuggestedFix.builder();
@@ -326,12 +328,13 @@ public final class MixedMutabilityReturnType extends BugChecker
               qualifyType(state, fix, typeDetails.immutableType()) + ".of");
           simpleFix.merge(fix);
           fixWithBuilders.merge(fix);
-          continue;
+          break;
         }
 
         SuggestedFix simple = applySimpleFix(typeDetails.immutableType(), expression, state);
         simpleFix.merge(simple);
         fixWithBuilders.merge(simple);
+        break;
       }
     }
     if (!anyBuilderFixes) {
@@ -385,7 +388,7 @@ public final class MixedMutabilityReturnType extends BugChecker
 
       Tree erasedType = ASTHelpers.getErasedTypeTree(variableTree.getType());
       // don't try to replace synthetic nodes for `var`
-      if (ASTHelpers.getStartPosition(erasedType) != -1) {
+      if (!hasImplicitType(variableTree, state)) {
         fix.replace(erasedType, qualifyType(state, fix, details.builderType()));
       }
       if (variableTree.getInitializer() != null) {
@@ -403,15 +406,14 @@ public final class MixedMutabilityReturnType extends BugChecker
       if (!getSymbol(identifier).equals(symbol)) {
         return null;
       }
-      if (parent instanceof VariableTree) {
-        VariableTree variable = (VariableTree) parent;
+      if (parent instanceof VariableTree variable) {
         fix.replace(variable.getType(), qualifyType(state, fix, details.builderType()));
         return null;
       }
       if (parent instanceof MemberSelectTree) {
         Tree grandParent = getCurrentPath().getParentPath().getParentPath().getLeaf();
-        if (grandParent instanceof MethodInvocationTree) {
-          if (!details.appendMethods().matches((MethodInvocationTree) grandParent, state)) {
+        if (grandParent instanceof MethodInvocationTree methodInvocationTree) {
+          if (!details.appendMethods().matches(methodInvocationTree, state)) {
             failed = true;
             return null;
           }
@@ -429,20 +431,14 @@ public final class MixedMutabilityReturnType extends BugChecker
     }
   }
 
-  @AutoValue
-  abstract static class TypeDetails {
-    abstract String immutableType();
-
-    abstract String builderType();
-
-    abstract Matcher<ExpressionTree> appendMethods();
-
-    abstract Matcher<Tree> skipTypes();
-
+  record TypeDetails(
+      String immutableType,
+      String builderType,
+      Matcher<ExpressionTree> appendMethods,
+      Matcher<Tree> skipTypes) {
     static TypeDetails of(
         String immutableType, Matcher<ExpressionTree> appendMethods, Matcher<Tree> skipTypes) {
-      return new AutoValue_MixedMutabilityReturnType_TypeDetails(
-          immutableType, immutableType + ".Builder", appendMethods, skipTypes);
+      return new TypeDetails(immutableType, immutableType + ".Builder", appendMethods, skipTypes);
     }
   }
 }

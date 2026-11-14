@@ -33,31 +33,58 @@ public class ReturnsNullCollectionTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Collection;",
-            "import java.util.ArrayList;",
-            "import java.util.List;",
-            "import java.util.Map;",
-            "class Test {",
-            "  Collection<String> methodReturnsNullCollection() {",
-            "  // BUG: Diagnostic contains: ReturnsNullCollection",
-            "    return null;",
-            "  }",
-            "  List<String> methodReturnsNullList() {",
-            "  // BUG: Diagnostic contains: ReturnsNullCollection",
-            "    return null;",
-            "  }",
-            "  Map<String, String> methodReturnsNullMap() {",
-            "  // BUG: Diagnostic contains: ReturnsNullCollection",
-            "    return null;",
-            "  }",
-            "  List<String> methodReturnsNullListConditionally(boolean foo) {",
-            "    if (foo) {",
-            "      // BUG: Diagnostic contains: ReturnsNullCollection",
-            "      return null;",
-            "    }",
-            "    return new ArrayList();",
-            "  }",
-            "}")
+            """
+            import com.google.common.collect.Multimap;
+            import com.google.common.collect.Table;
+            import java.util.ArrayList;
+            import java.util.Collection;
+            import java.util.List;
+            import java.util.Map;
+
+            class Test {
+              Collection<String> methodReturnsNullCollection() {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return null;
+              }
+
+              List<String> methodReturnsNullList() {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return null;
+              }
+
+              Map<String, String> methodReturnsNullMap() {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return null;
+              }
+
+              Multimap<String, String> methodReturnsNullMultimap() {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return null;
+              }
+
+              Table<String, String, String> methodReturnsNullTable() {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return null;
+              }
+
+              List<String> methodReturnsNullListConditionally(boolean foo) {
+                if (foo) {
+                  // BUG: Diagnostic contains: ReturnsNullCollection
+                  return null;
+                }
+                return new ArrayList();
+              }
+
+              List<String> methodReturnsNullListInCatch() {
+                try {
+                  return new ArrayList();
+                } catch (Exception e) {
+                  // BUG: Diagnostic contains: ReturnsNullCollection
+                  return null;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -66,29 +93,79 @@ public class ReturnsNullCollectionTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Collection;",
-            "import java.util.HashMap;",
-            "import java.util.List;",
-            "import java.util.Map;",
-            "import javax.annotation.Nullable;",
-            "class Test {",
-            "  @Nullable",
-            "  Collection<String> methodReturnsNullCollection() {",
-            "    return null;",
-            "  }",
-            "  @Nullable",
-            "  List<String> methodReturnsNullList() {",
-            "    return null;",
-            "  }",
-            "  @Nullable",
-            "  Map<String, String> methodReturnsNullMap() {",
-            "    return null;",
-            "  }",
-            "  @Nullable",
-            "  HashMap<String, String> methodReturnsNullHashMap() {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import java.util.Collection;
+            import java.util.HashMap;
+            import java.util.List;
+            import java.util.Map;
+            import javax.annotation.Nullable;
+
+            class Test {
+              @Nullable
+              Collection<String> methodReturnsNullCollection() {
+                return null;
+              }
+
+              @Nullable
+              List<String> methodReturnsNullList() {
+                return null;
+              }
+
+              @Nullable
+              Map<String, String> methodReturnsNullMap() {
+                return null;
+              }
+
+              @Nullable
+              HashMap<String, String> methodReturnsNullHashMap() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ternary_b536946282_shouldBeFlagged() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.List;
+
+            class Test {
+              List<String> methodReturnsNullTernary(boolean foo, List<String> bar) {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return foo ? bar : null;
+              }
+
+              List<String> methodReturnsNullTernaryReversed(boolean foo, List<String> bar) {
+                // BUG: Diagnostic contains: ReturnsNullCollection
+                return foo ? null : bar;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void enclosingIfNull_b536946282_shouldBeFlagged() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.List;
+
+            class Test {
+              List<String> method(List<String> bar) {
+                if (bar == null) {
+                  // TODO(b/536946282): should be flagged by ReturnsNullCollection
+                  return bar;
+                }
+                return bar;
+              }
+            }
+            """)
         .doTest();
   }
 }

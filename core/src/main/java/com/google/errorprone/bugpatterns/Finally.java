@@ -41,21 +41,23 @@ import com.sun.tools.javac.tree.JCTree.JCContinue;
 import com.sun.tools.javac.util.Name;
 
 /**
- * Matches the behaviour of javac's finally Xlint warning.
+ * Matches the behaviour of javac's {@code -Xlint:finally} flag.
  *
- * <p>1) Any return statement in a finally block is an error 2) An uncaught throw statement in a
- * finally block is an error. We can't always know whether a specific exception will be caught, so
- * we report errors for throw statements that are not contained in a try with at least one catch
- * block. 3) A continue statement in a finally block is an error if it breaks out of a (possibly
- * labeled) loop that is outside the enclosing finally. 4) A break statement in a finally block is
- * an error if it breaks out of a (possibly labeled) loop or a switch statement that is outside the
- * enclosing finally.
+ * <ol>
+ *   <li>Any return statement in a finally block is an error.
+ *   <li>An uncaught throw statement in a finally block is an error. We can't always know whether a
+ *       specific exception will be caught, so we report errors for throw statements that are not
+ *       contained in a try with at least one catch block.
+ *   <li>A continue statement in a finally block is an error if it breaks out of a (possibly
+ *       labeled) loop that is outside the enclosing finally.
+ *   <li>A break statement in a finally block is an error if it breaks out of a (possibly labeled)
+ *       loop or a switch statement that is outside the enclosing finally.
+ * </ol>
  *
  * @author eaftan@google.com (Eddie Aftandilian)
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 @BugPattern(
-    name = "Finally",
     altNames = {"finally", "ThrowFromFinallyBlock"},
     summary =
         "If you return or throw from a finally, then values returned or thrown from the"
@@ -121,12 +123,10 @@ public class Finally extends BugChecker
       Tree prevTree = null;
       for (Tree leaf : state.getPath()) {
         switch (leaf.getKind()) {
-          case METHOD:
-          case LAMBDA_EXPRESSION:
-          case CLASS:
+          case METHOD, LAMBDA_EXPRESSION, CLASS -> {
             return false;
-          default:
-            break;
+          }
+          default -> {}
         }
         MatchResult mr = matchAncestor(leaf, prevTree);
         if (mr != MatchResult.KEEP_LOOKING) {
@@ -139,9 +139,8 @@ public class Finally extends BugChecker
     }
 
     /** Match a tree in the ancestor chain given the ancestor's immediate descendant. */
-    protected MatchResult matchAncestor(Tree leaf, Tree prevTree) {
-      if (leaf instanceof TryTree) {
-        TryTree tryTree = (TryTree) leaf;
+    MatchResult matchAncestor(Tree leaf, Tree prevTree) {
+      if (leaf instanceof TryTree tryTree) {
         if (tryTree.getFinallyBlock() != null && tryTree.getFinallyBlock().equals(prevTree)) {
           return MatchResult.FOUND_ERROR;
         }
@@ -161,20 +160,24 @@ public class Finally extends BugChecker
       CONTINUE
     }
 
-    public FinallyJumpMatcher(JCContinue jcContinue) {
+    FinallyJumpMatcher(JCContinue jcContinue) {
       this.label = jcContinue.getLabel();
       this.jumpType = JumpType.CONTINUE;
     }
 
-    public FinallyJumpMatcher(JCBreak jcBreak) {
+    FinallyJumpMatcher(JCBreak jcBreak) {
       this.label = jcBreak.getLabel();
       this.jumpType = JumpType.BREAK;
     }
 
     /**
-     * The target of a jump statement (break or continue) is (1) the enclosing loop if the jump is
-     * unlabeled (2) the enclosing LabeledStatementTree with matching label if the jump is labeled
-     * (3) the enclosing switch statement if the jump is a break
+     * The target of a jump statement (break or continue) is:
+     *
+     * <ol>
+     *   <li>the enclosing loop if the jump is unlabeled;
+     *   <li>the enclosing LabeledStatementTree with matching label if the jump is labeled;
+     *   <li>the enclosing switch statement if the jump is a break.
+     * </ol>
      *
      * <p>If the target of a break or continue statement is encountered before reaching a finally
      * block, return NO_MATCH.
@@ -185,20 +188,17 @@ public class Finally extends BugChecker
       // (1)
       if (label == null) {
         switch (leaf.getKind()) {
-          case WHILE_LOOP:
-          case DO_WHILE_LOOP:
-          case FOR_LOOP:
-          case ENHANCED_FOR_LOOP:
+          case WHILE_LOOP, DO_WHILE_LOOP, FOR_LOOP, ENHANCED_FOR_LOOP -> {
             return MatchResult.NO_MATCH;
-          default:
-            break;
+          }
+          default -> {}
         }
       }
 
       // (2)
       if (label != null
-          && leaf instanceof LabeledStatementTree
-          && label.equals(((LabeledStatementTree) leaf).getLabel())) {
+          && leaf instanceof LabeledStatementTree labeledStatementTree
+          && label.equals(labeledStatementTree.getLabel())) {
         return MatchResult.NO_MATCH;
       }
 
@@ -215,8 +215,7 @@ public class Finally extends BugChecker
   private static class FinallyThrowMatcher extends FinallyCompletionMatcher<ThrowTree> {
     @Override
     protected MatchResult matchAncestor(Tree tree, Tree prevTree) {
-      if (tree instanceof TryTree) {
-        TryTree tryTree = (TryTree) tree;
+      if (tree instanceof TryTree tryTree) {
         if (tryTree.getBlock().equals(prevTree) && !tryTree.getCatches().isEmpty()) {
           // The current ancestor is a try block with associated catch blocks.
           return MatchResult.NO_MATCH;

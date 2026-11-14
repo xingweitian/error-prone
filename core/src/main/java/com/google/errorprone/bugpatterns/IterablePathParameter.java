@@ -22,6 +22,7 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
 
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -41,15 +42,16 @@ import javax.lang.model.element.ElementKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "IterablePathParameter",
     summary = "Path implements Iterable<Path>; prefer Collection<Path> for clarity",
     severity = ERROR)
 public class IterablePathParameter extends BugChecker implements VariableTreeMatcher {
+  private static final ClassName PATH = ClassName.of(Path.class.getName());
+
   @Override
   public Description matchVariable(VariableTree tree, VisitorState state) {
     Type type = ASTHelpers.getType(tree);
     VarSymbol symbol = ASTHelpers.getSymbol(tree);
-    if (type == null || symbol == null) {
+    if (type == null) {
       return NO_MATCH;
     }
     if (symbol.getKind() != ElementKind.PARAMETER) {
@@ -61,21 +63,18 @@ public class IterablePathParameter extends BugChecker implements VariableTreeMat
     if (type.getTypeArguments().isEmpty()) {
       return NO_MATCH;
     }
-    if (!isSameType(
-        wildBound(getOnlyElement(type.getTypeArguments())),
-        state.getTypeFromString(Path.class.getName()),
-        state)) {
+    if (!isSameType(wildBound(getOnlyElement(type.getTypeArguments())), PATH, state)) {
       return NO_MATCH;
     }
     Description.Builder description = buildDescription(tree);
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (tree.getType() instanceof ParameterizedTypeTree
-        && (!(parent instanceof JCLambda)
-            || ((JCLambda) parent).paramKind == ParameterKind.EXPLICIT)) {
+    if (tree.getType() instanceof ParameterizedTypeTree parameterizedTypeTree
+        && (!(parent instanceof JCLambda jCLambda)
+            || jCLambda.paramKind == ParameterKind.EXPLICIT)) {
       description.addFix(
           SuggestedFix.builder()
               .addImport("java.util.Collection")
-              .replace(((ParameterizedTypeTree) tree.getType()).getType(), "Collection")
+              .replace(parameterizedTypeTree.getType(), "Collection")
               .build());
     }
     return description.build();

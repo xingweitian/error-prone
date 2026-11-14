@@ -18,6 +18,7 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.common.base.Ascii;
 import com.google.common.collect.ImmutableMap;
@@ -43,7 +44,6 @@ import javax.lang.model.element.ElementKind;
 
 /** Checker for variables under the same scope that only differ in capitalization. */
 @BugPattern(
-    name = "InconsistentCapitalization",
     summary =
         "It is confusing to have a field and a parameter under the same scope that differ only in "
             + "capitalization.",
@@ -76,8 +76,7 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
       String fieldName = field.getSimpleName().toString();
       VariableTree parameterTree = (VariableTree) parameterPath.getLeaf();
       SuggestedFix.Builder fix =
-          SuggestedFix.builder()
-              .merge(SuggestedFixes.renameVariable(parameterTree, fieldName, state));
+          SuggestedFixes.renameVariable(parameterTree, fieldName, state).toBuilder();
 
       if (parameterPath.getParentPath() != null) {
         String qualifiedName =
@@ -136,15 +135,14 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
 
   /** Returns true if the given symbol has static modifier and is all upper case. */
   private static boolean isUpperCaseAndStatic(Symbol symbol) {
-    return symbol.isStatic()
-        && symbol.name.contentEquals(Ascii.toUpperCase(symbol.name.toString()));
+    return isStatic(symbol) && symbol.name.contentEquals(Ascii.toUpperCase(symbol.name.toString()));
   }
 
   /**
    * Matcher for all fields of the given class node that are either instance members or not all
    * upper case.
    */
-  private static class FieldScanner extends TreeScanner<Void, Void> {
+  private static final class FieldScanner extends TreeScanner<Void, Void> {
 
     static ImmutableSet<Symbol> findFields(ClassTree tree) {
       ImmutableSet.Builder<Symbol> fieldsBuilder = ImmutableSet.builder();
@@ -171,7 +169,7 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
           && ASTHelpers.enclosingClass(symbol).equals(classSymbol)) {
         fields.add(symbol);
       }
-      return super.visitVariable(tree, unused);
+      return super.visitVariable(tree, null);
     }
   }
 
@@ -179,13 +177,13 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
    * Matcher for all parameters (methods, constructors, lambda expressions) that have the same name
    * as one of the provided fields but with different capitalization.
    */
-  private static class MatchingParametersScanner extends TreePathScanner<Void, Void> {
+  private static final class MatchingParametersScanner extends TreePathScanner<Void, Void> {
 
     static ImmutableMap<TreePath, Symbol> findMatchingParameters(
         ImmutableMap<String, Symbol> fieldNamesMap, TreePath path) {
       ImmutableMap.Builder<TreePath, Symbol> matchedParametersBuilder = ImmutableMap.builder();
       new MatchingParametersScanner(fieldNamesMap, matchedParametersBuilder).scan(path, null);
-      return matchedParametersBuilder.build();
+      return matchedParametersBuilder.buildOrThrow();
     }
 
     private final ImmutableMap<String, Symbol> fields;
@@ -211,7 +209,7 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
     public Void visitVariable(VariableTree tree, Void unused) {
       Symbol symbol = ASTHelpers.getSymbol(tree);
       if (!symbol.getKind().equals(ElementKind.PARAMETER)) {
-        return super.visitVariable(tree, unused);
+        return super.visitVariable(tree, null);
       }
       String variableName = symbol.toString();
       Symbol matchedField = fields.get(Ascii.toLowerCase(variableName));
@@ -221,7 +219,7 @@ public class InconsistentCapitalization extends BugChecker implements ClassTreeM
           matchedParameters.put(getCurrentPath(), matchedField);
         }
       }
-      return super.visitVariable(tree, unused);
+      return super.visitVariable(tree, null);
     }
   }
 }

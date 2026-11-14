@@ -25,12 +25,12 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
+import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 
@@ -39,7 +39,6 @@ import com.sun.source.util.TreeScanner;
  * functions of Optionals.
  */
 @BugPattern(
-    name = "UnnecessaryOptionalGet",
     summary =
         "This code can be simplified by directly using the lambda parameters instead of calling"
             + " get..() on optional.",
@@ -61,7 +60,7 @@ public final class UnnecessaryOptionalGet extends BugChecker
       anyOf(
           instanceMethod()
               .onExactClass("java.util.Optional")
-              .namedAnyOf("get", "orElse", "orElseGet", "orElseThrow"),
+              .namedAnyOf("get", "orElseThrow", "orElse", "orElseGet", "orElseThrow"),
           instanceMethod()
               .onExactClass("java.util.OptionalLong")
               .namedAnyOf("getAsLong", "orElse", "orElseGet", "orElseThrow"),
@@ -81,24 +80,30 @@ public final class UnnecessaryOptionalGet extends BugChecker
       return Description.NO_MATCH;
     }
     ExpressionTree onlyArg = getOnlyElement(tree.getArguments());
-    if (!onlyArg.getKind().equals(Kind.LAMBDA_EXPRESSION)) {
+    if (!(onlyArg instanceof LambdaExpressionTree lambdaExpressionTree)) {
       return Description.NO_MATCH;
     }
-    VariableTree arg = getOnlyElement(((LambdaExpressionTree) onlyArg).getParameters());
+    VariableTree arg = getOnlyElement(lambdaExpressionTree.getParameters());
+    SuggestedFixes.VariableNamer variableNamer = SuggestedFixes.variableNamer(state);
     SuggestedFix.Builder fix = SuggestedFix.builder();
+    String replacement =
+        arg.getName().isEmpty() ? variableNamer.avoidShadowing("value") : arg.getName().toString();
     new TreeScanner<Void, VisitorState>() {
       @Override
       public Void visitMethodInvocation(
           MethodInvocationTree methodInvocationTree, VisitorState visitorState) {
         if (OPTIONAL_GET.matches(methodInvocationTree, visitorState)
             && sameVariable(getReceiver(tree), getReceiver(methodInvocationTree))) {
-          fix.replace(methodInvocationTree, state.getSourceForNode(arg));
+          fix.replace(methodInvocationTree, replacement);
         }
         return super.visitMethodInvocation(methodInvocationTree, visitorState);
       }
     }.scan(onlyArg, state);
     if (fix.isEmpty()) {
       return Description.NO_MATCH;
+    }
+    if (arg.getName().isEmpty()) {
+      fix.merge(SuggestedFixes.renameVariable(arg, replacement, state));
     }
     return describeMatch(tree, fix.build());
   }

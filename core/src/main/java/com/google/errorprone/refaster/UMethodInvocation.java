@@ -25,7 +25,7 @@ import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UTree} version of {@link MethodInvocationTree}.
@@ -34,13 +34,27 @@ import javax.annotation.Nullable;
  */
 @AutoValue
 public abstract class UMethodInvocation extends UExpression implements MethodInvocationTree {
-  public static UMethodInvocation create(UExpression methodSelect, List<UExpression> arguments) {
-    return new AutoValue_UMethodInvocation(methodSelect, ImmutableList.copyOf(arguments));
+  public static UMethodInvocation create(
+      List<? extends UExpression> typeArguments,
+      UExpression methodSelect,
+      List<UExpression> arguments) {
+    return new AutoValue_UMethodInvocation(
+        ImmutableList.copyOf(typeArguments), methodSelect, ImmutableList.copyOf(arguments));
+  }
+
+  public static UMethodInvocation create(
+      List<? extends UExpression> typeArguments,
+      UExpression methodSelect,
+      UExpression... arguments) {
+    return create(typeArguments, methodSelect, ImmutableList.copyOf(arguments));
   }
 
   public static UMethodInvocation create(UExpression methodSelect, UExpression... arguments) {
-    return create(methodSelect, ImmutableList.copyOf(arguments));
+    return create(ImmutableList.of(), methodSelect, ImmutableList.copyOf(arguments));
   }
+
+  @Override
+  public abstract ImmutableList<UExpression> getTypeArguments();
 
   @Override
   public abstract UExpression getMethodSelect();
@@ -49,12 +63,11 @@ public abstract class UMethodInvocation extends UExpression implements MethodInv
   public abstract ImmutableList<UExpression> getArguments();
 
   @Override
-  @Nullable
-  public Choice<Unifier> visitMethodInvocation(
+  public @Nullable Choice<Unifier> visitMethodInvocation(
       MethodInvocationTree methodInvocation, @Nullable Unifier unifier) {
     return getMethodSelect()
         .unify(methodInvocation.getMethodSelect(), unifier)
-        .thenChoose(
+        .flatMap(
             unifications(
                 getArguments(), methodInvocation.getArguments(), /* allowVarargs= */ true));
   }
@@ -70,16 +83,11 @@ public abstract class UMethodInvocation extends UExpression implements MethodInv
   }
 
   @Override
-  public List<UTree<?>> getTypeArguments() {
-    return ImmutableList.of();
-  }
-
-  @Override
   public JCMethodInvocation inline(Inliner inliner) throws CouldNotResolveImportException {
     return inliner
         .maker()
         .Apply(
-            com.sun.tools.javac.util.List.<JCExpression>nil(),
+            inliner.<JCExpression>inlineList(getTypeArguments()),
             getMethodSelect().inline(inliner),
             inliner.<JCExpression>inlineList(getArguments()));
   }

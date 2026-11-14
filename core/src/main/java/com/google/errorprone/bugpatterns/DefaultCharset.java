@@ -21,15 +21,18 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.toType;
+import static com.google.errorprone.matchers.ProtobufMatchers.BYTE_STRING;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.common.io.Files;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
@@ -37,6 +40,7 @@ import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.suppliers.Suppliers;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
@@ -51,6 +55,7 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -66,10 +71,10 @@ import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Scanner;
+import javax.inject.Inject;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "DefaultCharset",
     summary =
         "Implicit use of the platform default charset, which can result in differing behaviour"
             + " between JVM executions or incorrect behavior if the encoding of the data source"
@@ -82,13 +87,13 @@ public class DefaultCharset extends BugChecker
   enum CharsetFix {
     UTF_8_FIX("UTF_8", "Specify UTF-8") {
       @Override
-      void addImport(SuggestedFix.Builder fix, VisitorState state) {
+      void addImport(SuggestedFix.Builder fix) {
         fix.addStaticImport("java.nio.charset.StandardCharsets.UTF_8");
       }
     },
     DEFAULT_CHARSET_FIX("Charset.defaultCharset()", "Specify default charset") {
       @Override
-      void addImport(SuggestedFix.Builder fix, VisitorState state) {
+      void addImport(SuggestedFix.Builder fix) {
         fix.addImport("java.nio.charset.Charset");
       }
     };
@@ -105,7 +110,7 @@ public class DefaultCharset extends BugChecker
       return replacement;
     }
 
-    abstract void addImport(SuggestedFix.Builder fix, VisitorState state);
+    abstract void addImport(SuggestedFix.Builder fix);
   }
 
   // ignore the constructor that takes FileDescriptor; it's rare and there's no automated fix
@@ -135,30 +140,33 @@ public class DefaultCharset extends BugChecker
       anyOf(
           constructor()
               .forClass(String.class.getName())
-              .withParametersOfType(ImmutableList.of(Suppliers.arrayOf(Suppliers.BYTE_TYPE))),
+              .withParametersOfType(Suppliers.arrayOf(Suppliers.BYTE_TYPE)),
           constructor()
               .forClass(String.class.getName())
               .withParametersOfType(
-                  ImmutableList.of(
-                      Suppliers.arrayOf(Suppliers.BYTE_TYPE),
-                      Suppliers.INT_TYPE,
-                      Suppliers.INT_TYPE)),
+                  Suppliers.arrayOf(Suppliers.BYTE_TYPE), Suppliers.INT_TYPE, Suppliers.INT_TYPE),
           constructor()
               .forClass(OutputStreamWriter.class.getName())
-              .withParametersOfType(ImmutableList.of(Suppliers.typeFromClass(OutputStream.class))),
+              .withParametersOfType(Suppliers.typeFromClass(OutputStream.class)),
           constructor()
               .forClass(InputStreamReader.class.getName())
-              .withParametersOfType(ImmutableList.of(Suppliers.typeFromClass(InputStream.class))));
+              .withParametersOfType(Suppliers.typeFromClass(InputStream.class)));
 
   private static final Matcher<ExpressionTree> BYTESTRING_COPY_FROM =
-      staticMethod().onClass("com.google.protobuf.ByteString").named("copyFrom");
+      staticMethod().onClass(BYTE_STRING).named("copyFrom");
 
   private static final Matcher<ExpressionTree> STRING_GET_BYTES =
-      instanceMethod().onExactClass(String.class.getName()).named("getBytes").withParameters();
+      instanceMethod().onExactClass(String.class.getName()).named("getBytes").withNoParameters();
+
+  private static final Matcher<ExpressionTree> BYTE_ARRAY_OUTPUT_STREAM_TO_STRING =
+      instanceMethod()
+          .onDescendantOf(ByteArrayOutputStream.class.getName())
+          .named("toString")
+          .withNoParameters();
 
   private static final Matcher<ExpressionTree> FILE_NEW_WRITER =
       staticMethod()
-          .onClass(com.google.common.io.Files.class.getName())
+          .onClass(Files.class.getName())
           .named("newWriter")
           .withParameters("java.lang.String");
 
@@ -189,42 +197,48 @@ public class DefaultCharset extends BugChecker
               .forClass(Scanner.class.getName())
               .withParameters(ReadableByteChannel.class.getName()));
 
+  private final boolean byteArrayOutputStreamToString;
+
+  @Inject
+  DefaultCharset(ErrorProneFlags flags) {
+    this.byteArrayOutputStreamToString =
+        flags.getBoolean("DefaultCharset:ByteArrayOutputStreamToString").orElse(true);
+  }
+
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (state.isAndroidCompatible()) { // Android's default platform Charset is always UTF-8
       return NO_MATCH;
     }
     if (STRING_GET_BYTES.matches(tree, state)) {
-      Description.Builder description = buildDescription(tree);
       Tree parent = state.getPath().getParentPath().getLeaf();
-      if (parent instanceof ExpressionTree
-          && BYTESTRING_COPY_FROM.matches((ExpressionTree) parent, state)) {
-        byteStringFixes(description, tree, (ExpressionTree) parent, state);
+      if (parent instanceof ExpressionTree expressionTree
+          && BYTESTRING_COPY_FROM.matches(expressionTree, state)) {
+        return byteStringFixes(tree, expressionTree, state);
       } else {
-        appendCharsets(description, tree, tree.getMethodSelect(), tree.getArguments(), state);
+        return appendCharsets(tree, tree.getMethodSelect(), tree.getArguments(), state);
       }
-      return description.build();
     }
     if (FILE_NEW_WRITER.matches(tree, state)) {
-      Description.Builder description = buildDescription(tree);
-      appendCharsets(description, tree, tree.getMethodSelect(), tree.getArguments(), state);
-      return description.build();
+      return appendCharsets(tree, tree.getMethodSelect(), tree.getArguments(), state);
+    }
+    if (byteArrayOutputStreamToString && BYTE_ARRAY_OUTPUT_STREAM_TO_STRING.matches(tree, state)) {
+      return appendCharsets(tree, tree.getMethodSelect(), tree.getArguments(), state);
     }
     return NO_MATCH;
   }
 
-  private static void byteStringFixes(
-      Description.Builder description,
-      MethodInvocationTree tree,
-      ExpressionTree parent,
-      VisitorState state) {
-    description.addFix(byteStringFix(tree, parent, state, "copyFromUtf8(", "").build());
-
+  private Description byteStringFixes(
+      MethodInvocationTree tree, ExpressionTree parent, VisitorState state) {
     SuggestedFix.Builder builder =
         byteStringFix(
             tree, parent, state, "copyFrom(", ", " + CharsetFix.DEFAULT_CHARSET_FIX.replacement());
-    CharsetFix.DEFAULT_CHARSET_FIX.addImport(builder, state);
-    description.addFix(builder.build());
+    CharsetFix.DEFAULT_CHARSET_FIX.addImport(builder);
+
+    return buildDescription(tree)
+        .addFix(byteStringFix(tree, parent, state, "copyFromUtf8(", "").build())
+        .addFix(builder.build())
+        .build();
   }
 
   private static SuggestedFix.Builder byteStringFix(
@@ -237,14 +251,14 @@ public class DefaultCharset extends BugChecker
     SuggestedFix.Builder fix = SuggestedFix.builder();
     if (parentReceiver != null) {
       fix.replace(
-          /*startPos=*/ state.getEndPosition(parentReceiver),
-          /*endPos=*/ getStartPosition(tree),
-          /*replaceWith=*/ "." + prefix);
+          /* startPos= */ state.getEndPosition(parentReceiver),
+          /* endPos= */ getStartPosition(tree),
+          /* replaceWith= */ "." + prefix);
     } else {
       fix.replace(
-          /*startPos=*/ getStartPosition(parent),
-          /*endPos=*/ getStartPosition(tree),
-          /*replaceWith=*/ prefix);
+          /* startPos= */ getStartPosition(parent),
+          /* endPos= */ getStartPosition(tree),
+          /* replaceWith= */ prefix);
     }
     fix.replace(
         state.getEndPosition(ASTHelpers.getReceiver(tree)), state.getEndPosition(tree), suffix);
@@ -257,9 +271,7 @@ public class DefaultCharset extends BugChecker
       return NO_MATCH;
     }
     if (CTOR.matches(tree, state)) {
-      Description.Builder description = buildDescription(tree);
-      appendCharsets(description, tree, tree.getIdentifier(), tree.getArguments(), state);
-      return description.build();
+      return appendCharsets(tree, tree.getIdentifier(), tree.getArguments(), state);
     }
     if (FILE_READER.matches(tree, state)) {
       return handleFileReader(tree, state);
@@ -268,26 +280,26 @@ public class DefaultCharset extends BugChecker
       return handleFileWriter(tree, state);
     }
     if (PRINT_WRITER.matches(tree, state)) {
-      return handlePrintWriter(tree, state);
+      return handlePrintWriter(tree);
     }
     if (PRINT_WRITER_OUTPUTSTREAM.matches(tree, state)) {
-      return handlePrintWriterOutputStream(tree, state);
+      return handlePrintWriterOutputStream(tree);
     }
     if (SCANNER_MATCHER.matches(tree, state)) {
-      return handleScanner(tree, state);
+      return handleScanner(tree);
     }
     return NO_MATCH;
   }
 
-  private Description handleScanner(NewClassTree tree, VisitorState state) {
+  private Description handleScanner(NewClassTree tree) {
     Description.Builder description = buildDescription(tree);
     for (CharsetFix charsetFix : CharsetFix.values()) {
       SuggestedFix.Builder fix =
           SuggestedFix.builder()
               .postfixWith(
                   getOnlyElement(tree.getArguments()),
-                  String.format(", %s.name()", charsetFix.replacement()));
-      charsetFix.addImport(fix, state);
+                  String.format(", %s", charsetFix.replacement()));
+      charsetFix.addImport(fix);
       description.addFix(fix.build());
     }
     return description.build();
@@ -334,7 +346,7 @@ public class DefaultCharset extends BugChecker
         String.format(
             "Files.newBufferedReader(%s, %s)", toPath(state, arg, fix), charset.replacement()));
     fix.addImport("java.nio.file.Files");
-    charset.addImport(fix, state);
+    charset.addImport(fix);
     variableTypeFix(fix, state, FileReader.class, Reader.class);
     return fix.build();
   }
@@ -347,7 +359,7 @@ public class DefaultCharset extends BugChecker
         String.format(
             "Files.newReader(%s, %s)", toFile(state, fileArg, fix), charset.replacement()));
     fix.addImport("com.google.common.io.Files");
-    charset.addImport(fix, state);
+    charset.addImport(fix);
     variableTypeFix(fix, state, FileReader.class, Reader.class);
     return fix.build();
   }
@@ -356,15 +368,13 @@ public class DefaultCharset extends BugChecker
       SuggestedFix.Builder fix, VisitorState state, Class<?> original, Class<?> replacement) {
     Tree parent = state.getPath().getParentPath().getLeaf();
     Symbol sym;
-    switch (parent.getKind()) {
-      case VARIABLE:
-        sym = ASTHelpers.getSymbol((VariableTree) parent);
-        break;
-      case ASSIGNMENT:
-        sym = ASTHelpers.getSymbol(((AssignmentTree) parent).getVariable());
-        break;
-      default:
+    switch (parent) {
+      case VariableTree variableTree -> sym = ASTHelpers.getSymbol(variableTree);
+      case AssignmentTree assignmentTree ->
+          sym = ASTHelpers.getSymbol(assignmentTree.getVariable());
+      default -> {
         return;
+      }
     }
     if (!ASTHelpers.isSameType(
         sym.type, state.getTypeFromString(original.getCanonicalName()), state)) {
@@ -376,7 +386,7 @@ public class DefaultCharset extends BugChecker
         if (!sym.equals(ASTHelpers.getSymbol(node))) {
           return null;
         }
-        if (ASTHelpers.getStartPosition(node.getType()) == -1) {
+        if (ASTHelpers.hasImplicitType(node, state)) {
           // ignore synthetic tree nodes for `var`
           return null;
         }
@@ -414,7 +424,7 @@ public class DefaultCharset extends BugChecker
         String.format(
             "Files.newWriter(%s, %s)", toFile(state, fileArg, fix), charset.replacement()));
     fix.addImport("com.google.common.io.Files");
-    charset.addImport(fix, state);
+    charset.addImport(fix);
     variableTypeFix(fix, state, FileWriter.class, Writer.class);
     return fix.build();
   }
@@ -437,7 +447,7 @@ public class DefaultCharset extends BugChecker
     sb.append(".newBufferedWriter(");
     sb.append(toPath(state, fileArg, fix));
     sb.append(", ").append(charset.replacement());
-    charset.addImport(fix, state);
+    charset.addImport(fix);
     if (appendTree != null) {
       sb.append(toAppendMode(fix, appendTree, state));
     }
@@ -475,7 +485,7 @@ public class DefaultCharset extends BugChecker
     if (ASTHelpers.isSubtype(type, state.getSymtab().stringType, state)) {
       fix.addImport("java.io.File");
       return String.format("new File(%s)", state.getSourceForNode(fileArg));
-    } else if (ASTHelpers.isSubtype(type, state.getTypeFromString("java.io.File"), state)) {
+    } else if (ASTHelpers.isSubtype(type, JAVA_IO_FILE.get(state), state)) {
       return state.getSourceForNode(fileArg);
     } else {
       throw new AssertionError("unexpected type: " + type);
@@ -488,22 +498,19 @@ public class DefaultCharset extends BugChecker
     if (ASTHelpers.isSubtype(type, state.getSymtab().stringType, state)) {
       fix.addImport("java.nio.file.Paths");
       return String.format("Paths.get(%s)", state.getSourceForNode(fileArg));
-    } else if (ASTHelpers.isSubtype(type, state.getTypeFromString("java.io.File"), state)) {
+    } else if (ASTHelpers.isSubtype(type, JAVA_IO_FILE.get(state), state)) {
       return String.format("%s.toPath()", state.getSourceForNode(fileArg));
     } else {
       throw new AssertionError("unexpected type: " + type);
     }
   }
 
-  private static void appendCharsets(
-      Description.Builder description,
-      Tree tree,
-      Tree select,
-      List<? extends ExpressionTree> arguments,
-      VisitorState state) {
-    description.addFix(appendCharset(tree, select, arguments, state, CharsetFix.UTF_8_FIX));
-    description.addFix(
-        appendCharset(tree, select, arguments, state, CharsetFix.DEFAULT_CHARSET_FIX));
+  private Description appendCharsets(
+      Tree tree, Tree select, List<? extends ExpressionTree> arguments, VisitorState state) {
+    return buildDescription(tree)
+        .addFix(appendCharset(tree, select, arguments, state, CharsetFix.UTF_8_FIX))
+        .addFix(appendCharset(tree, select, arguments, state, CharsetFix.DEFAULT_CHARSET_FIX))
+        .build();
   }
 
   private static Fix appendCharset(
@@ -521,38 +528,40 @@ public class DefaultCharset extends BugChecker
     } else {
       fix.postfixWith(Iterables.getLast(arguments), ", " + charset.replacement());
     }
-    charset.addImport(fix, state);
+    charset.addImport(fix);
     fix.setShortDescription(charset.title);
     return fix.build();
   }
 
-  private Description handlePrintWriter(NewClassTree tree, VisitorState state) {
+  private Description handlePrintWriter(NewClassTree tree) {
     Description.Builder description = buildDescription(tree);
     for (CharsetFix charsetFix : CharsetFix.values()) {
       SuggestedFix.Builder fix =
           SuggestedFix.builder()
               .postfixWith(
                   getOnlyElement(tree.getArguments()),
-                  String.format(", %s.name()", charsetFix.replacement()));
-      charsetFix.addImport(fix, state);
+                  String.format(", %s", charsetFix.replacement()));
+      charsetFix.addImport(fix);
       description.addFix(fix.build());
     }
     return description.build();
   }
 
-  private Description handlePrintWriterOutputStream(NewClassTree tree, VisitorState state) {
-    Tree outputStream = tree.getArguments().get(0);
+  private Description handlePrintWriterOutputStream(NewClassTree tree) {
+    Tree outputStream = tree.getArguments().getFirst();
     Description.Builder description = buildDescription(tree);
     for (CharsetFix charsetFix : CharsetFix.values()) {
       SuggestedFix.Builder fix =
           SuggestedFix.builder()
               .prefixWith(outputStream, "new BufferedWriter(new OutputStreamWriter(")
               .postfixWith(outputStream, String.format(", %s))", charsetFix.replacement()));
-      charsetFix.addImport(fix, state);
+      charsetFix.addImport(fix);
       fix.addImport("java.io.BufferedWriter");
       fix.addImport("java.io.OutputStreamWriter");
       description.addFix(fix.build());
     }
     return description.build();
   }
+
+  private static final Supplier<Type> JAVA_IO_FILE = typeFromString("java.io.File");
 }

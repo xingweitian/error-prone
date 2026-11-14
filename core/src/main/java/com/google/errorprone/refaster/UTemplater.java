@@ -18,7 +18,16 @@ package com.google.errorprone.refaster;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
+import static com.google.errorprone.util.AnnotationNames.MATCHES_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.NOT_MATCHES_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.OF_KIND_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.REPEATED_ANNOTATION;
 
+import com.google.auto.common.AnnotationMirrors;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -26,14 +35,11 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.reflect.TypeToken;
-import com.google.errorprone.SubContext;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.refaster.annotation.Matches;
-import com.google.errorprone.refaster.annotation.NotMatches;
-import com.google.errorprone.refaster.annotation.OfKind;
-import com.google.errorprone.refaster.annotation.Repeated;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.MoreAnnotations;
 import com.sun.source.tree.AnnotatedTypeTree;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ArrayAccessTree;
@@ -109,17 +115,13 @@ import com.sun.tools.javac.tree.JCTree.JCPrimitiveTypeTree;
 import com.sun.tools.javac.util.Context;
 import java.lang.annotation.Annotation;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.Nullable;
-import javax.lang.model.element.Element;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.ElementKind;
-import javax.lang.model.element.TypeElement;
-import javax.lang.model.type.DeclaredType;
-import javax.lang.model.type.MirroredTypeException;
+import javax.lang.model.type.TypeMirror;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Converts a type-checked syntax tree to a portable {@code UTree} template.
@@ -127,38 +129,29 @@ import javax.lang.model.type.MirroredTypeException;
  * @author lowasser@google.com (Louis Wasserman)
  */
 public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
-  /**
-   * Context key to indicate that templates should be treated as BlockTemplates, regardless of their
-   * structure.
-   */
-  public static final Context.Key<Boolean> REQUIRE_BLOCK_KEY = new Context.Key<>();
-
-  /**
-   * Returns a template based on a method. One-line methods starting with a {@code return} statement
-   * are guessed to be expression templates, and all other methods are guessed to be block
-   * templates.
-   */
-  public static Template<?> createTemplate(Context context, MethodTree decl) {
+  public static Template<?> createTemplate(
+      Context context,
+      MethodTree decl,
+      Map<MethodSymbol, PlaceholderMethod> placeholderMethods,
+      boolean requireBlock) {
     MethodSymbol declSym = ASTHelpers.getSymbol(decl);
     ImmutableClassToInstanceMap<Annotation> annotations = UTemplater.annotationMap(declSym);
     ImmutableMap<String, VarSymbol> freeExpressionVars = freeExpressionVariables(decl);
-    Context subContext = new SubContext(context);
-    final UTemplater templater = new UTemplater(freeExpressionVars, subContext);
+    UTemplater templater = new UTemplater(freeExpressionVars, context, placeholderMethods);
     ImmutableMap<String, UType> expressionVarTypes =
         ImmutableMap.copyOf(
             Maps.transformValues(
                 freeExpressionVars, (VarSymbol sym) -> templater.template(sym.type)));
 
     UType genericType = templater.template(declSym.type);
-    List<UTypeVar> typeParameters;
+    ImmutableList<UTypeVar> typeParameters;
     UMethodType methodType;
-    if (genericType instanceof UForAll) {
-      UForAll forAllType = (UForAll) genericType;
+    if (genericType instanceof UForAll forAllType) {
       typeParameters = forAllType.getTypeVars();
       methodType = (UMethodType) forAllType.getQuantifiedType();
-    } else if (genericType instanceof UMethodType) {
+    } else if (genericType instanceof UMethodType uMethodType) {
       typeParameters = ImmutableList.of();
-      methodType = (UMethodType) genericType;
+      methodType = uMethodType;
     } else {
       throw new IllegalArgumentException(
           "Expected genericType to be either a ForAll or a UMethodType, but was " + genericType);
@@ -166,10 +159,9 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
     List<? extends StatementTree> bodyStatements = decl.getBody().getStatements();
     if (bodyStatements.size() == 1
-        && Iterables.getOnlyElement(bodyStatements).getKind() == Kind.RETURN
-        && context.get(REQUIRE_BLOCK_KEY) == null) {
-      ExpressionTree expression =
-          ((ReturnTree) Iterables.getOnlyElement(bodyStatements)).getExpression();
+        && Iterables.getOnlyElement(bodyStatements) instanceof ReturnTree returnTree
+        && !requireBlock) {
+      ExpressionTree expression = returnTree.getExpression();
       return ExpressionTemplate.create(
           annotations,
           typeParameters,
@@ -186,33 +178,49 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     }
   }
 
+  public static Template<?> createTemplate(Context context, MethodTree decl) {
+    return createTemplate(context, decl, ImmutableMap.of(), false);
+  }
+
   public static ImmutableMap<String, VarSymbol> freeExpressionVariables(
       MethodTree templateMethodDecl) {
     ImmutableMap.Builder<String, VarSymbol> builder = ImmutableMap.builder();
     for (VariableTree param : templateMethodDecl.getParameters()) {
       builder.put(param.getName().toString(), ASTHelpers.getSymbol(param));
     }
-    return builder.build();
+    return builder.buildOrThrow();
   }
 
   private final ImmutableMap<String, VarSymbol> freeVariables;
   private final Context context;
+  private final Map<MethodSymbol, PlaceholderMethod> placeholderMethods;
 
-  public UTemplater(Map<String, VarSymbol> freeVariables, Context context) {
+  public UTemplater(
+      Map<String, VarSymbol> freeVariables,
+      Context context,
+      Map<MethodSymbol, PlaceholderMethod> placeholderMethods) {
     this.freeVariables = ImmutableMap.copyOf(freeVariables);
     this.context = context;
+    this.placeholderMethods = placeholderMethods;
+  }
+
+  public UTemplater(Map<String, VarSymbol> freeVariables, Context context) {
+    this(freeVariables, context, ImmutableMap.of());
+  }
+
+  UTemplater(Context context, Map<MethodSymbol, PlaceholderMethod> placeholderMethods) {
+    this(ImmutableMap.of(), context, placeholderMethods);
   }
 
   UTemplater(Context context) {
-    this(ImmutableMap.<String, VarSymbol>of(), context);
+    this(ImmutableMap.of(), context, ImmutableMap.of());
   }
 
   public Tree template(Tree tree) {
     return tree.accept(this, null);
   }
 
-  @Nullable
-  private List<Tree> templateTrees(@Nullable Iterable<? extends Tree> trees) {
+  private @Nullable ImmutableList<Tree> templateTrees(@Nullable Iterable<? extends Tree> trees) {
     if (trees == null) {
       return null;
     }
@@ -253,8 +261,7 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     return (UExpression) tree.accept(this, null);
   }
 
-  @Nullable
-  private List<UExpression> templateExpressions(
+  private @Nullable ImmutableList<UExpression> templateExpressions(
       @Nullable Iterable<? extends ExpressionTree> expressions) {
     if (expressions == null) {
       return null;
@@ -274,8 +281,8 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     return template((ExpressionTree) tree);
   }
 
-  @Nullable
-  private List<UExpression> templateTypeExpressions(@Nullable Iterable<? extends Tree> types) {
+  private @Nullable ImmutableList<UExpression> templateTypeExpressions(
+      @Nullable Iterable<? extends Tree> types) {
     if (types == null) {
       return null;
     }
@@ -332,9 +339,9 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
   @Override
   public UExpression visitMemberSelect(MemberSelectTree tree, Void v) {
     Symbol sym = ASTHelpers.getSymbol(tree);
-    if (sym instanceof ClassSymbol) {
-      return UClassIdent.create((ClassSymbol) sym);
-    } else if (sym.isStatic()) {
+    if (sym instanceof ClassSymbol classSymbol) {
+      return UClassIdent.create(classSymbol);
+    } else if (isStatic(sym)) {
       ExpressionTree selected = tree.getExpression();
       checkState(
           ASTHelpers.getSymbol(selected) instanceof ClassSymbol,
@@ -347,6 +354,13 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
   private UStaticIdent staticMember(Symbol symbol) {
     return UStaticIdent.create(
+        (ClassSymbol) symbol.getEnclosingElement(),
+        symbol.getSimpleName(),
+        template(symbol.asType()));
+  }
+
+  private UMethodIdent method(Symbol symbol) {
+    return UMethodIdent.create(
         (ClassSymbol) symbol.getEnclosingElement(),
         symbol.getSimpleName(),
         template(symbol.asType()));
@@ -418,7 +432,7 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
   static <T, U extends Unifiable<? super T>> boolean anyMatch(
       U toUnify, T target, Unifier unifier) {
-    return toUnify.unify(target, unifier).first().isPresent();
+    return toUnify.unify(target, unifier).findFirst().isPresent();
   }
 
   @Override
@@ -452,19 +466,21 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     } else if (anyMatch(AS_VARARGS, tree.getMethodSelect(), new Unifier(context))) {
       ExpressionTree arg = Iterables.getOnlyElement(tree.getArguments());
       checkArgument(
-          ASTHelpers.hasAnnotation(
-              ASTHelpers.getSymbol(arg), Repeated.class, new VisitorState(context)));
+          hasAnnotation(
+              ASTHelpers.getSymbol(arg),
+              REPEATED_ANNOTATION,
+              VisitorState.createForUtilityPurposes(context)));
       return template(arg);
     }
-    Map<MethodSymbol, PlaceholderMethod> placeholderMethods =
-        context.get(RefasterRuleBuilderScanner.PLACEHOLDER_METHODS_KEY);
-    if (placeholderMethods != null && placeholderMethods.containsKey(ASTHelpers.getSymbol(tree))) {
+    if (placeholderMethods.containsKey(ASTHelpers.getSymbol(tree))) {
       return UPlaceholderExpression.create(
           placeholderMethods.get(ASTHelpers.getSymbol(tree)),
           templateExpressions(tree.getArguments()));
     } else {
       return UMethodInvocation.create(
-          template(tree.getMethodSelect()), templateExpressions(tree.getArguments()));
+          templateTypeExpressions(tree.getTypeArguments()),
+          template(tree.getMethodSelect()),
+          templateExpressions(tree.getArguments()));
     }
   }
 
@@ -584,30 +600,33 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
   @Override
   public UExpression visitIdentifier(IdentifierTree tree, Void v) {
     Symbol sym = ASTHelpers.getSymbol(tree);
-    if (sym instanceof ClassSymbol) {
-      return UClassIdent.create((ClassSymbol) sym);
-    } else if (sym != null && sym.isStatic()) {
+    if (sym instanceof ClassSymbol classSymbol) {
+      return UClassIdent.create(classSymbol);
+    } else if (sym != null && isStatic(sym)) {
       return staticMember(sym);
     } else if (freeVariables.containsKey(tree.getName().toString())) {
       VarSymbol symbol = freeVariables.get(tree.getName().toString());
       checkState(symbol == sym);
       UExpression ident = UFreeIdent.create(tree.getName());
-      Matches matches = ASTHelpers.getAnnotation(symbol, Matches.class);
+      Class<? extends Matcher<? super ExpressionTree>> matches =
+          getMatcherClass(symbol, MATCHES_ANNOTATION);
       if (matches != null) {
-        ident = UMatches.create(getValue(matches), /* positive= */ true, ident);
+        ident = UMatches.create(matches, /* positive= */ true, ident);
       }
-      NotMatches notMatches = ASTHelpers.getAnnotation(symbol, NotMatches.class);
+      Class<? extends Matcher<? super ExpressionTree>> notMatches =
+          getMatcherClass(symbol, NOT_MATCHES_ANNOTATION);
       if (notMatches != null) {
-        ident = UMatches.create(getValue(notMatches), /* positive= */ false, ident);
+        ident = UMatches.create(notMatches, /* positive= */ false, ident);
       }
-      OfKind hasKind = ASTHelpers.getAnnotation(symbol, OfKind.class);
-      if (hasKind != null) {
-        EnumSet<Kind> allowed = EnumSet.copyOf(Arrays.asList(hasKind.value()));
-        ident = UOfKind.create(ident, ImmutableSet.copyOf(allowed));
+      ImmutableSet<Kind> allowed =
+          MoreAnnotations.getEnumValues(symbol, OF_KIND_ANNOTATION).stream()
+              .map(c -> Kind.valueOf(c.getSimpleName().toString()))
+              .collect(toImmutableSet());
+      if (!allowed.isEmpty()) {
+        ident = UOfKind.create(ident, allowed);
       }
       // @Repeated annotations need to be checked last.
-      Repeated repeated = ASTHelpers.getAnnotation(symbol, Repeated.class);
-      if (repeated != null) {
+      if (MoreAnnotations.getAnnotation(symbol, REPEATED_ANNOTATION).isPresent()) {
         ident = URepeated.create(tree.getName(), ident);
       }
       return ident;
@@ -615,53 +634,36 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     if (sym == null) {
       return UTypeVarIdent.create(tree.getName());
     }
-    switch (sym.getKind()) {
-      case TYPE_PARAMETER:
-        return UTypeVarIdent.create(tree.getName());
-      default:
-        return ULocalVarIdent.create(tree.getName());
-    }
+    return switch (sym.getKind()) {
+      case TYPE_PARAMETER -> UTypeVarIdent.create(tree.getName());
+      case METHOD -> method(sym);
+      default -> ULocalVarIdent.create(tree.getName());
+    };
+  }
+
+  static @Nullable Class<? extends Matcher<? super ExpressionTree>> getMatcherClass(
+      Symbol symbol, ClassName annotationName) {
+    return MoreAnnotations.getAnnotation(symbol, annotationName)
+        .map(UTemplater::getMatcherClass)
+        .orElse(null);
   }
 
   /**
-   * Returns the {@link Class} instance for the {@link Matcher} associated with the provided {@link
-   * Matches} annotation. This roundabout solution is recommended and explained by {@link
-   * Element#getAnnotation(Class)}.
+   * Returns the {@link Class} instance for the {@link Matcher} associated with the provided
+   * annotation mirror.
    */
-  static Class<? extends Matcher<? super ExpressionTree>> getValue(Matches matches) {
-    String name;
-    try {
-      matches.value();
-      throw new RuntimeException("unreachable");
-    } catch (MirroredTypeException e) {
-      DeclaredType type = (DeclaredType) e.getTypeMirror();
-      name = ((TypeElement) type.asElement()).getQualifiedName().toString();
-    }
+  static Class<? extends Matcher<? super ExpressionTree>> getMatcherClass(
+      AnnotationMirror compound) {
+    TypeMirror type =
+        MoreAnnotations.getTypeValue(compound, "value")
+            .orElseThrow(() ->
+                new IllegalArgumentException(
+                    "No value in " + AnnotationMirrors.toString(compound)));
+    String name = ((Type) type).asElement().getQualifiedName().toString();
     try {
       return asSubclass(Class.forName(name), new TypeToken<Matcher<? super ExpressionTree>>() {});
     } catch (ClassNotFoundException | ClassCastException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  /**
-   * Returns the {@link Class} instance for the {@link Matcher} associated with the provided {@link
-   * NotMatches} annotation. This roundabout solution is recommended and explained by {@link
-   * Element#getAnnotation(Class)}.
-   */
-  static Class<? extends Matcher<? super ExpressionTree>> getValue(NotMatches matches) {
-    String name;
-    try {
-      matches.value();
-      throw new RuntimeException("unreachable");
-    } catch (MirroredTypeException e) {
-      DeclaredType type = (DeclaredType) e.getTypeMirror();
-      name = ((TypeElement) type.asElement()).getQualifiedName().toString();
-    }
-    try {
-      return asSubclass(Class.forName(name), new TypeToken<Matcher<? super ExpressionTree>>() {});
-    } catch (ClassNotFoundException | ClassCastException e) {
-      throw new RuntimeException(e);
+      throw new IllegalArgumentException(e);
     }
   }
 
@@ -681,8 +683,8 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
     return (UStatement) tree.accept(this, null);
   }
 
-  @Nullable
-  private List<UStatement> templateStatements(@Nullable List<? extends StatementTree> statements) {
+  private @Nullable ImmutableList<UStatement> templateStatements(
+      @Nullable List<? extends StatementTree> statements) {
     if (statements == null) {
       return null;
     }
@@ -696,7 +698,7 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
   @Override
   public UTry visitTry(TryTree tree, Void v) {
     @SuppressWarnings({"unchecked", "rawtypes"})
-    List<UTree<?>> resources =
+    ImmutableList<UTree<?>> resources =
         cast(templateTrees(tree.getResources()), (Class<UTree<?>>) (Class) UTree.class);
     UBlock block = visitBlock(tree.getBlock(), null);
     ImmutableList.Builder<UCatch> catchesBuilder = ImmutableList.builder();
@@ -714,13 +716,8 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
         visitVariable(tree.getParameter(), null), visitBlock(tree.getBlock(), null));
   }
 
-  @Nullable
-  private PlaceholderMethod placeholder(@Nullable ExpressionTree expr) {
-    Map<MethodSymbol, PlaceholderMethod> placeholderMethods =
-        context.get(RefasterRuleBuilderScanner.PLACEHOLDER_METHODS_KEY);
-    return (placeholderMethods != null && expr != null)
-        ? placeholderMethods.get(ASTHelpers.getSymbol(expr))
-        : null;
+  private @Nullable PlaceholderMethod placeholder(@Nullable ExpressionTree expr) {
+    return expr != null ? placeholderMethods.get(ASTHelpers.getSymbol(expr)) : null;
   }
 
   @Override
@@ -758,7 +755,8 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
   public UVariableDecl visitVariable(VariableTree tree, Void v) {
     return UVariableDecl.create(
         tree.getName(),
-        templateType(tree.getType()),
+        UVariableDecl.isVarType(tree) ? null : templateType(tree.getType()),
+        template(getType(tree)),
         (tree.getInitializer() == null) ? null : template(tree.getInitializer()));
   }
 
@@ -879,9 +877,9 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
         @Override
         public UType visitClassType(ClassType type, Void v) {
-          if (type instanceof IntersectionClassType) {
+          if (type instanceof IntersectionClassType intersectionClassType) {
             return UIntersectionClassType.create(
-                templateTypes(((IntersectionClassType) type).getComponents()));
+                templateTypes(intersectionClassType.getComponents()));
           }
           return UClassType.create(
               type.tsym.getQualifiedName().toString(), templateTypes(type.getTypeArguments()));
@@ -912,7 +910,8 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
         @Override
         public UForAll visitForAll(ForAll type, Void v) {
-          List<UTypeVar> vars = cast(templateTypes(type.getTypeVariables()), UTypeVar.class);
+          ImmutableList<UTypeVar> vars =
+              cast(templateTypes(type.getTypeVariables()), UTypeVar.class);
           return UForAll.create(vars, type.qtype.accept(this, null));
         }
       };
@@ -920,17 +919,22 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
   @SuppressWarnings("unchecked")
   public static ImmutableClassToInstanceMap<Annotation> annotationMap(Symbol symbol) {
     ImmutableClassToInstanceMap.Builder<Annotation> builder = ImmutableClassToInstanceMap.builder();
-    for (Compound compound : symbol.getAnnotationMirrors()) {
-      String annotationClassName =
-          classNameFrom((TypeElement) compound.getAnnotationType().asElement());
+    for (AnnotationMirror compound : symbol.getAnnotationMirrors()) {
+      String annotationClassName = classNameFrom(MoreAnnotations.asElement(compound));
       try {
         Class<? extends Annotation> annotationClazz =
             Class.forName(annotationClassName).asSubclass(Annotation.class);
         builder.put(
             (Class) annotationClazz,
-            AnnotationProxyMaker.generateAnnotation(compound, annotationClazz));
+            AnnotationProxyMaker.generateAnnotation((Compound) compound, annotationClazz));
       } catch (ClassNotFoundException e) {
-        throw new IllegalArgumentException("Unrecognized annotation type", e);
+        String friendlyMessage =
+            "Tried to instantiate an instance of the annotation "
+                + annotationClassName
+                + " while processing "
+                + symbol.getSimpleName()
+                + ", but the annotation class file was not present on the classpath.";
+        throw new LinkageError(friendlyMessage, e);
       }
     }
     return builder.build();
@@ -938,13 +942,13 @@ public class UTemplater extends SimpleTreeVisitor<Tree, Void> {
 
   // Class.forName() needs nested classes as "foo.Bar$Baz$Quux", not "foo.Bar.Baz.Quux"
   // (which is what getQualifiedName() returns).
-  private static String classNameFrom(TypeElement type) {
+  private static String classNameFrom(Symbol type) {
     // Get the full type name (e.g. "foo.Bar.Baz.Quux") before walking up the hierarchy.
     String typeName = type.getQualifiedName().toString();
     // Find outermost enclosing type (e.g. "foo.Bar" in our example), possibly several levels up.
     // Packages enclose types, so we cannot just wait until we hit null.
     while (type.getEnclosingElement().getKind() == ElementKind.CLASS) {
-      type = (TypeElement) type.getEnclosingElement();
+      type = type.getEnclosingElement();
     }
     // Start with outermost class name and append remainder of full type name with '.' -> '$'
     String className = type.getQualifiedName().toString();

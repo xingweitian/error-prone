@@ -46,9 +46,10 @@ import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 @BugPattern(
-    name = "DeadException",
     altNames = "ThrowableInstanceNeverThrown",
     summary = "Exception created but not thrown",
     severity = ERROR)
@@ -92,7 +93,7 @@ public class DeadException extends BugChecker implements NewClassTreeMatcher {
 
   private static class ChildOfBlockOrCase<T extends Tree>
       extends ChildMultiMatcher<T, StatementTree> {
-    public ChildOfBlockOrCase(MatchType matchType, Matcher<StatementTree> nodeMatcher) {
+    ChildOfBlockOrCase(MatchType matchType, Matcher<StatementTree> nodeMatcher) {
       super(matchType, nodeMatcher);
     }
 
@@ -102,10 +103,10 @@ public class DeadException extends BugChecker implements NewClassTreeMatcher {
       if (enclosing == null) {
         return ImmutableList.of();
       }
-      if (enclosing instanceof BlockTree) {
-        return ((BlockTree) enclosing).getStatements();
-      } else if (enclosing instanceof CaseTree) {
-        return ((CaseTree) enclosing).getStatements();
+      if (enclosing instanceof BlockTree blockTree) {
+        return blockTree.getStatements();
+      } else if (enclosing instanceof CaseTree caseTree) {
+        return caseTree.getStatements();
       } else {
         // findEnclosing given two types must return something of one of those types
         throw new IllegalStateException("enclosing tree not a BlockTree or CaseTree");

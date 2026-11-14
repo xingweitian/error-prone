@@ -16,19 +16,26 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static com.google.errorprone.util.ASTHelpers.getDeclaredSymbol;
+import static com.google.errorprone.util.ASTHelpers.getModifiers;
+import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
+import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Range;
+import com.google.common.collect.TreeRangeSet;
 import com.google.errorprone.BugCheckerInfo;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.ErrorProneOptions;
+import com.google.errorprone.SuppressionInfo;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.annotations.CheckReturnValue;
+import com.google.errorprone.fixes.ErrorPronePosition;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Suppressible;
 import com.google.errorprone.suppliers.Supplier;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AnnotatedTypeTree;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ArrayAccessTree;
@@ -36,6 +43,7 @@ import com.sun.source.tree.ArrayTypeTree;
 import com.sun.source.tree.AssertTree;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BinaryTree;
+import com.sun.source.tree.BindingPatternTree;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.BreakTree;
 import com.sun.source.tree.CaseTree;
@@ -44,10 +52,14 @@ import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.CompoundAssignmentTree;
 import com.sun.source.tree.ConditionalExpressionTree;
+import com.sun.source.tree.ConstantCaseLabelTree;
 import com.sun.source.tree.ContinueTree;
+import com.sun.source.tree.DeconstructionPatternTree;
+import com.sun.source.tree.DefaultCaseLabelTree;
 import com.sun.source.tree.DoWhileLoopTree;
 import com.sun.source.tree.EmptyStatementTree;
 import com.sun.source.tree.EnhancedForLoopTree;
+import com.sun.source.tree.ExportsTree;
 import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ForLoopTree;
 import com.sun.source.tree.IdentifierTree;
@@ -63,12 +75,19 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
+import com.sun.source.tree.ModuleTree;
 import com.sun.source.tree.NewArrayTree;
 import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.OpensTree;
+import com.sun.source.tree.PackageTree;
 import com.sun.source.tree.ParameterizedTypeTree;
 import com.sun.source.tree.ParenthesizedTree;
+import com.sun.source.tree.PatternCaseLabelTree;
 import com.sun.source.tree.PrimitiveTypeTree;
+import com.sun.source.tree.ProvidesTree;
+import com.sun.source.tree.RequiresTree;
 import com.sun.source.tree.ReturnTree;
+import com.sun.source.tree.SwitchExpressionTree;
 import com.sun.source.tree.SwitchTree;
 import com.sun.source.tree.SynchronizedTree;
 import com.sun.source.tree.ThrowTree;
@@ -78,21 +97,22 @@ import com.sun.source.tree.TypeCastTree;
 import com.sun.source.tree.TypeParameterTree;
 import com.sun.source.tree.UnaryTree;
 import com.sun.source.tree.UnionTypeTree;
+import com.sun.source.tree.UsesTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.tree.WhileLoopTree;
 import com.sun.source.tree.WildcardTree;
+import com.sun.source.tree.YieldTree;
+import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
+import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.Name;
 import java.io.Serializable;
 import java.lang.annotation.Annotation;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiPredicate;
 
@@ -116,64 +136,81 @@ public abstract class BugChecker implements Suppressible, Serializable {
 
   private static BiPredicate<Set<? extends Name>, VisitorState> suppressionPredicate(
       Set<Class<? extends Annotation>> suppressionClasses) {
-    switch (suppressionClasses.size()) {
-      case 0:
-        return (annos, state) -> false;
-      case 1:
-        {
-          Supplier<Name> self =
-              VisitorState.memoize(
-                  state -> state.getName(Iterables.getOnlyElement(suppressionClasses).getName()));
-          return (annos, state) -> annos.contains(self.get(state));
-        }
-      default:
-        {
-          Supplier<Set<? extends Name>> self =
-              VisitorState.memoize(
-                  state ->
-                      suppressionClasses.stream()
-                          .map(Class::getName)
-                          .map(state::getName)
-                          .collect(toImmutableSet()));
-          return (annos, state) -> !Collections.disjoint(self.get(state), annos);
-        }
-    }
+    return switch (suppressionClasses.size()) {
+      case 0 -> (annos, state) -> false;
+      case 1 -> {
+        Supplier<Name> self =
+            VisitorState.memoize(
+                state -> state.getName(Iterables.getOnlyElement(suppressionClasses).getName()));
+        yield (annos, state) -> annos.contains(self.get(state));
+      }
+      default -> {
+        Supplier<Set<? extends Name>> self =
+            VisitorState.memoize(state ->
+                suppressionClasses.stream()
+                    .map(Class::getName)
+                    .map(state::getName)
+                    .collect(toImmutableSet()));
+        yield (annos, state) -> !Collections.disjoint(self.get(state), annos);
+      }
+    };
   }
 
   /** Helper to create a Description for the common case where there is a fix. */
   @CheckReturnValue
-  protected Description describeMatch(Tree node, Fix fix) {
-    return buildDescription(node).addFix(fix).build();
-  }
-
-  /** Helper to create a Description for the common case where there is a fix. */
-  @CheckReturnValue
-  protected Description describeMatch(JCTree node, Fix fix) {
-    return describeMatch((Tree) node, fix);
-  }
-
-  /** Helper to create a Description for the common case where there is a fix. */
-  @CheckReturnValue
-  protected Description describeMatch(DiagnosticPosition position, Fix fix) {
+  public Description describeMatch(ErrorPronePosition position, Fix fix) {
     return buildDescription(position).addFix(fix).build();
+  }
+
+  /** Helper to create a Description for the common case where there is a fix. */
+  @CheckReturnValue
+  public Description describeMatch(Tree node, Fix fix) {
+    return describeMatch(ErrorPronePosition.from(node), fix);
+  }
+
+  /** Helper to create a Description for the common case where there is a fix. */
+  @CheckReturnValue
+  public Description describeMatch(JCTree node, Fix fix) {
+    return describeMatch(ErrorPronePosition.from(node), fix);
+  }
+
+  /** Helper to create a Description for the common case where there is a fix. */
+  @CheckReturnValue
+  public Description describeMatch(DiagnosticPosition position, Fix fix) {
+    return describeMatch(ErrorPronePosition.from(position), fix);
   }
 
   /** Helper to create a Description for the common case where there is no fix. */
   @CheckReturnValue
-  protected Description describeMatch(Tree node) {
-    return buildDescription(node).build();
+  public Description describeMatch(ErrorPronePosition position) {
+    return buildDescription(position).build();
   }
 
-  /** Helper to create a Description for the common case where there is an {@link Optional} fix. */
+  /** Helper to create a Description for the common case where there is no fix. */
   @CheckReturnValue
-  protected Description describeMatch(Tree node, Optional<? extends Fix> fix) {
-    return buildDescription(node).addFix(fix).build();
+  public Description describeMatch(Tree node) {
+    return describeMatch(ErrorPronePosition.from(node));
   }
 
-  /** Helper to create a Description for the common case where there is an {@link Optional} fix. */
+  /** Helper to create a Description for the common case where there is no fix. */
   @CheckReturnValue
-  protected Description describeMatch(DiagnosticPosition position, Optional<? extends Fix> fix) {
-    return buildDescription(position).addFix(fix).build();
+  public Description describeMatch(JCTree node) {
+    return describeMatch(ErrorPronePosition.from(node));
+  }
+
+  /** Helper to create a Description for the common case where there is no fix. */
+  @CheckReturnValue
+  public Description describeMatch(DiagnosticPosition position) {
+    return describeMatch(ErrorPronePosition.from(position));
+  }
+
+  /**
+   * Returns a Description builder, which allows you to customize the diagnostic with a custom
+   * message or multiple fixes.
+   */
+  @CheckReturnValue
+  public Description.Builder buildDescription(ErrorPronePosition position) {
+    return Description.builder(position, canonicalName(), linkUrl(), message());
   }
 
   /**
@@ -182,7 +219,7 @@ public abstract class BugChecker implements Suppressible, Serializable {
    */
   @CheckReturnValue
   public Description.Builder buildDescription(Tree node) {
-    return Description.builder(node, canonicalName(), linkUrl(), defaultSeverity(), message());
+    return buildDescription(ErrorPronePosition.from(node));
   }
 
   /**
@@ -191,7 +228,7 @@ public abstract class BugChecker implements Suppressible, Serializable {
    */
   @CheckReturnValue
   public Description.Builder buildDescription(DiagnosticPosition position) {
-    return Description.builder(position, canonicalName(), linkUrl(), defaultSeverity(), message());
+    return buildDescription(ErrorPronePosition.from(position));
   }
 
   /**
@@ -201,7 +238,7 @@ public abstract class BugChecker implements Suppressible, Serializable {
   // This overload exists purely to disambiguate for JCTree.
   @CheckReturnValue
   public Description.Builder buildDescription(JCTree tree) {
-    return Description.builder(tree, canonicalName(), linkUrl(), defaultSeverity(), message());
+    return buildDescription(ErrorPronePosition.from(tree));
   }
 
   @Override
@@ -220,10 +257,6 @@ public abstract class BugChecker implements Suppressible, Serializable {
 
   public SeverityLevel defaultSeverity() {
     return info.defaultSeverity();
-  }
-
-  public SeverityLevel severity(Map<String, SeverityLevel> severities) {
-    return firstNonNull(severities.get(canonicalName()), defaultSeverity());
   }
 
   public String linkUrl() {
@@ -253,29 +286,71 @@ public abstract class BugChecker implements Suppressible, Serializable {
    * Returns true if the given tree is annotated with a {@code @SuppressWarnings} that disables this
    * bug checker.
    */
-  public boolean isSuppressed(Tree tree) {
-    return isSuppressed(ASTHelpers.getAnnotation(tree, SuppressWarnings.class));
+  public boolean isSuppressed(Tree tree, VisitorState state) {
+    Symbol sym = getDeclaredSymbol(tree);
+    /*
+     * TODO(cpovirk): At least for @SuppressWarnings, should our suppression checks look for
+     * annotations only on the kinds of trees that are covered by SuppressibleTreePathScanner? Or,
+     * now that @SuppressWarnings has been changed to be applicable to all declaration locations,
+     * should we generalize SuppressibleTreePathScanner to look on all those locations?
+     */
+    return sym != null && isSuppressed(sym, state);
   }
 
   /**
-   * Returns true if the given symbol is annotated with a {@code @SuppressWarnings} that disables
-   * this bug checker.
+   * Returns true if the given symbol is annotated with a {@code @SuppressWarnings} or other
+   * annotation that disables this bug checker.
    */
-  public boolean isSuppressed(Symbol symbol) {
-    return isSuppressed(ASTHelpers.getAnnotation(symbol, SuppressWarnings.class));
+  /*
+   * TODO(cpovirk): Would we consider deleting this overload (or at least making it `private`)? Its
+   * callers appear to all have access to a Tree, and callers might accidentally pass
+   * getSymbol(tree) instead of getDeclaredSymbol(tree), resulting in over-suppression. Fortunately,
+   * the Tree probably provides all that we need, at least for looking for @SuppressWarnings. It
+   * does *not* provide all that we need for looking for any @Inherited suppression annotations (if
+   * such annotations are something that we (a) support and (b) want to support), but we can always
+   * call getDeclaredSymbol inside the implementation where necessary.
+   */
+  public boolean isSuppressed(Symbol sym, VisitorState state) {
+    ErrorProneOptions errorProneOptions = state.errorProneOptions();
+    boolean suppressedInGeneratedCode =
+        errorProneOptions.disableWarningsInGeneratedCode()
+            && state.severityMap().get(canonicalName()) != SeverityLevel.ERROR;
+    SuppressionInfo.SuppressedState suppressedState =
+        SuppressionInfo.EMPTY
+            .withExtendedSuppressions(sym, state, customSuppressionAnnotationNames.get(state))
+            .suppressedState(BugChecker.this, suppressedInGeneratedCode, state);
+    return suppressedState == SuppressionInfo.SuppressedState.SUPPRESSED;
   }
 
-  private boolean isSuppressed(SuppressWarnings suppression) {
-    return suppression != null
-        && !Collections.disjoint(Arrays.asList(suppression.value()), allNames());
-  }
+  private final Supplier<? extends Set<? extends Name>> customSuppressionAnnotationNames =
+      VisitorState.memoize(state ->
+          customSuppressionAnnotations().stream()
+              .map(a -> state.getName(a.getName()))
+              .collect(toImmutableSet()));
 
-  public interface AnnotationTreeMatcher extends Suppressible {
-    Description matchAnnotation(AnnotationTree tree, VisitorState state);
+  /** Computes a RangeSet of code regions which are suppressed by this bug checker. */
+  public ImmutableRangeSet<Integer> suppressedRegions(VisitorState state) {
+    TreeRangeSet<Integer> suppressedRegions = TreeRangeSet.create();
+    new TreeScanner<Void, Void>() {
+      @Override
+      public Void scan(Tree tree, Void unused) {
+        if (getModifiers(tree) != null && isSuppressed(tree, state)) {
+          suppressedRegions.add(Range.closed(getStartPosition(tree), state.getEndPosition(tree)));
+        } else {
+          super.scan(tree, null);
+        }
+        return null;
+      }
+    }.scan(state.getPath().getCompilationUnit(), null);
+    return ImmutableRangeSet.copyOf(suppressedRegions);
   }
 
   public interface AnnotatedTypeTreeMatcher extends Suppressible {
     Description matchAnnotatedType(AnnotatedTypeTree tree, VisitorState state);
+  }
+
+  public interface AnnotationTreeMatcher extends Suppressible {
+    Description matchAnnotation(AnnotationTree tree, VisitorState state);
   }
 
   public interface ArrayAccessTreeMatcher extends Suppressible {
@@ -296,6 +371,10 @@ public abstract class BugChecker implements Suppressible, Serializable {
 
   public interface BinaryTreeMatcher extends Suppressible {
     Description matchBinary(BinaryTree tree, VisitorState state);
+  }
+
+  public interface BindingPatternTreeMatcher extends Suppressible {
+    Description matchBindingPattern(BindingPatternTree tree, VisitorState state);
   }
 
   public interface BlockTreeMatcher extends Suppressible {
@@ -330,8 +409,20 @@ public abstract class BugChecker implements Suppressible, Serializable {
     Description matchConditionalExpression(ConditionalExpressionTree tree, VisitorState state);
   }
 
+  public interface ConstantCaseLabelTreeMatcher extends Suppressible {
+    Description matchConstantCaseLabel(ConstantCaseLabelTree tree, VisitorState state);
+  }
+
   public interface ContinueTreeMatcher extends Suppressible {
     Description matchContinue(ContinueTree tree, VisitorState state);
+  }
+
+  public interface DeconstructionPatternTreeMatcher extends Suppressible {
+    Description matchDeconstructionPattern(DeconstructionPatternTree tree, VisitorState state);
+  }
+
+  public interface DefaultCaseLabelTreeMatcher extends Suppressible {
+    Description matchDefaultCaseLabel(DefaultCaseLabelTree tree, VisitorState state);
   }
 
   public interface DoWhileLoopTreeMatcher extends Suppressible {
@@ -347,6 +438,10 @@ public abstract class BugChecker implements Suppressible, Serializable {
   }
 
   // Intentionally skip ErroneousTreeMatcher -- we don't analyze malformed expressions.
+
+  public interface ExportsTreeMatcher extends Suppressible {
+    Description matchExports(ExportsTree tree, VisitorState state);
+  }
 
   public interface ExpressionStatementTreeMatcher extends Suppressible {
     Description matchExpressionStatement(ExpressionStatementTree tree, VisitorState state);
@@ -408,6 +503,10 @@ public abstract class BugChecker implements Suppressible, Serializable {
     Description matchModifiers(ModifiersTree tree, VisitorState state);
   }
 
+  public interface ModuleTreeMatcher extends Suppressible {
+    Description matchModule(ModuleTree tree, VisitorState state);
+  }
+
   public interface NewArrayTreeMatcher extends Suppressible {
     Description matchNewArray(NewArrayTree tree, VisitorState state);
   }
@@ -419,6 +518,14 @@ public abstract class BugChecker implements Suppressible, Serializable {
   // Intentionally skip OtherTreeMatcher. It seems to be used only for let expressions, which are
   // generated by javac to implement autoboxing. We are only interested in source-level constructs.
 
+  public interface OpensTreeMatcher extends Suppressible {
+    Description matchOpens(OpensTree tree, VisitorState state);
+  }
+
+  public interface PackageTreeMatcher extends Suppressible {
+    Description matchPackage(PackageTree tree, VisitorState state);
+  }
+
   public interface ParameterizedTypeTreeMatcher extends Suppressible {
     Description matchParameterizedType(ParameterizedTypeTree tree, VisitorState state);
   }
@@ -427,12 +534,28 @@ public abstract class BugChecker implements Suppressible, Serializable {
     Description matchParenthesized(ParenthesizedTree tree, VisitorState state);
   }
 
+  public interface PatternCaseLabelTreeMatcher extends Suppressible {
+    Description matchPatternCaseLabel(PatternCaseLabelTree tree, VisitorState state);
+  }
+
   public interface PrimitiveTypeTreeMatcher extends Suppressible {
     Description matchPrimitiveType(PrimitiveTypeTree tree, VisitorState state);
   }
 
+  public interface ProvidesTreeMatcher extends Suppressible {
+    Description matchProvides(ProvidesTree tree, VisitorState state);
+  }
+
+  public interface RequiresTreeMatcher extends Suppressible {
+    Description matchRequires(RequiresTree tree, VisitorState state);
+  }
+
   public interface ReturnTreeMatcher extends Suppressible {
     Description matchReturn(ReturnTree tree, VisitorState state);
+  }
+
+  public interface SwitchExpressionTreeMatcher extends Suppressible {
+    Description matchSwitchExpression(SwitchExpressionTree tree, VisitorState state);
   }
 
   public interface SwitchTreeMatcher extends Suppressible {
@@ -467,6 +590,10 @@ public abstract class BugChecker implements Suppressible, Serializable {
     Description matchUnionType(UnionTypeTree tree, VisitorState state);
   }
 
+  public interface UsesTreeMatcher extends Suppressible {
+    Description matchUses(UsesTree tree, VisitorState state);
+  }
+
   public interface VariableTreeMatcher extends Suppressible {
     Description matchVariable(VariableTree tree, VisitorState state);
   }
@@ -479,13 +606,14 @@ public abstract class BugChecker implements Suppressible, Serializable {
     Description matchWildcard(WildcardTree tree, VisitorState state);
   }
 
+  public interface YieldTreeMatcher extends Suppressible {
+    Description matchYield(YieldTree tree, VisitorState state);
+  }
+
   @Override
   public boolean equals(Object obj) {
-    if (!(obj instanceof BugChecker)) {
-      return false;
-    }
-    BugChecker that = (BugChecker) obj;
-    return this.canonicalName().equals(that.canonicalName())
+    return obj instanceof BugChecker that
+        && this.canonicalName().equals(that.canonicalName())
         && this.defaultSeverity().equals(that.defaultSeverity())
         && this.supportsSuppressWarnings() == that.supportsSuppressWarnings()
         && this.customSuppressionAnnotations().equals(that.customSuppressionAnnotations());
@@ -500,13 +628,34 @@ public abstract class BugChecker implements Suppressible, Serializable {
         customSuppressionAnnotations());
   }
 
-  /** A {@link TreePathScanner} which skips trees which are suppressed for this check. */
-  protected class SuppressibleTreePathScanner<A, B> extends TreePathScanner<A, B> {
+  /**
+   * A {@link TreePathScanner} which skips trees which are suppressed for this check.
+   *
+   * @param <R> the type returned by each scanner method
+   * @param <P> the type of the parameter passed to each scanner method
+   */
+  protected class SuppressibleTreePathScanner<R, P> extends TreePathScanner<R, P> {
+
+    protected final VisitorState state;
+
+    public SuppressibleTreePathScanner(VisitorState state) {
+      this.state = state;
+    }
+
     @Override
-    public final A scan(Tree tree, B b) {
+    public R scan(Tree tree, P param) {
+      return suppressed(tree) ? null : super.scan(tree, param);
+    }
+
+    @Override
+    public R scan(TreePath treePath, P param) {
+      return suppressed(treePath.getLeaf()) ? null : super.scan(treePath, param);
+    }
+
+    private boolean suppressed(Tree tree) {
       boolean isSuppressible =
           tree instanceof ClassTree || tree instanceof MethodTree || tree instanceof VariableTree;
-      return isSuppressible && isSuppressed(tree) ? null : super.scan(tree, b);
+      return isSuppressible && isSuppressed(tree, state);
     }
   }
 }

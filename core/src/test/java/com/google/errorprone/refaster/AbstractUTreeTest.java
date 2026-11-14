@@ -19,10 +19,10 @@ package com.google.errorprone.refaster;
 import static com.google.common.truth.Truth.assertWithMessage;
 
 import com.google.common.base.Joiner;
+import com.google.errorprone.util.ErrorProneParser;
 import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.parser.Parser;
-import com.sun.tools.javac.parser.ParserFactory;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.util.Context;
@@ -58,17 +58,14 @@ public abstract class AbstractUTreeTest {
   }
 
   public void assertUnifies(String expression, UTree<?> template) {
-    assertWithMessage(
-            String.format("Expected template %s to unify with expression %s", template, expression))
-        .that(template.unify(parseExpression(expression), unifier).first())
+    assertWithMessage("Expected template %s to unify with expression %s", template, expression)
+        .that(template.unify(parseExpression(expression), unifier).findFirst())
         .isPresent();
   }
 
   public void assertInlines(String expression, UTree<?> template) {
     try {
-      assertWithMessage(
-              String.format(
-                  "Expected template %s to inline to expression %s", template, expression))
+      assertWithMessage("Expected template %s to inline to expression %s", template, expression)
           .that(template.inline(inliner).toString())
           .isEqualTo(expression);
     } catch (CouldNotResolveImportException e) {
@@ -79,9 +76,7 @@ public abstract class AbstractUTreeTest {
   public void assertInlines(String expression, UStatement template) {
     try {
       // javac's pretty-printer uses the platform line terminator
-      assertWithMessage(
-              String.format(
-                  "Expected template %s to inline to expression %s", template, expression))
+      assertWithMessage("Expected template %s to inline to expression %s", template, expression)
           .that(Joiner.on(System.lineSeparator()).join(template.inlineStatements(inliner)))
           .isEqualTo(expression);
     } catch (CouldNotResolveImportException e) {
@@ -91,22 +86,22 @@ public abstract class AbstractUTreeTest {
 
   protected JCExpression parseExpression(String contents) {
     Parser parser =
-        ParserFactory.instance(context)
-            .newParser(
-                contents,
-                /* keepDocComments= */ false,
-                /* keepEndPos= */ false,
-                /* keepLineMap= */ true);
+        ErrorProneParser.newParser(
+            context,
+            contents,
+            /* keepDocComments= */ false,
+            /* keepEndPos= */ false,
+            /* keepLineMap= */ true);
     return parser.parseExpression();
   }
 
   protected <V> void bind(Bindings.Key<V> key, V value) {
     Bindings bindings = Bindings.create(inliner.bindings);
     bindings.putBinding(key, value);
-    inliner = new Inliner(context, bindings);
+    inliner = new Inliner(context, bindings, inliner.compilationUnit());
   }
 
-  protected JCExpression ident(final String name) {
+  protected JCExpression ident(String name) {
     return MockitoHamcrest.argThat(
         new TypeSafeMatcher<JCExpression>() {
           @Override
@@ -116,7 +111,7 @@ public abstract class AbstractUTreeTest {
 
           @Override
           public boolean matchesSafely(JCExpression item) {
-            return item instanceof JCIdent && ((JCIdent) item).getName().contentEquals(name);
+            return item instanceof JCIdent jCIdent && jCIdent.getName().contentEquals(name);
           }
         });
   }

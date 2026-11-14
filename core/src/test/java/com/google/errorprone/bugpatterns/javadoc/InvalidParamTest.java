@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns.javadoc;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -37,15 +36,42 @@ public final class InvalidParamTest {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param <T> baz",
-            "   // BUG: Diagnostic contains: Parameter name `c` is unknown",
-            "   * @param c foo",
-            "   * @param b bar",
-            "   */",
-            "  <T> void foo(int a, int b);",
-            "}")
+            """
+            interface Test {
+              /**
+               * @param <T> baz // BUG: Diagnostic contains: Parameter name `c` is unknown
+               * @param c foo
+               * @param b bar
+               */
+              <T> void foo(int a, int b);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void badColon() {
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @param c: foo
+               */
+              <T> void foo(int c);
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @param c foo
+               */
+              <T> void foo(int c);
+            }
+            """)
         .doTest();
   }
 
@@ -54,25 +80,29 @@ public final class InvalidParamTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param <T> baz",
-            "   * @param c foo",
-            "   * @param b bar",
-            "   */",
-            "  <T> void foo(int a, int b);",
-            "}")
+            """
+            interface Test {
+              /**
+               * @param <T> baz
+               * @param c foo
+               * @param b bar
+               */
+              <T> void foo(int a, int b);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param <T> baz",
-            "   * @param a foo",
-            "   * @param b bar",
-            "   */",
-            "  <T> void foo(int a, int b);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /**
+               * @param <T> baz
+               * @param a foo
+               * @param b bar
+               */
+              <T> void foo(int a, int b);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -80,23 +110,27 @@ public final class InvalidParamTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param <S> baz",
-            "   * @param a bar",
-            "   */",
-            "  <T> void foo(int a);",
-            "}")
+            """
+            interface Test {
+              /**
+               * @param <S> baz
+               * @param a bar
+               */
+              <T> void foo(int a);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param <T> baz",
-            "   * @param a bar",
-            "   */",
-            "  <T> void foo(int a);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /**
+               * @param <T> baz
+               * @param a bar
+               */
+              <T> void foo(int a);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -104,35 +138,39 @@ public final class InvalidParamTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * {@code foabar}, {@code barfoo}",
-            "   */",
-            "  void foo(int foobar);",
-            "}")
+            """
+            interface Test {
+              /** {@code foabar}, {@code barfoo} */
+              void foo(int foobar);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * {@code foobar}, {@code barfoo}",
-            "   */",
-            "  void foo(int foobar);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** {@code foobar}, {@code barfoo} */
+              void foo(int foobar);
+            }
+            """)
+        .doTest();
   }
 
   @Test
+  @SuppressWarnings("MisformattedTestData")
   public void verySimilarCodeParam_diagnosticMessage() {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   // BUG: Diagnostic contains: `foabar` is very close to the parameter `foobar`",
-            "   * {@code foabar}, {@code barfoo}",
-            "   */",
-            "  void foo(int foobar);",
-            "}")
+"""
+interface Test {
+  /**
+   * // BUG: Diagnostic contains: `foabar` is very close to the parameter `foobar`
+   * {@code foabar},
+   * {@code barfoo}
+   */
+  void foo(int foobar);
+}
+""")
         .doTest();
   }
 
@@ -141,15 +179,18 @@ public final class InvalidParamTest {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * Frobnicates a {@code foobarbaz}.",
-            "   * @param <T> baz",
-            "   * @param a bar",
-            "   * @param b quux",
-            "   */",
-            "  <T> void foo(int a, int b, int foobarbaz);",
-            "}")
+            """
+            interface Test {
+              /**
+               * Frobnicates a {@code foobarbaz}.
+               *
+               * @param <T> baz
+               * @param a bar
+               * @param b quux
+               */
+              <T> void foo(int a, int b, int foobarbaz);
+            }
+            """)
         .doTest();
   }
 
@@ -158,10 +199,137 @@ public final class InvalidParamTest {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  /** Returns {@code true}. */",
-            "  boolean foo(int tree);",
-            "}")
+            """
+            interface Test {
+              /** Returns {@code true}. */
+              boolean foo(int tree);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negative_record() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * @param name Name.
+             */
+            public record Test(String name) {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData")
+  public void badParameterName_record() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * // BUG: Diagnostic contains: Parameter name `bar` is unknown
+             * @param bar Foo.
+             */
+            public record Test(String foo) {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData")
+  public void multipleConstructors_record() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * @param foo Foo.
+             * @param bar Bar.
+             */
+            public record Test(String foo, Integer bar) {
+              public Test(Integer bar) {
+                this(null, bar);
+              }
+
+              /**
+               * // BUG: Diagnostic contains: Parameter name `bar` is unknown
+               * @param bar Foo.
+               */
+              public Test(String foo) {
+                this(foo, null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData")
+  public void typeParameter_record() {
+    helper
+        .addSourceLines(
+            "Negative.java",
+            """
+            /**
+             * @param <T> The type parameter.
+             * @param contents Contents.
+             * @param bar Bar.
+             */
+            public record Negative<T>(T contents, String bar) {}
+            """)
+        .addSourceLines(
+            "Positive.java",
+            """
+            /**
+             * // BUG: Diagnostic contains: Parameter name `E` is unknown
+             * @param <E> The type parameter.
+             * @param contents Contents.
+             * @param bar Bar.
+             */
+            public record Positive<T>(T contents, String bar) {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void compactConstructor_record() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * @param name Name.
+             */
+            public record Test(String name) {
+              public Test {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData")
+  public void normalConstructor_record() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * @param name Name.
+             */
+            public record Test(String name) {
+              /**
+               * // BUG: Diagnostic contains: Parameter name `foo` is unknown
+               * @param foo Name.
+               */
+              public Test(String name) {
+                this.name = name;
+              }
+            }
+            """)
         .doTest();
   }
 }

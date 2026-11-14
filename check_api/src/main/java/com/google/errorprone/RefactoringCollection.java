@@ -20,10 +20,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.StandardOpenOption.CREATE;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.SetMultimap;
 import com.google.errorprone.ErrorProneOptions.PatchingOptions;
 import com.google.errorprone.apply.DescriptionBasedDiff;
 import com.google.errorprone.apply.FileDestination;
@@ -50,27 +49,19 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /** A container of fixes that have been collected during a single compilation phase. */
-class RefactoringCollection implements DescriptionListener.Factory {
+public final class RefactoringCollection implements DescriptionListener.Factory {
 
   private static final Logger logger = Logger.getLogger(RefactoringCollection.class.getName());
 
-  private final Multimap<URI, DelegatingDescriptionListener> foundSources = HashMultimap.create();
+  private final SetMultimap<URI, DelegatingDescriptionListener> foundSources =
+      HashMultimap.create();
   private final Path rootPath;
   private final FileDestination fileDestination;
   private final Function<URI, RefactoringResult> postProcess;
   private final DescriptionListener.Factory descriptionsFactory;
   private final ImportOrganizer importOrganizer;
 
-  @AutoValue
-  abstract static class RefactoringResult {
-    abstract String message();
-
-    abstract RefactoringResultType type();
-
-    private static RefactoringResult create(String message, RefactoringResultType type) {
-      return new AutoValue_RefactoringCollection_RefactoringResult(message, type);
-    }
-  }
+  record RefactoringResult(String message, RefactoringResultType type) {}
 
   enum RefactoringResultType {
     NO_CHANGES,
@@ -85,13 +76,14 @@ class RefactoringCollection implements DescriptionListener.Factory {
     if (patchingOptions.inPlace()) {
       fileDestination = new FsFileDestination(rootPath);
       postProcess =
-          uri ->
-              RefactoringResult.create(
-                  String.format(
-                      "Refactoring changes were successfully applied to %s,"
-                          + " please check the refactored code and recompile.",
-                      uri),
-                  RefactoringResultType.CHANGED);
+          uri -> {
+            String message =
+                String.format(
+                    "Refactoring changes were successfully applied to %s,"
+                        + " please check the refactored code and recompile.",
+                    uri);
+            return new RefactoringResult(message, RefactoringResultType.CHANGED);
+          };
     } else {
       Path baseDir = rootPath.resolve(patchingOptions.baseDirectory());
       Path patchFilePath = baseDir.resolve("error-prone.patch");
@@ -105,7 +97,7 @@ class RefactoringCollection implements DescriptionListener.Factory {
             public RefactoringResult apply(URI uri) {
               try {
                 writePatchFile(first, uri, patchFileDestination, patchFilePath);
-                return RefactoringResult.create(
+                return new RefactoringResult(
                     "Changes were written to "
                         + patchFilePath
                         + ". Please inspect the file and apply with: "
@@ -159,12 +151,11 @@ class RefactoringCollection implements DescriptionListener.Factory {
 
   RefactoringResult applyChanges(URI uri) throws Exception {
     Collection<DelegatingDescriptionListener> listeners = foundSources.removeAll(uri);
-    if (listeners.isEmpty()) {
-      return RefactoringResult.create("", RefactoringResultType.NO_CHANGES);
+    if (doApplyProcess(fileDestination, new FsFileSource(rootPath), listeners)) {
+      return postProcess.apply(uri);
     }
 
-    doApplyProcess(fileDestination, new FsFileSource(rootPath), listeners);
-    return postProcess.apply(uri);
+    return new RefactoringResult("", RefactoringResultType.NO_CHANGES);
   }
 
   private static void writePatchFile(
@@ -184,15 +175,21 @@ class RefactoringCollection implements DescriptionListener.Factory {
     }
   }
 
-  private static void doApplyProcess(
+  private static boolean doApplyProcess(
       FileDestination fileDestination,
       FileSource fileSource,
       Collection<DelegatingDescriptionListener> listeners) {
+    boolean appliedDiff = false;
     for (DelegatingDescriptionListener listener : listeners) {
+      if (listener.base.isEmpty()) {
+        continue;
+      }
+
       try {
         SourceFile file = fileSource.readFile(listener.base.getRelevantFileName());
         listener.base.applyDifferences(file);
         fileDestination.writeFile(file);
+        appliedDiff = true;
       } catch (IOException e) {
         logger.log(
             Level.WARNING,
@@ -200,16 +197,12 @@ class RefactoringCollection implements DescriptionListener.Factory {
             e);
       }
     }
+
+    return appliedDiff;
   }
 
-  private static final class DelegatingDescriptionListener implements DescriptionListener {
-    final DescriptionBasedDiff base;
-    final DescriptionListener listener;
-
-    DelegatingDescriptionListener(DescriptionListener listener, DescriptionBasedDiff base) {
-      this.listener = listener;
-      this.base = base;
-    }
+  private record DelegatingDescriptionListener(
+      DescriptionListener listener, DescriptionBasedDiff base) implements DescriptionListener {
 
     @Override
     public void onDescribed(Description description) {

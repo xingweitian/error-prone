@@ -31,10 +31,10 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import javax.inject.Inject;
 
 /** Bans calls to {@code Period#plus/minus(TemporalAmount)} where the argument is a Duration. */
 @BugPattern(
-    name = "PeriodTimeMath",
     summary = "When adding or subtracting from a Period, Duration is incompatible.",
     explanation =
         "Period.(plus|minus)(TemporalAmount) will always throw a DateTimeException when passed a "
@@ -50,7 +50,8 @@ public final class PeriodTimeMath extends BugChecker implements MethodInvocation
   private static final Matcher<ExpressionTree> DURATION = isSameType("java.time.Duration");
   private static final Matcher<ExpressionTree> PERIOD = isSameType("java.time.Period");
 
-  public PeriodTimeMath(ErrorProneFlags flags) {
+  @Inject
+  PeriodTimeMath(ErrorProneFlags flags) {
     boolean requireStrictCompatibility =
         flags.getBoolean("PeriodTimeMath:RequireStaticPeriodArgument").orElse(false);
     matcherToCheck =

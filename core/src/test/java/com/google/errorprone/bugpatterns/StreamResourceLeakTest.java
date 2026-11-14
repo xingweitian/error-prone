@@ -16,22 +16,39 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static java.lang.String.format;
+
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
+import com.google.testing.junit.testparameterinjector.TestParameter;
+import com.google.testing.junit.testparameterinjector.TestParameterInjector;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
 
 /** {@link StreamResourceLeakTest}Test */
-@RunWith(JUnit4.class)
+@RunWith(TestParameterInjector.class)
 public class StreamResourceLeakTest {
 
   private final CompilationTestHelper testHelper =
       CompilationTestHelper.newInstance(StreamResourceLeak.class, getClass());
 
   @Test
-  public void positive() {
+  public void positive(
+      @TestParameter({
+            "Files.newDirectoryStream(p)",
+            "Files.newDirectoryStream(p, /* glob= */ \"*\")",
+            "Files.newDirectoryStream(p, /* filter= */ path -> true)",
+            "Files.list(p)",
+            "Files.walk(p, /* maxDepth= */ 0)",
+            "Files.walk(p)",
+            "Files.find(p, /* maxDepth= */ 0, (path, a) -> true)",
+            "try (Stream<String> stream ="
+                + " Files.lines(p).collect(Collectors.toList()).stream()) {\n"
+                + "    stream.collect(Collectors.joining(\", \"));\n"
+                + "}",
+            "Files.lines(p).collect(Collectors.joining(\", \"))",
+          })
+          String buggySnippet) {
     testHelper
         .addSourceLines(
             "Test.java",
@@ -41,28 +58,9 @@ public class StreamResourceLeakTest {
             "import java.util.stream.Collectors;",
             "import java.util.stream.Stream;",
             "class Test {",
-            "  String f(Path p) throws IOException {",
+            "  void f(Path p) throws IOException {",
             "    // BUG: Diagnostic contains: should be closed",
-            "    Files.newDirectoryStream(p);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.newDirectoryStream(p, /* glob= */ \"*\");",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.newDirectoryStream(p, /* filter= */ path -> true);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.list(p);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.walk(p, /* maxDepth= */ 0);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.walk(p);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    Files.find(p, /* maxDepth= */ 0, (path, a) -> true);",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    try (Stream<String> stream ="
-                + " Files.lines(p).collect(Collectors.toList()).stream()) {",
-            "      stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    return Files.lines(p).collect(Collectors.joining(\", \"));",
+            format("    %s;", buggySnippet),
             "  }",
             "}")
         .doTest();
@@ -73,21 +71,24 @@ public class StreamResourceLeakTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  String f(Path p) throws IOException {",
-            "    try (Stream<String> stream = Files.lines(p).filter(l -> !l.isEmpty())) {",
-            "      stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "    try (Stream<String> stream = Files.lines(p)) {",
-            "      return stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+            import java.util.stream.Stream;
+
+            class Test {
+              String f(Path p) throws IOException {
+                try (Stream<String> stream = Files.lines(p).filter(l -> !l.isEmpty())) {
+                  stream.collect(Collectors.joining(", "));
+                }
+                try (Stream<String> stream = Files.lines(p)) {
+                  return stream.collect(Collectors.joining(", "));
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -96,29 +97,35 @@ public class StreamResourceLeakTest {
     BugCheckerRefactoringTestHelper.newInstance(StreamResourceLeak.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "class Test {",
-            "  String f(Path p) throws IOException {",
-            "    return Files.lines(p).collect(Collectors.joining(\", \"));",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+
+            class Test {
+              String f(Path p) throws IOException {
+                return Files.lines(p).collect(Collectors.joining(", "));
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  String f(Path p) throws IOException {",
-            "    try (Stream<String> stream = Files.lines(p)) {",
-            "      return stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+            import java.util.stream.Stream;
+
+            class Test {
+              String f(Path p) throws IOException {
+                try (Stream<String> stream = Files.lines(p)) {
+                  return stream.collect(Collectors.joining(", "));
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -127,30 +134,36 @@ public class StreamResourceLeakTest {
     BugCheckerRefactoringTestHelper.newInstance(StreamResourceLeak.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "class Test {",
-            "  void f(Path p) throws IOException {",
-            "    String s = Files.lines(p).collect(Collectors.joining(\", \"));",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+
+            class Test {
+              void f(Path p) throws IOException {
+                String s = Files.lines(p).collect(Collectors.joining(", "));
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  void f(Path p) throws IOException {",
-            "    String s;",
-            "    try (Stream<String> stream = Files.lines(p)) {",
-            "      s = stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+            import java.util.stream.Stream;
+
+            class Test {
+              void f(Path p) throws IOException {
+                String s;
+                try (Stream<String> stream = Files.lines(p)) {
+                  s = stream.collect(Collectors.joining(", "));
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -159,27 +172,30 @@ public class StreamResourceLeakTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Collectors;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  String f(Path p) throws IOException {",
-            "    String r;",
-            "    // BUG: Diagnostic contains:",
-            "    try (Stream<String> stream = Files.lines(p).count() > 0 ? null : null) {",
-            "      r = stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "    try (Stream<String> stream = true ? null : Files.lines(p)) {",
-            "      r = stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "    try (Stream<String> stream = true ? Files.lines(p) : null) {",
-            "      r = stream.collect(Collectors.joining(\", \"));",
-            "    }",
-            "    return r;",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Collectors;
+            import java.util.stream.Stream;
+
+            class Test {
+              String f(Path p) throws IOException {
+                String r;
+                // BUG: Diagnostic contains:
+                try (Stream<String> stream = Files.lines(p).count() > 0 ? null : null) {
+                  r = stream.collect(Collectors.joining(", "));
+                }
+                try (Stream<String> stream = true ? null : Files.lines(p)) {
+                  r = stream.collect(Collectors.joining(", "));
+                }
+                try (Stream<String> stream = true ? Files.lines(p) : null) {
+                  r = stream.collect(Collectors.joining(", "));
+                }
+                return r;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -188,17 +204,20 @@ public class StreamResourceLeakTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.annotations.MustBeClosed;",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  @MustBeClosed",
-            "  Stream<String> f(Path p) throws IOException {",
-            "    return Files.lines(p);",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.annotations.MustBeClosed;
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Stream;
+
+            class Test {
+              @MustBeClosed
+              Stream<String> f(Path p) throws IOException {
+                return Files.lines(p);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -207,21 +226,25 @@ public class StreamResourceLeakTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.annotations.MustBeClosed;",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  @MustBeClosed",
-            "  Stream<String> f(Path p) throws IOException {",
-            "    return Files.list(p).map(Path::toString); // OK due to @MustBeClosed",
-            "  }",
-            "  Stream<String> g(Path p) throws IOException {",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    return Files.list(p).map(Path::toString);",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.annotations.MustBeClosed;
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Stream;
+
+            class Test {
+              @MustBeClosed
+              Stream<String> f(Path p) throws IOException {
+                return Files.list(p).map(Path::toString); // OK due to @MustBeClosed
+              }
+
+              Stream<String> g(Path p) throws IOException {
+                // BUG: Diagnostic contains: should be closed
+                return Files.list(p).map(Path::toString);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -230,42 +253,48 @@ public class StreamResourceLeakTest {
     BugCheckerRefactoringTestHelper.newInstance(StreamResourceLeak.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.DirectoryStream;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "class Test {",
-            "  void f(Path p) throws IOException {",
-            "    DirectoryStream<Path> l = Files.newDirectoryStream(p);",
-            "    for (Path x : Files.newDirectoryStream(p)) {",
-            "      System.err.println(x);",
-            "    }",
-            "    System.err.println(l);",
-            "    System.err.println(Files.newDirectoryStream(p));",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.DirectoryStream;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            class Test {
+              void f(Path p) throws IOException {
+                DirectoryStream<Path> l = Files.newDirectoryStream(p);
+                for (Path x : Files.newDirectoryStream(p)) {
+                  System.err.println(x);
+                }
+                System.err.println(l);
+                System.err.println(Files.newDirectoryStream(p));
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.DirectoryStream;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "class Test {",
-            "  void f(Path p) throws IOException {",
-            "    try (DirectoryStream<Path> l = Files.newDirectoryStream(p)) {",
-            "      try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {",
-            "        for (Path x : stream) {",
-            "          System.err.println(x);",
-            "        }",
-            "      }",
-            "      System.err.println(l);",
-            "    }",
-            "    try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {",
-            "      System.err.println(stream);",
-            "    }",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            import java.io.IOException;
+            import java.nio.file.DirectoryStream;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            class Test {
+              void f(Path p) throws IOException {
+                try (DirectoryStream<Path> l = Files.newDirectoryStream(p)) {
+                  try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {
+                    for (Path x : stream) {
+                      System.err.println(x);
+                    }
+                  }
+                  System.err.println(l);
+                }
+                try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {
+                  System.err.println(stream);
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -273,16 +302,69 @@ public class StreamResourceLeakTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "import java.io.IOException;",
-            "import java.nio.file.Files;",
-            "import java.nio.file.Path;",
-            "import java.nio.file.DirectoryStream;",
-            "interface I {",
-            "  default DirectoryStream<Path> f(Path path) throws IOException {",
-            "    // BUG: Diagnostic contains: should be closed",
-            "    return Files.newDirectoryStream(path);",
-            "  }",
-            "}")
+            """
+            import java.io.IOException;
+            import java.nio.file.DirectoryStream;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            interface I {
+              default DirectoryStream<Path> f(Path path) throws IOException {
+                // BUG: Diagnostic contains: should be closed
+                return Files.newDirectoryStream(path);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void record() {
+    testHelper
+        .addSourceLines(
+            "ExampleRecord.java",
+            """
+            package example;
+
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Stream;
+
+            record ExampleRecord(Path path) {
+              public Stream<Path> list() throws IOException {
+                // BUG: Diagnostic contains: should be closed
+                return Files.list(path);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void methodReference() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.stream.Stream;
+
+            class Test {
+              interface IOFunction<T, R> {
+                R apply(T t) throws IOException;
+              }
+
+              void f(IOFunction<Path, Stream<String>> lines) {}
+
+              void g() {
+                // BUG: Diagnostic contains: should be closed
+                f(Files::lines);
+              }
+            }
+            """)
         .doTest();
   }
 }

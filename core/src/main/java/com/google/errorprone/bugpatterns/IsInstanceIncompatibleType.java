@@ -37,16 +37,14 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Type;
-import java.util.Collection;
+import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * @author cushon@google.com (Liam Miller-Cushon)
  * @author eleanorh@google.com (Eleanor Harris)
  */
-@BugPattern(
-    name = "IsInstanceIncompatibleType",
-    summary = "This use of isInstance will always evaluate to false.",
-    severity = ERROR)
+@BugPattern(summary = "This use of isInstance will always evaluate to false.", severity = ERROR)
 public final class IsInstanceIncompatibleType extends BugChecker
     implements MethodInvocationTreeMatcher, MemberReferenceTreeMatcher {
   private static final Matcher<ExpressionTree> IS_INSTANCE =
@@ -62,7 +60,7 @@ public final class IsInstanceIncompatibleType extends BugChecker
     if (receiverType == null) {
       return NO_MATCH;
     }
-    Type argumentType = getType(tree.getArguments().get(0));
+    Type argumentType = getType(tree.getArguments().getFirst());
 
     return isCastable(argumentType, receiverType, state)
         ? NO_MATCH
@@ -80,19 +78,20 @@ public final class IsInstanceIncompatibleType extends BugChecker
     if (receiverType == null) {
       return NO_MATCH;
     }
-    Type argumentType = ASTHelpers.getUpperBound(type.getParameterTypes().get(0), state.getTypes());
+    Type argumentType =
+        ASTHelpers.getUpperBound(type.getParameterTypes().getFirst(), state.getTypes());
 
     return isCastable(argumentType, receiverType, state)
         ? NO_MATCH
         : buildMessage(argumentType, receiverType, tree, state);
   }
 
-  private static Type classTypeArgument(ExpressionTree tree) {
+  private static @Nullable Type classTypeArgument(ExpressionTree tree) {
     ExpressionTree receiver = getReceiver(tree);
     if (receiver == null) {
       return null;
     }
-    Collection<Type> receiverTypeArguments = getType(receiver).getTypeArguments();
+    List<Type> receiverTypeArguments = getType(receiver).getTypeArguments();
     return !receiverTypeArguments.isEmpty() ? getOnlyElement(receiverTypeArguments) : null;
   }
 

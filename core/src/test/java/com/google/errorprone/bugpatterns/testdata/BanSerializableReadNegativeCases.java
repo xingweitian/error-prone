@@ -17,8 +17,12 @@
 package com.google.errorprone.bugpatterns.testdata;
 
 import com.google.errorprone.bugpatterns.BanSerializableReadTest;
+import java.io.DataInput;
+import java.io.Externalizable;
 import java.io.IOException;
+import java.io.ObjectInput;
 import java.io.ObjectInputStream;
+import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -29,11 +33,12 @@ import java.io.Serializable;
  *
  * @author tshadwell@google.com (Thomas Shadwell)
  */
-public class BanSerializableReadNegativeCases implements Serializable {
+public class BanSerializableReadNegativeCases implements Serializable, Externalizable {
   public final String hi = "hi";
+  public Integer testField;
 
   // mostly a smoke test
-  public static final void noCrimesHere() {
+  public static void noCrimesHere() {
     System.out.println(new BanSerializableReadNegativeCases().hi);
   }
 
@@ -67,7 +72,7 @@ public class BanSerializableReadNegativeCases implements Serializable {
    * @throws ClassNotFoundException
    */
   @SuppressWarnings("BanSerializableRead")
-  public static final void sayHi() throws IOException, ClassNotFoundException {
+  public static void sayHi() throws IOException, ClassNotFoundException {
     PipedInputStream in = new PipedInputStream();
     PipedOutputStream out = new PipedOutputStream(in);
 
@@ -86,7 +91,7 @@ public class BanSerializableReadNegativeCases implements Serializable {
 
   // code has gone through a security review
   @SuppressWarnings("BanSerializableRead")
-  public static final void directCall2() throws IOException, ClassNotFoundException {
+  public static void directCall2() throws IOException, ClassNotFoundException {
     PipedInputStream in = new PipedInputStream();
     PipedOutputStream out = new PipedOutputStream(in);
 
@@ -110,10 +115,61 @@ public class BanSerializableReadNegativeCases implements Serializable {
     self.readObject(deserializer);
   }
 
+  // code is for Android
+  @SuppressWarnings("BanSerializableRead")
+  public static final void directCall4() throws IOException, ClassNotFoundException {
+    PipedInputStream in = new PipedInputStream();
+    PipedOutputStream out = new PipedOutputStream(in);
+
+    ObjectOutputStream serializer = new ObjectOutputStream(out);
+    ObjectInputStream deserializer = new ObjectInputStream(in);
+
+    BanSerializableReadPositiveCases self = new BanSerializableReadPositiveCases();
+    self.readObject(deserializer);
+  }
+
   // calls to readObject should themselves be excluded in a readObject method
   void readObject(ObjectInputStream ois) throws IOException, ClassNotFoundException {
     BanSerializableReadNegativeCases c = new BanSerializableReadNegativeCases();
     c.readObject(ois);
     ois.defaultReadObject();
+  }
+
+  private static class SomeSerializable implements Serializable {
+    // A readObject method that doesn't actually satisfy Serializable interface.
+    public void readObject(DataInput ois) throws IOException, ClassNotFoundException {}
+  }
+
+  public static final void callOverloadedReadObject() throws IOException, ClassNotFoundException {
+    new SomeSerializable().readObject(null);
+  }
+
+  private static class ObjectInputStreamIsExempt extends ObjectInputStream {
+    ObjectInputStreamIsExempt() throws IOException, ClassNotFoundException {
+      super();
+    }
+
+    @Override
+    public Object readObjectOverride() throws IOException, ClassNotFoundException {
+      // Calling readObjectOverride is banned by the checker; therefore, overrides can
+      // call other banned methods without added risk.
+      return super.readObject();
+    }
+  }
+
+  @Override
+  public void readExternal(ObjectInput in) {
+    try {
+      testField = (Integer) in.readObject();
+    } catch (IOException | ClassNotFoundException e) {
+    }
+  }
+
+  @Override
+  public void writeExternal(ObjectOutput out) {
+    try {
+      out.writeObject(testField);
+    } catch (IOException e) {
+    }
   }
 }

@@ -20,7 +20,6 @@ import static java.lang.annotation.ElementType.FIELD;
 import static java.lang.annotation.ElementType.LOCAL_VARIABLE;
 import static java.lang.annotation.ElementType.PARAMETER;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import static javax.lang.model.element.Modifier.FINAL;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
@@ -30,8 +29,8 @@ import java.lang.annotation.Target;
  *
  * <p>Most references are never modified, and accidentally modifying a reference is a potential
  * source of bugs. To prevent accidental modifications, the accompanying Error Prone <a
- * href="https://errorprone.info/bugpattern/Var">check</a> prevents parameters and local variables from
- * being modified unless they are explicitly annotated with @Var.
+ * href="https://errorprone.info/bugpattern/Var">check</a> prevents parameters and local variables
+ * from being modified unless they are explicitly annotated with @Var.
  *
  * <p>Since Java 8 can infer whether a local variable or parameter is effectively {@code final}, and
  * {@code @Var} makes it clear whether any variable is non- {@code final}, explicitly marking local
@@ -42,5 +41,5 @@ import java.lang.annotation.Target;
  */
 @Target({FIELD, PARAMETER, LOCAL_VARIABLE})
 @Retention(RUNTIME)
-@IncompatibleModifiers(FINAL)
+@IncompatibleModifiers(modifier = {Modifier.FINAL})
 public @interface Var {}

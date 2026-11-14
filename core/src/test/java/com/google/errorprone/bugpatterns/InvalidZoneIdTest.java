@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author bhagwani@google.com (Sumit Bhagwani) */
+/**
+ * @author bhagwani@google.com (Sumit Bhagwani)
+ */
 @RunWith(JUnit4.class)
 public class InvalidZoneIdTest {
 
@@ -29,69 +31,83 @@ public class InvalidZoneIdTest {
       CompilationTestHelper.newInstance(InvalidZoneId.class, getClass());
 
   @Test
-  public void testPositiveCase() {
+  public void positiveCase() {
     compilationHelper
         .addSourceLines(
             "a/A.java",
-            "package a;",
-            "import java.time.ZoneId;",
-            "class A {",
-            "  private static final String TIMEZONE_ID = \"unknown\";",
-            "  public static void test() {",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"unknown\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(TIMEZONE_ID);",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"America/Los_Angele\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"America/Los Angeles\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"KST\");",
-            "  }",
-            "  public static void invalidCustomIDs() {",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"GMT+24\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"GMT1\");",
-            "    // BUG: Diagnostic contains:",
-            "    ZoneId.of(\"GMT/0\");",
-            "  }",
-            "}")
+            """
+            package a;
+
+            import java.time.ZoneId;
+
+            class A {
+              private static final String TIMEZONE_ID = "unknown";
+
+              public static void test() {
+                // BUG: Diagnostic contains:
+                ZoneId.of("");
+                // BUG: Diagnostic contains:
+                ZoneId.of("unknown");
+                // BUG: Diagnostic contains:
+                ZoneId.of(TIMEZONE_ID);
+                // BUG: Diagnostic contains:
+                ZoneId.of("America/Los_Angele");
+                // BUG: Diagnostic contains:
+                ZoneId.of("America/Los Angeles");
+                // BUG: Diagnostic contains:
+                ZoneId.of("KST");
+              }
+
+              public static void invalidCustomIDs() {
+                // BUG: Diagnostic contains:
+                ZoneId.of("GMT+24");
+                // BUG: Diagnostic contains:
+                ZoneId.of("GMT1");
+                // BUG: Diagnostic contains:
+                ZoneId.of("GMT/0");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
+  public void negativeCase() {
     compilationHelper
         .addSourceLines(
             "a/A.java",
-            "package a;",
-            "import java.time.ZoneId;",
-            "class A {",
-            "  private static final String TIMEZONE_ID = \"America/New_York\";",
-            "  public static void ianaIDs() {",
-            "    ZoneId.of(\"America/Los_Angeles\");",
-            "    ZoneId.of(TIMEZONE_ID);",
-            "    ZoneId.of(\"Europe/London\");",
-            "  }",
-            "  public static void customIDs() {",
-            "    // Custom IDs",
-            "    ZoneId.of(\"GMT+0\");",
-            "    ZoneId.of(\"GMT+00\");",
-            "    ZoneId.of(\"GMT+00:00\");",
-            "    ZoneId.of(\"GMT+00:00:00\");",
-            "  }",
-            "  public static void twoLetterIDs() {",
-            "    ZoneId.of(\"UT\");",
-            "  }",
-            "  public static void threeLetterIDs() {",
-            "    ZoneId.of(\"GMT\");",
-            "    ZoneId.of(\"UTC\");",
-            "  }",
-            "}")
+            """
+            package a;
+
+            import java.time.ZoneId;
+
+            class A {
+              private static final String TIMEZONE_ID = "America/New_York";
+
+              public static void ianaIDs() {
+                ZoneId.of("America/Los_Angeles");
+                ZoneId.of(TIMEZONE_ID);
+                ZoneId.of("Europe/London");
+              }
+
+              public static void customIDs() {
+                // Custom IDs
+                ZoneId.of("GMT+0");
+                ZoneId.of("GMT+00");
+                ZoneId.of("GMT+00:00");
+                ZoneId.of("GMT+00:00:00");
+              }
+
+              public static void twoLetterIDs() {
+                ZoneId.of("UT");
+              }
+
+              public static void threeLetterIDs() {
+                ZoneId.of("GMT");
+                ZoneId.of("UTC");
+              }
+            }
+            """)
         .doTest();
   }
 }

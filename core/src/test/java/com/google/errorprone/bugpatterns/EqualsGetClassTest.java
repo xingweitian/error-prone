@@ -40,20 +40,28 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    return o != null && o.getClass().equals(getClass()) && a == ((Test) o).a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                return o != null && o.getClass().equals(getClass()) && a == ((Test) o).a;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    return o instanceof Test && a == ((Test) o).a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                return o instanceof Test && a == ((Test) o).a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -62,20 +70,28 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    return (o != null) && (o.getClass() == getClass()) && a == ((Test) o).a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                return (o != null) && (o.getClass() == getClass()) && a == ((Test) o).a;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    return (o instanceof Test) && a == ((Test) o).a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                return (o instanceof Test) && a == ((Test) o).a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -84,23 +100,38 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null) { return false; }",
-            "    if (o.getClass() != getClass()) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null) {
+                  return false;
+                }
+                if (o.getClass() != getClass()) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (!(o instanceof Test)) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+
+                if (!(o instanceof Test)) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -109,26 +140,39 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null) {",
-            "      return false;",
-            "    } else {",
-            "      if (o.getClass() != getClass()) { return false; }",
-            "      return ((Test) o).a == a;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null) {
+                  return false;
+                } else {
+                  if (o.getClass() != getClass()) {
+                    return false;
+                  }
+                  return ((Test) o).a == a;
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (!(o instanceof Test)) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+
+                if (!(o instanceof Test)) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -137,23 +181,29 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null)",
-            "      return false;",
-            "    else",
-            "      return o.getClass() == getClass() && ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null) return false;
+                else return o.getClass() == getClass() && ((Test) o).a == a;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    return o instanceof Test && ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                return o instanceof Test && ((Test) o).a == a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -162,24 +212,34 @@ public final class EqualsGetClassTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null || !o.getClass().equals(((Object) this).getClass())) {",
-            "      return false;",
-            "    }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null || !o.getClass().equals(((Object) this).getClass())) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (!(o instanceof Test)) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (!(o instanceof Test)) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -188,16 +248,25 @@ public final class EqualsGetClassTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Objects;",
-            "class Test {",
-            "  private int a;",
-            "  // BUG: Diagnostic matches: NO_FIX",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null) { return false; }",
-            "    if (!Objects.equal(o.getClass(), getClass())) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Objects;
+
+            class Test {
+              private int a;
+
+              @Override
+              // BUG: Diagnostic matches: NO_FIX
+              public boolean equals(Object o) {
+                if (o == null) {
+                  return false;
+                }
+                if (!Objects.equal(o.getClass(), getClass())) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .expectErrorMessage("NO_FIX", fix -> !fix.contains("instanceof Test"))
         .doTest();
   }
@@ -207,14 +276,22 @@ public final class EqualsGetClassTest {
     helper
         .addSourceLines(
             "Test.java",
-            "final class Test {",
-            "  private int a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null) { return false; }",
-            "    if (o.getClass() != getClass()) { return false; }",
-            "    return ((Test) o).a == a;",
-            "  }",
-            "}")
+            """
+            final class Test {
+              private int a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null) {
+                  return false;
+                }
+                if (o.getClass() != getClass()) {
+                  return false;
+                }
+                return ((Test) o).a == a;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -223,14 +300,20 @@ public final class EqualsGetClassTest {
     helper
         .addSourceLines(
             "Test.java",
-            "final class Test {",
-            "  Object foo = new Object() {",
-            "    @Override public boolean equals(Object o) {",
-            "      if (o == null) { return false; }",
-            "      return o.getClass() == getClass();",
-            "    }",
-            "  };",
-            "}")
+            """
+            final class Test {
+              Object foo =
+                  new Object() {
+                    @Override
+                    public boolean equals(Object o) {
+                      if (o == null) {
+                        return false;
+                      }
+                      return o.getClass() == getClass();
+                    }
+                  };
+            }
+            """)
         .doTest();
   }
 
@@ -239,14 +322,22 @@ public final class EqualsGetClassTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private Object a;",
-            "  @Override public boolean equals(Object o) {",
-            "    if (o == null) { return false; }",
-            "    if (!(o instanceof Test)) { return false; }",
-            "    return ((Test) o).a.getClass() == a.getClass();",
-            "  }",
-            "}")
+            """
+            class Test {
+              private Object a;
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == null) {
+                  return false;
+                }
+                if (!(o instanceof Test)) {
+                  return false;
+                }
+                return ((Test) o).a.getClass() == a.getClass();
+              }
+            }
+            """)
         .doTest();
   }
 }

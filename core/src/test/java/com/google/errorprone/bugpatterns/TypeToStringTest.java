@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -32,20 +33,23 @@ public class TypeToStringTest {
     testHelper
         .addSourceLines(
             "ExampleChecker.java",
-            "import com.google.errorprone.BugPattern;",
-            "import com.google.errorprone.BugPattern.SeverityLevel;",
-            "import com.google.errorprone.VisitorState;",
-            "import com.google.errorprone.bugpatterns.BugChecker;",
-            "import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;",
-            "import com.google.errorprone.matchers.Description;",
-            "import com.sun.source.tree.ClassTree;",
-            "import com.sun.tools.javac.code.Types;",
-            "@BugPattern(name = \"Example\", summary = \"\", severity = SeverityLevel.ERROR)",
-            "public class ExampleChecker extends BugChecker implements ClassTreeMatcher {",
-            "  @Override public Description matchClass(ClassTree t, VisitorState s) {",
-            "    return Description.NO_MATCH;",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.BugPattern;
+            import com.google.errorprone.BugPattern.SeverityLevel;
+            import com.google.errorprone.VisitorState;
+            import com.google.errorprone.bugpatterns.BugChecker;
+            import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+            import com.google.errorprone.matchers.Description;
+            import com.sun.source.tree.ClassTree;
+
+            @BugPattern(name = "Example", summary = "", severity = SeverityLevel.ERROR)
+            public class ExampleChecker extends BugChecker implements ClassTreeMatcher {
+              @Override
+              public Description matchClass(ClassTree t, VisitorState s) {
+                return Description.NO_MATCH;
+              }
+            }
+            """)
         .addModules("jdk.compiler/com.sun.tools.javac.code")
         .doTest();
   }
@@ -55,47 +59,329 @@ public class TypeToStringTest {
     testHelper
         .addSourceLines(
             "ExampleChecker.java",
-            "import com.google.errorprone.BugPattern;",
-            "import com.google.errorprone.BugPattern.SeverityLevel;",
-            "import com.google.errorprone.VisitorState;",
-            "import com.google.errorprone.bugpatterns.BugChecker;",
-            "import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;",
-            "import com.google.errorprone.fixes.SuggestedFix;",
-            "import com.google.errorprone.matchers.Description;",
-            "import com.google.errorprone.matchers.Matcher;",
-            "import com.sun.source.tree.ClassTree;",
-            "import com.sun.tools.javac.tree.TreeMaker;",
-            "import com.sun.tools.javac.code.Type;",
-            "import com.sun.tools.javac.code.Types;",
-            "import com.sun.tools.javac.tree.JCTree;",
-            "import com.sun.tools.javac.tree.JCTree.JCClassDecl;",
-            "@BugPattern(name = \"Example\", summary = \"\", severity = SeverityLevel.ERROR)",
-            "public class ExampleChecker extends BugChecker implements ClassTreeMatcher {",
-            "  @Override",
-            "  public Description matchClass(ClassTree tree, VisitorState state) {",
-            "    Type type = ((JCTree) tree).type;",
-            "    if (type.toString().contains(\"matcha\")) {",
-            "      return describeMatch(tree);",
-            "    }",
-            "    // BUG: Diagnostic contains: TypeToString",
-            "    if (type.toString().equals(\"match\")) {",
-            "      return describeMatch(tree);",
-            "    }",
-            "    if (new InnerClass().matchaMatcher(type)) {",
-            "      return describeMatch(tree);",
-            "    }",
-            "    return Description.NO_MATCH;",
-            "  }",
-            "",
-            "  class InnerClass {",
-            "    boolean matchaMatcher(Type type) {",
-            "      // BUG: Diagnostic contains: TypeToString",
-            "      return type.toString().equals(\"match\");",
-            "    }",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.BugPattern;
+            import com.google.errorprone.BugPattern.SeverityLevel;
+            import com.google.errorprone.VisitorState;
+            import com.google.errorprone.bugpatterns.BugChecker;
+            import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+            import com.google.errorprone.matchers.Description;
+            import com.sun.source.tree.ClassTree;
+            import com.sun.tools.javac.code.Type;
+            import com.sun.tools.javac.tree.JCTree;
+
+            @BugPattern(name = "Example", summary = "", severity = SeverityLevel.ERROR)
+            public class ExampleChecker extends BugChecker implements ClassTreeMatcher {
+              @Override
+              public Description matchClass(ClassTree tree, VisitorState state) {
+                Type type = ((JCTree) tree).type;
+                if (type.toString().contains("matcha")) {
+                  return describeMatch(tree);
+                }
+                // BUG: Diagnostic contains: TypeToString
+                if (type.toString().equals("match")) {
+                  return describeMatch(tree);
+                }
+                if (new InnerClass().matchaMatcher(type)) {
+                  return describeMatch(tree);
+                }
+                return Description.NO_MATCH;
+              }
+
+              class InnerClass {
+                boolean matchaMatcher(Type type) {
+                  // BUG: Diagnostic contains: TypeToString
+                  return type.toString().equals("match");
+                }
+              }
+            }
+            """)
         .addModules(
-            "jdk.compiler/com.sun.tools.javac.code", "jdk.compiler/com.sun.tools.javac.tree")
+            "jdk.compiler/com.sun.tools.javac.code",
+            "jdk.compiler/com.sun.tools.javac.tree",
+            "jdk.compiler/com.sun.tools.javac.util")
+        .doTest();
+  }
+
+  @Test
+  public void refactoringWithTypes() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, TypeMirror other) {
+                if (type.toString().equals(other.toString())) {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, TypeMirror other) {
+                if (types.isSameType(type, other)) {}
+              }
+            }
+            """)
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
+        .doTest();
+  }
+
+  @Test
+  public void refactoringWithStringLiteral() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, Elements elements) {
+                if (type.toString().equals("java.lang.String")) {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Example.java",
+            """
+            import java.util.Objects;
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, Elements elements) {
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("java.lang.String"))) {}
+              }
+            }
+            """)
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
+        .doTest();
+  }
+
+  @Test
+  public void refactoringWithPrimitiveStringLiteral() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, Elements elements) {
+                if (type.toString().equals("void")) {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeKind;
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void foo(TypeMirror type, Types types, Elements elements) {
+                if (type.getKind() == TypeKind.VOID) {}
+              }
+            }
+            """)
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
+        .doTest();
+  }
+
+  @Test
+  public void refactoringWithProcessingEnvironment() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.annotation.processing.ProcessingEnvironment;
+            import javax.lang.model.type.TypeMirror;
+
+            class Example {
+              void foo(ProcessingEnvironment env, TypeMirror type) {
+                if (type.toString().equals("java.lang.String")) {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Example.java",
+            """
+            import java.util.Objects;
+            import javax.annotation.processing.ProcessingEnvironment;
+            import javax.lang.model.type.TypeMirror;
+
+            class Example {
+              void foo(ProcessingEnvironment env, TypeMirror type) {
+                if (Objects.equals(
+                    env.getTypeUtils().asElement(type),
+                    env.getElementUtils().getTypeElement("java.lang.String"))) {}
+              }
+            }
+            """)
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
+        .doTest();
+  }
+
+  @Test
+  public void unknownString() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.annotation.processing.ProcessingEnvironment;
+            import javax.lang.model.type.TypeMirror;
+
+            class Example {
+              boolean foo(ProcessingEnvironment env, TypeMirror type, String s) {
+                return type.toString().equals(s);
+              }
+            }
+            """)
+        .expectUnchanged()
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
+        .doTest();
+  }
+
+  @Test
+  public void noMatch_autoValue() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.auto.value.AutoValue;
+            import javax.lang.model.type.TypeMirror;
+
+            @AutoValue
+            abstract class Test {
+              abstract TypeMirror type();
+            }
+            """)
+        .addSourceLines(
+            "AutoValue_Test.java",
+            """
+            import javax.annotation.processing.Generated;
+            import javax.lang.model.type.TypeMirror;
+
+            @Generated("com.google.auto.value.processor.AutoValueProcessor")
+            abstract class AutoValue_Test extends Test {
+              private final TypeMirror type;
+
+              AutoValue_Test(TypeMirror type) {
+                this.type = type;
+              }
+
+              @Override
+              public boolean equals(Object o) {
+                if (o == this) {
+                  return true;
+                }
+                if (o instanceof Test) {
+                  Test that = (Test) o;
+                  return this.type.toString().equals(that.type().toString());
+                }
+                return false;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void classNameIdentifierVariants() {
+    BugCheckerRefactoringTestHelper.newInstance(TypeToString.class, getClass())
+        .addInputLines(
+            "Example.java",
+            """
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void valid(TypeMirror type, Types types, Elements elements) {
+                if (type.toString().equals("SingleSegment")) {}
+                if (type.toString().equals("a.b.$Foo._Bar$1")) {}
+                if (type.toString().equals("com.example.λ.α_1")) {}
+                if (type.toString().equals("com.example.𝒰.a𝟎")) {}
+                if (type.toString().equals("com.example.record.var")) {}
+                if (type.toString().equals("int")) {}
+                if (type.toString().equals("boolean")) {}
+              }
+
+              void invalid(TypeMirror type, Types types, Elements elements) {
+                if (type.toString().equals("")) {}
+                if (type.toString().equals(".")) {}
+                if (type.toString().equals("a..b")) {}
+                if (type.toString().equals(".a")) {}
+                if (type.toString().equals("a.")) {}
+                if (type.toString().equals("1a")) {}
+                if (type.toString().equals("a.1b")) {}
+                if (type.toString().equals("𝟎")) {}
+                if (type.toString().equals("a.𝟎")) {}
+                if (type.toString().equals("default")) {}
+                if (type.toString().equals("a.default.b")) {}
+                if (type.toString().equals("_")) {}
+                if (type.toString().equals("java.util.List<String>")) {}
+                if (type.toString().equals("java.lang.String[]")) {}
+                if (type.toString().equals(" java.lang.String")) {}
+                if (type.toString().equals("java.lang.String ")) {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Example.java",
+            """
+            import java.util.Objects;
+            import javax.lang.model.type.TypeKind;
+            import javax.lang.model.type.TypeMirror;
+            import javax.lang.model.util.Elements;
+            import javax.lang.model.util.Types;
+
+            class Example {
+              void valid(TypeMirror type, Types types, Elements elements) {
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("SingleSegment"))) {}
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("a.b.$Foo._Bar$1"))) {}
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("com.example.λ.α_1"))) {}
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("com.example.𝒰.a𝟎"))) {}
+                if (Objects.equals(types.asElement(type), elements.getTypeElement("com.example.record.var"))) {}
+                if (type.getKind() == TypeKind.INT) {}
+                if (type.getKind() == TypeKind.BOOLEAN) {}
+              }
+
+              void invalid(TypeMirror type, Types types, Elements elements) {
+                if (type.toString().equals("")) {}
+                if (type.toString().equals(".")) {}
+                if (type.toString().equals("a..b")) {}
+                if (type.toString().equals(".a")) {}
+                if (type.toString().equals("a.")) {}
+                if (type.toString().equals("1a")) {}
+                if (type.toString().equals("a.1b")) {}
+                if (type.toString().equals("𝟎")) {}
+                if (type.toString().equals("a.𝟎")) {}
+                if (type.toString().equals("default")) {}
+                if (type.toString().equals("a.default.b")) {}
+                if (type.toString().equals("_")) {}
+                if (type.toString().equals("java.util.List<String>")) {}
+                if (type.toString().equals("java.lang.String[]")) {}
+                if (type.toString().equals(" java.lang.String")) {}
+                if (type.toString().equals("java.lang.String ")) {}
+              }
+            }
+            """)
+        .addModules("jdk.compiler/com.sun.tools.javac.code")
         .doTest();
   }
 }

@@ -32,21 +32,21 @@ public class BanSerializableReadTest {
       BugCheckerRefactoringTestHelper.newInstance(BanSerializableRead.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("BanSerializableReadPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper.addSourceFile("testdata/BanSerializableReadPositiveCases.java").doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("BanSerializableReadNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper.addSourceFile("testdata/BanSerializableReadNegativeCases.java").doTest();
   }
 
   @Test
-  public void testNegativeCaseUnchanged() {
+  public void negativeCaseUnchanged() {
     refactoringHelper
-        .addInput("BanSerializableReadNegativeCases.java")
+        .addInput("testdata/BanSerializableReadNegativeCases.java")
         .expectUnchanged()
-        .setArgs("-XepCompilingTestOnlyCode")
+        .setTestOnly()
         .doTest();
   }
 }

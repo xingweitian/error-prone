@@ -17,13 +17,16 @@
 package com.google.errorprone.bugpatterns.threadsafety;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.bugpatterns.threadsafety.HeldLockAnalyzer.INVOKES_LAMBDAS_IMMEDIATELY;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 
 import com.google.common.base.Joiner;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.LambdaExpressionTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.MemberReferenceTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.bugpatterns.threadsafety.GuardedByExpression.Kind;
@@ -31,14 +34,17 @@ import com.google.errorprone.bugpatterns.threadsafety.GuardedByExpression.Select
 import com.google.errorprone.bugpatterns.threadsafety.GuardedByUtils.GuardedByValidationResult;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
-import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.LambdaExpressionTree;
+import com.sun.source.tree.MemberReferenceTree;
+import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
+import javax.inject.Inject;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
@@ -47,15 +53,20 @@ import com.sun.tools.javac.code.Type;
     summary = "Checks for unguarded accesses to fields and methods with @GuardedBy annotations",
     severity = ERROR)
 public class GuardedByChecker extends BugChecker
-    implements VariableTreeMatcher, MethodTreeMatcher, LambdaExpressionTreeMatcher {
+    implements VariableTreeMatcher,
+        MethodTreeMatcher,
+        LambdaExpressionTreeMatcher,
+        MemberReferenceTreeMatcher {
 
-  private static final String JUC_READ_WRITE_LOCK = "java.util.concurrent.locks.ReadWriteLock";
+  private static final ClassName JUC_READ_WRITE_LOCK =
+      ClassName.of("java.util.concurrent.locks.ReadWriteLock");
 
-  private final GuardedByFlags flags = GuardedByFlags.allOn();
+  @Inject
+  GuardedByChecker() {}
 
   @Override
-  public Description matchMethod(MethodTree tree, final VisitorState state) {
-    // Constructors (and field initializers, instance initalizers, and class initalizers) are free
+  public Description matchMethod(MethodTree tree, VisitorState state) {
+    // Constructors (and field initializers, instance initializers, and class initializers) are free
     // to mutate guarded state without holding the necessary locks. It is assumed that all objects
     // (and classes) are thread-local during initialization.
     if (ASTHelpers.getSymbol(tree).isConstructor()) {
@@ -67,17 +78,31 @@ public class GuardedByChecker extends BugChecker
 
   @Override
   public Description matchLambdaExpression(LambdaExpressionTree tree, VisitorState state) {
+    var parent = state.getPath().getParentPath().getLeaf();
+    if (parent instanceof MethodInvocationTree methodInvocationTree
+        && INVOKES_LAMBDAS_IMMEDIATELY.matches(methodInvocationTree, state)) {
+      return NO_MATCH;
+    }
     analyze(state.withPath(new TreePath(state.getPath(), tree.getBody())));
+    return NO_MATCH;
+  }
+
+  @Override
+  public Description matchMemberReference(MemberReferenceTree tree, VisitorState state) {
+    var parent = state.getPath().getParentPath().getLeaf();
+    if (parent instanceof MethodInvocationTree methodInvocationTree
+        && INVOKES_LAMBDAS_IMMEDIATELY.matches(methodInvocationTree, state)) {
+      return NO_MATCH;
+    }
+    analyze(state);
     return NO_MATCH;
   }
 
   private void analyze(VisitorState state) {
     HeldLockAnalyzer.analyze(
         state,
-        (ExpressionTree tree, GuardedByExpression guard, HeldLockSet live) ->
-            report(GuardedByChecker.this.checkGuardedAccess(tree, guard, live, state), state),
-        this::isSuppressed,
-        flags);
+        (tree, guard, live) -> report(checkGuardedAccess(tree, guard, live, state), state),
+        tree -> isSuppressed(tree, state));
   }
 
   @Override
@@ -103,7 +128,7 @@ public class GuardedByChecker extends BugChecker
     // members guarded by ReadWriteLocks. We could allow accesses when either the
     // read or write locks are held, but that's not much better than enforcing
     // nothing.
-    if (isRWLock(guard, state)) {
+    if (isRwLock(guard, state)) {
       return NO_MATCH;
     }
 
@@ -161,7 +186,7 @@ public class GuardedByChecker extends BugChecker
     return message.toString();
   }
 
-  private static Select findOuterInstance(GuardedByExpression expr) {
+  private static @Nullable Select findOuterInstance(GuardedByExpression expr) {
     while (expr.kind() == Kind.SELECT) {
       Select select = (Select) expr;
       if (select.sym().name.contentEquals(GuardedByExpression.ENCLOSING_INSTANCE_NAME)) {
@@ -186,13 +211,13 @@ public class GuardedByChecker extends BugChecker
    * Returns true if the lock expression corresponds to a {@code
    * java.util.concurrent.locks.ReadWriteLock}.
    */
-  private static boolean isRWLock(GuardedByExpression guard, VisitorState state) {
+  private static boolean isRwLock(GuardedByExpression guard, VisitorState state) {
     Type guardType = guard.type();
     if (guardType == null) {
       return false;
     }
 
-    Symbol rwLockSymbol = state.getSymbolFromString(JUC_READ_WRITE_LOCK);
+    Symbol rwLockSymbol = JUC_READ_WRITE_LOCK.symbol(state);
     if (rwLockSymbol == null) {
       return false;
     }
@@ -211,12 +236,12 @@ public class GuardedByChecker extends BugChecker
 
   /** Validates that {@code @GuardedBy} strings can be resolved. */
   private Description validate(Tree tree, VisitorState state) {
-    GuardedByValidationResult result = GuardedByUtils.isGuardedByValid(tree, state, flags);
+    GuardedByValidationResult result = GuardedByUtils.isGuardedByValid(tree, state);
     if (result.isValid()) {
       return Description.NO_MATCH;
     }
     return buildDescription(tree)
-        .setMessage(String.format("Invalid @GuardedBy expression: %s", result.message()))
+        .setMessage("Invalid @GuardedBy expression: %s", result.message())
         .build();
   }
 }

@@ -21,16 +21,26 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.bugpatterns.flogger.FloggerHelpers.inferFormatSpecifier;
+import static com.google.errorprone.bugpatterns.formatstring.LenientFormatStringUtils.getLenientFormatStringPosition;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.toType;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.predicates.TypePredicates.isExactType;
+import static com.google.errorprone.predicates.TypePredicates.isPrimitive;
+import static com.google.errorprone.suppliers.Suppliers.BOOLEAN_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.BYTE_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.CHAR_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.DOUBLE_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.FLOAT_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.INT_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.LONG_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.OBJECT_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.SHORT_TYPE;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getType;
-import static java.util.Arrays.stream;
-import static java.util.Objects.requireNonNull;
 
 import com.google.common.base.Ascii;
 import com.google.common.collect.ImmutableMap;
@@ -41,23 +51,27 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.matchers.method.ParameterPredicates;
+import com.google.errorprone.predicates.TypePredicates;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
+import java.util.EnumSet;
 import java.util.List;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
 import javax.lang.model.type.TypeKind;
+import org.jspecify.annotations.Nullable;
+import org.safere.Pattern;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "FloggerArgumentToString",
     summary =
         "Use Flogger's printf-style formatting instead of explicitly converting arguments to"
-            + " strings",
+            + " strings. Note that Flogger does more than just call toString; for instance, it"
+            + " formats arrays sensibly.",
     severity = WARNING)
 public class FloggerArgumentToString extends BugChecker implements MethodInvocationTreeMatcher {
 
@@ -71,7 +85,7 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
   private static final Pattern PRINTF_TERM_CAPTURE_PATTERN =
       Pattern.compile(
           // Skip escaped pairs of '%' before the next term.
-          "[^%]*+(?:%%[^%]*+)*+"
+          "[^%]*(?:%%[^%]*)*"
               // Capture an unescaped '%' and anything up to the first letter.
               + "(%[^%a-zA-Z]*[a-zA-Z])");
 
@@ -99,70 +113,76 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
   private static final Character HEX_FORMAT = 'x';
   private static final Character UPPER_HEX_FORMAT = 'X';
 
-  static class Parameter {
+  static final class Parameter {
 
-    final ExpressionTree expression;
-    @Nullable final Character placeholder;
-
-    private Parameter(ExpressionTree expression) {
-      this.expression = requireNonNull(expression);
-      this.placeholder = null;
-    }
+    final Supplier<String> source;
+    final Type type;
+    final @Nullable Character placeholder;
 
     private Parameter(ExpressionTree expression, char placeholder) {
-      this.expression = requireNonNull(expression);
+      this(s -> s.getSourceForNode(expression), getType(expression), placeholder);
+    }
+
+    private Parameter(Supplier<String> source, Type type, char placeholder) {
+      this.source = source;
+      this.type = type;
       this.placeholder = placeholder;
+    }
+
+    private static Parameter receiver(MethodInvocationTree invocation, char placeholder) {
+      ExpressionTree receiver = getReceiver(invocation);
+      if (receiver != null) {
+        return new Parameter(getReceiver(invocation), placeholder);
+      }
+      return new Parameter(s -> "this", null, placeholder);
     }
   }
 
   private enum Unwrapper {
     // Unwrap any instance call to toString().
-    TO_STRING(instanceMethod().anyClass().named("toString").withParameters()) {
+    TO_STRING(instanceMethod().anyClass().named("toString").withNoParameters()) {
 
       @Override
       Parameter unwrap(MethodInvocationTree invocation, char placeholder) {
-        return new Parameter(getReceiver(invocation), placeholder);
+        return Parameter.receiver(invocation, placeholder);
       }
     },
     // Unwrap things like: String.valueOf(x) --> x
     // Consider carefully if it's worth doing the char[] variant (Will we format char[] exactly
     // as the corresponding String? How often is it used?)
     STRING_VALUE_OF(
-        anyOf(
-            Stream.of(
-                    "valueOf(boolean)",
-                    "valueOf(char)",
-                    "valueOf(int)",
-                    "valueOf(long)",
-                    "valueOf(float)",
-                    "valueOf(double)",
-                    "valueOf(java.lang.Object)")
-                .map(
-                    signature ->
-                        instanceMethod().onExactClass("java.lang.String").withSignature(signature))
-                .collect(toImmutableList()))) {
+        instanceMethod()
+            .onExactClass("java.lang.String")
+            .named("valueOf")
+            .withParametersMatching(
+                ParameterPredicates.of(
+                    TypePredicates.anyOf(isPrimitive(), isExactType(OBJECT_TYPE))))) {
 
       @Override
       Parameter unwrap(MethodInvocationTree invocation, char placeholder) {
-        return new Parameter(getOnlyArgument(invocation), placeholder);
+        return Parameter.receiver(invocation, placeholder);
       }
     },
     // Unwrap things like: Integer.toString(n) --> n
     STATIC_TO_STRING(
         anyOf(
-            ImmutableMap.<Class<?>, String>builder()
-                .put(Boolean.class, "toString(boolean)")
-                .put(Character.class, "toString(char)")
-                .put(Byte.class, "toString(byte)")
-                .put(Short.class, "toString(short)")
-                .put(Integer.class, "toString(int)")
-                .put(Long.class, "toString(long)")
-                .put(Float.class, "toString(float)")
-                .put(Double.class, "toString(double)")
-                .build()
+            ImmutableMap.<Class<?>, Supplier<Type>>builder()
+                .put(Boolean.class, BOOLEAN_TYPE)
+                .put(Character.class, CHAR_TYPE)
+                .put(Byte.class, BYTE_TYPE)
+                .put(Short.class, SHORT_TYPE)
+                .put(Integer.class, INT_TYPE)
+                .put(Long.class, LONG_TYPE)
+                .put(Float.class, FLOAT_TYPE)
+                .put(Double.class, DOUBLE_TYPE)
+                .buildOrThrow()
                 .entrySet()
                 .stream()
-                .map(e -> staticMethod().onClass(e.getKey().getName()).withSignature(e.getValue()))
+                .map(e ->
+                    staticMethod()
+                        .onClass(e.getKey().getName())
+                        .named("toString")
+                        .withParametersOfType(e.getValue()))
                 .collect(toImmutableList()))) {
 
       @Override
@@ -174,19 +194,23 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
     // Note that we could also unwrap unboxing, but this has the effect of removing a null check.
     STATIC_VALUE_OF(
         anyOf(
-            ImmutableMap.<Class<?>, String>builder()
-                .put(Boolean.class, "valueOf(boolean)")
-                .put(Character.class, "valueOf(char)")
-                .put(Byte.class, "valueOf(byte)")
-                .put(Short.class, "valueOf(short)")
-                .put(Integer.class, "valueOf(int)")
-                .put(Long.class, "valueOf(long)")
-                .put(Float.class, "valueOf(float)")
-                .put(Double.class, "valueOf(double)")
-                .build()
+            ImmutableMap.<Class<?>, Supplier<Type>>builder()
+                .put(Boolean.class, BOOLEAN_TYPE)
+                .put(Character.class, CHAR_TYPE)
+                .put(Byte.class, BYTE_TYPE)
+                .put(Short.class, SHORT_TYPE)
+                .put(Integer.class, INT_TYPE)
+                .put(Long.class, LONG_TYPE)
+                .put(Float.class, FLOAT_TYPE)
+                .put(Double.class, DOUBLE_TYPE)
+                .buildOrThrow()
                 .entrySet()
                 .stream()
-                .map(e -> staticMethod().onClass(e.getKey().getName()).withSignature(e.getValue()))
+                .map(e ->
+                    staticMethod()
+                        .onClass(e.getKey().getName())
+                        .named("valueOf")
+                        .withParametersOfType(e.getValue()))
                 .collect(toImmutableList()))) {
 
       @Override
@@ -197,7 +221,7 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
     // Check that the output format safe to unwrap (it could be log("%b", x.toString()) which
     // cannot be unwrapped).
     STRING_TO_UPPER_CASE(
-        instanceMethod().onExactClass("java.lang.String").named("toUpperCase").withParameters()) {
+        instanceMethod().onExactClass("java.lang.String").named("toUpperCase").withNoParameters()) {
 
       @Override
       Parameter unwrap(MethodInvocationTree invocation, char placeholder) {
@@ -207,12 +231,11 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
     ASCII_TO_UPPER_CASE(
         anyOf(
             Stream.of("java.lang.String", "java.lang.CharSequence")
-                .map(
-                    param ->
-                        staticMethod()
-                            .onClass("com.google.common.base.Ascii")
-                            .named("toUpperCase")
-                            .withParameters(param))
+                .map(param ->
+                    staticMethod()
+                        .onClass("com.google.common.base.Ascii")
+                        .named("toUpperCase")
+                        .withParameters(param))
                 .collect(toImmutableList()))) {
 
       @Override
@@ -222,13 +245,17 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
     },
     STATIC_TO_HEX_STRING(
         anyOf(
-            ImmutableMap.<Class<?>, String>builder()
-                .put(Integer.class, "toHexString(int)")
-                .put(Long.class, "toHexString(long)")
-                .build()
+            ImmutableMap.<Class<?>, Supplier<Type>>builder()
+                .put(Integer.class, INT_TYPE)
+                .put(Long.class, LONG_TYPE)
+                .buildOrThrow()
                 .entrySet()
                 .stream()
-                .map(e -> staticMethod().onClass(e.getKey().getName()).withSignature(e.getValue()))
+                .map(e ->
+                    staticMethod()
+                        .onClass(e.getKey().getName())
+                        .named("toHexString")
+                        .withParametersOfType(e.getValue()))
                 .collect(toImmutableList()))) {
 
       @Override
@@ -268,37 +295,61 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
   private static final Matcher<ExpressionTree> LOG_MATCHER =
       instanceMethod().onDescendantOf("com.google.common.flogger.LoggingApi").named("log");
 
-  static final Matcher<ExpressionTree> UNWRAPPABLE =
-      anyOf(stream(Unwrapper.values()).map(u -> u.matcher).collect(toImmutableList()));
-
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-    if (!LOG_MATCHER.matches(tree, state)) {
-      return NO_MATCH;
-    }
     List<? extends ExpressionTree> arguments = tree.getArguments();
-    if (arguments.isEmpty()) {
-      return NO_MATCH;
+    if (LOG_MATCHER.matches(tree, state)) {
+      if (arguments.isEmpty()) {
+        return NO_MATCH;
+      }
+      String formatString = ASTHelpers.constValue(arguments.getFirst(), String.class);
+      if (formatString == null) {
+        return NO_MATCH;
+      }
+      arguments = arguments.subList(1, arguments.size());
+      return unwrapArguments(formatString, tree, arguments, EnumSet.allOf(Unwrapper.class), state);
+    } else {
+      var lenientFormatPosition = getLenientFormatStringPosition(tree, state);
+      EnumSet<Unwrapper> unwrappers =
+          EnumSet.of(Unwrapper.TO_STRING, Unwrapper.STRING_VALUE_OF, Unwrapper.STATIC_TO_STRING);
+      if (lenientFormatPosition != -1) {
+        for (int i = lenientFormatPosition + 1; i < arguments.size(); ++i) {
+          var argument = arguments.get(i);
+          var unwrapper =
+              unwrappers.stream()
+                  .filter(u -> u.matcher.matches(argument, state))
+                  .findFirst()
+                  .orElse(null);
+          if (unwrapper == null) {
+            continue;
+          }
+          Parameter unwrapped = unwrapper.unwrap((MethodInvocationTree) argument, 's');
+          state.reportMatch(
+              buildDescription(argument)
+                  .setMessage(
+                      "Avoid eagerly stringifying arguments to lenient format methods. The method"
+                          + " will stringify if needed, and the evaluation may be lazy.")
+                  .addFix(SuggestedFix.replace(argument, unwrapped.source.get(state)))
+                  .build());
+        }
+      }
     }
-    String formatString = ASTHelpers.constValue(arguments.get(0), String.class);
-    if (formatString == null) {
-      return NO_MATCH;
-    }
-    arguments = arguments.subList(1, arguments.size());
-    if (arguments.stream().noneMatch(argument -> UNWRAPPABLE.matches(argument, state))) {
-      return NO_MATCH;
-    }
-    return unwrapArguments(formatString, tree, arguments, state);
+    return NO_MATCH;
   }
 
-  Description unwrapArguments(
+  private Description unwrapArguments(
       String formatString,
       MethodInvocationTree tree,
       List<? extends ExpressionTree> arguments,
+      EnumSet<Unwrapper> unwrappers,
       VisitorState state) {
+    if (arguments.stream()
+        .noneMatch(arg -> unwrappers.stream().anyMatch(u -> u.matcher.matches(arg, state)))) {
+      return NO_MATCH;
+    }
     SuggestedFix.Builder fix = SuggestedFix.builder();
     int start = 0;
-    java.util.regex.Matcher matcher = PRINTF_TERM_CAPTURE_PATTERN.matcher(formatString);
+    org.safere.Matcher matcher = PRINTF_TERM_CAPTURE_PATTERN.matcher(formatString);
     StringBuilder sb = new StringBuilder();
     int idx = 0;
     boolean fixed = false;
@@ -319,12 +370,12 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
         if (term.length() == 2) {
           ExpressionTree argument = arguments.get(idx);
           char placeholder = term.charAt(1);
-          Parameter unwrapped = unwrap(argument, placeholder, state);
+          Parameter unwrapped = unwrap(argument, placeholder, unwrappers, state);
           if (unwrapped != null) {
-            fix.replace(argument, state.getSourceForNode(unwrapped.expression));
+            fix.replace(argument, unwrapped.source.get(state));
             placeholder = firstNonNull(unwrapped.placeholder, 's');
             if (placeholder == STRING_FORMAT) {
-              placeholder = inferFormatSpecifier(unwrapped.expression, state);
+              placeholder = inferFormatSpecifier(unwrapped.type, state);
             }
             term = "%" + placeholder;
             fixed = true;
@@ -339,17 +390,20 @@ public class FloggerArgumentToString extends BugChecker implements MethodInvocat
     if (!fixed) {
       return NO_MATCH;
     }
-    fix.replace(tree.getArguments().get(0), state.getConstantExpression(sb.toString()));
+    fix.replace(tree.getArguments().getFirst(), state.getConstantExpression(sb.toString()));
     return describeMatch(tree, fix.build());
   }
 
-  private static Parameter unwrap(ExpressionTree argument, char placeholder, VisitorState state) {
-    for (Unwrapper unwrapper : Unwrapper.values()) {
-      if (unwrapper.matcher.matches(argument, state)) {
-        return unwrapper.unwrap((MethodInvocationTree) argument, placeholder);
-      }
-    }
-    return null;
+  private static @Nullable Parameter unwrap(
+      ExpressionTree argument,
+      char placeholder,
+      EnumSet<Unwrapper> unwrappers,
+      VisitorState state) {
+    return unwrappers.stream()
+        .filter(unwrapper -> unwrapper.matcher.matches(argument, state))
+        .map(unwrapper -> unwrapper.unwrap((MethodInvocationTree) argument, placeholder))
+        .findFirst()
+        .orElse(null);
   }
 
   private static boolean hasSingleVarargsCompatibleArgument(

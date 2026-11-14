@@ -16,67 +16,79 @@
 
 package com.google.errorprone.bugpatterns.threadsafety;
 
-import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
+import static com.google.errorprone.util.ErrorProneLog.deferredDiagnosticHandler;
+import static com.google.errorprone.util.MoreAnnotations.asElement;
+import static com.google.errorprone.util.MoreAnnotations.getStrings;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.util.MoreAnnotations;
+import com.google.errorprone.bugpatterns.threadsafety.GuardedByExpression.Select;
+import com.google.errorprone.util.ErrorProneParser;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.parser.JavacParser;
-import com.sun.tools.javac.parser.ParserFactory;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Log;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
+import javax.lang.model.element.ElementKind;
+import org.jspecify.annotations.Nullable;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 public final class GuardedByUtils {
   public static ImmutableSet<String> getGuardValues(Symbol sym) {
-    return getAnnotationValueAsStrings(sym);
+    // This is called for every identifier and member select in the analyzed code, and most symbols
+    // have no annotations, so avoid the overhead of a stream.
+    List<Attribute.Compound> annotations = sym.getAnnotationMirrors();
+    if (annotations.isEmpty()) {
+      return ImmutableSet.of();
+    }
+    ImmutableSet.Builder<String> guards = ImmutableSet.builder();
+    for (Attribute.Compound a : annotations) {
+      if (ACCEPTED_GUARDED_BY_ANNOTATIONS.contains(asElement(a).toString())) {
+        guards.addAll(getStrings(a, "value"));
+      }
+    }
+    return guards.build();
   }
 
-  static ImmutableSet<String> getGuardValues(Tree tree, VisitorState state) {
+  static ImmutableSet<String> getGuardValues(Tree tree) {
     Symbol sym = getSymbol(tree);
-    if (sym == null) {
-      return ImmutableSet.of();
-    }
-    return getAnnotationValueAsStrings(sym);
+    return sym == null ? ImmutableSet.of() : getGuardValues(sym);
   }
 
-  private static ImmutableSet<String> getAnnotationValueAsStrings(Symbol sym) {
-    List<Attribute.Compound> rawAttributes = sym.getRawAttributes();
-    if (rawAttributes.isEmpty()) {
-      return ImmutableSet.of();
-    }
-    return rawAttributes.stream()
-        .filter(a -> a.getAnnotationType().asElement().getSimpleName().contentEquals("GuardedBy"))
-        .flatMap(
-            a ->
-                MoreAnnotations.getValue(a, "value")
-                    .map(MoreAnnotations::asStrings)
-                    .orElse(Stream.empty()))
-        .collect(toImmutableSet());
-  }
+  private static final ImmutableSet<String> ACCEPTED_GUARDED_BY_ANNOTATIONS =
+      ImmutableSet.of(
+          "android.support.annotation.GuardedBy",
+          "androidx.annotation.GuardedBy",
+          "com.android.internal.annotations.GuardedBy",
+          "com.google.errorprone.annotations.concurrent.GuardedBy",
+          "javax.annotation.concurrent.GuardedBy");
 
   static JCTree.JCExpression parseString(String guardedByString, Context context) {
     JavacParser parser =
-        ParserFactory.instance(context)
-            .newParser(
-                guardedByString,
-                /* keepDocComments= */ false,
-                /* keepEndPos= */ true,
-                /* keepLineMap= */ false);
+        ErrorProneParser.newParser(
+            context,
+            guardedByString,
+            /* keepDocComments= */ false,
+            /* keepEndPos= */ true,
+            /* keepLineMap= */ false);
+    Log log = Log.instance(context);
+    Log.DeferredDiagnosticHandler deferredDiagnosticHandler = deferredDiagnosticHandler(log);
     JCTree.JCExpression exp;
     try {
       exp = parser.parseExpression();
-    } catch (Throwable e) {
+    } catch (RuntimeException e) {
       throw new IllegalGuardedBy(e.getMessage());
+    } finally {
+      log.popDiagnosticHandler(deferredDiagnosticHandler);
     }
     int len = (parser.getEndPos(exp) - exp.getStartPosition());
     if (len != guardedByString.length()) {
@@ -85,24 +97,18 @@ public final class GuardedByUtils {
     return exp;
   }
 
-  @AutoValue
-  abstract static class GuardedByValidationResult {
-    abstract String message();
-
-    abstract Boolean isValid();
-
+  record GuardedByValidationResult(String message, boolean isValid) {
     static GuardedByValidationResult invalid(String message) {
-      return new AutoValue_GuardedByUtils_GuardedByValidationResult(message, false);
+      return new GuardedByValidationResult(message, false);
     }
 
     static GuardedByValidationResult ok() {
-      return new AutoValue_GuardedByUtils_GuardedByValidationResult("", true);
+      return new GuardedByValidationResult("", true);
     }
   }
 
-  public static GuardedByValidationResult isGuardedByValid(
-      Tree tree, VisitorState state, GuardedByFlags flags) {
-    ImmutableSet<String> guards = GuardedByUtils.getGuardValues(tree, state);
+  public static GuardedByValidationResult isGuardedByValid(Tree tree, VisitorState state) {
+    ImmutableSet<String> guards = GuardedByUtils.getGuardValues(tree);
     if (guards.isEmpty()) {
       return GuardedByValidationResult.ok();
     }
@@ -110,8 +116,8 @@ public final class GuardedByUtils {
     List<GuardedByExpression> boundGuards = new ArrayList<>();
     for (String guard : guards) {
       Optional<GuardedByExpression> boundGuard =
-          GuardedByBinder.bindString(guard, GuardedBySymbolResolver.from(tree, state), flags);
-      if (!boundGuard.isPresent()) {
+          GuardedByBinder.bindString(guard, GuardedBySymbolResolver.from(tree, state));
+      if (boundGuard.isEmpty()) {
         return GuardedByValidationResult.invalid("could not resolve guard");
       }
       boundGuards.add(boundGuard.get());
@@ -124,10 +130,16 @@ public final class GuardedByUtils {
     }
 
     for (GuardedByExpression boundGuard : boundGuards) {
+      GuardedByExpression boundGuardRoot =
+          boundGuard.kind() == GuardedByExpression.Kind.SELECT
+              ? ((Select) boundGuard).root()
+              : boundGuard;
+      boolean parameterGuard =
+          boundGuardRoot.sym() != null && boundGuardRoot.sym().getKind() == ElementKind.PARAMETER;
       boolean staticGuard =
           boundGuard.kind() == GuardedByExpression.Kind.CLASS_LITERAL
-              || (boundGuard.sym() != null && boundGuard.sym().isStatic());
-      if (treeSym.isStatic() && !staticGuard) {
+              || (boundGuard.sym() != null && isStatic(boundGuard.sym()));
+      if (isStatic(treeSym) && !staticGuard && !parameterGuard) {
         return GuardedByValidationResult.invalid("static member guarded by instance");
       }
     }
@@ -135,14 +147,11 @@ public final class GuardedByUtils {
     return GuardedByValidationResult.ok();
   }
 
-  public static Symbol bindGuardedByString(
-      Tree tree, String guard, VisitorState visitorState, GuardedByFlags flags) {
-    Optional<GuardedByExpression> bound =
-        GuardedByBinder.bindString(guard, GuardedBySymbolResolver.from(tree, visitorState), flags);
-    if (!bound.isPresent()) {
-      return null;
-    }
-    return bound.get().sym();
+  public static @Nullable Symbol bindGuardedByString(
+      Tree tree, String guard, VisitorState visitorState) {
+    return GuardedByBinder.bindString(guard, GuardedBySymbolResolver.from(tree, visitorState))
+        .map(bound -> bound.sym())
+        .orElse(null);
   }
 
   private GuardedByUtils() {}

@@ -19,7 +19,7 @@
     <parent>
         <artifactId>error_prone_parent</artifactId>
         <groupId>com.google.errorprone</groupId>
-        <version>HEAD-SNAPSHOT</version>
+        <version>1.0-HEAD-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -41,12 +41,6 @@
             <version>${project.version}</version>
             <classifier>with-dependencies</classifier>
             <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <!-- GPLv2 with Classpath Exception -->
-            <groupId>com.google.errorprone</groupId>
-            <artifactId>javac</artifactId>
-            <version>${javac.version}</version>
         </dependency>
         <dependency>
             <!-- Apache 2.0 -->

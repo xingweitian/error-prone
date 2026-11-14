@@ -18,10 +18,10 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
-import static com.google.errorprone.matchers.FieldMatchers.staticField;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.matchers.field.FieldMatchers.staticField;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -36,40 +36,33 @@ import com.sun.source.tree.MethodInvocationTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "SystemOut",
     summary =
-        "Printing to standard output should only be used for debugging, not in production code",
+        "Production code should not print to standard out or standard error. Standard out and"
+            + " standard error should only be used for debugging.",
     severity = WARNING,
     tags = StandardTags.LIKELY_ERROR)
-public class SystemOut extends BugChecker
+public final class SystemOut extends BugChecker
     implements MethodInvocationTreeMatcher, MemberSelectTreeMatcher {
 
-  private static final Matcher<ExpressionTree> SYSTEM_OUT =
-      anyOf(
-          staticField(System.class.getName(), "out"), //
-          staticField(System.class.getName(), "err"));
+  private static final Matcher<ExpressionTree> BAD_FIELDS =
+      staticField().onClass(System.class.getName()).namedAnyOf("out", "err");
 
-  private static final Matcher<ExpressionTree> PRINT_STACK_TRACE =
+  private static final Matcher<ExpressionTree> BAD_METHODS =
       anyOf(
-          staticMethod().onClass(Thread.class.getName()).named("dumpStack").withParameters(),
+          staticMethod().onClass("java.lang.IO").namedAnyOf("print", "println"),
+          staticMethod().onClass(Thread.class.getName()).named("dumpStack").withNoParameters(),
           instanceMethod()
               .onDescendantOf(Throwable.class.getName())
               .named("printStackTrace")
-              .withParameters());
+              .withNoParameters());
 
   @Override
   public Description matchMemberSelect(MemberSelectTree tree, VisitorState state) {
-    if (SYSTEM_OUT.matches(tree, state)) {
-      return describeMatch(tree);
-    }
-    return NO_MATCH;
+    return BAD_FIELDS.matches(tree, state) ? describeMatch(tree) : NO_MATCH;
   }
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-    if (PRINT_STACK_TRACE.matches(tree, state)) {
-      return describeMatch(tree);
-    }
-    return NO_MATCH;
+    return BAD_METHODS.matches(tree, state) ? describeMatch(tree) : NO_MATCH;
   }
 }

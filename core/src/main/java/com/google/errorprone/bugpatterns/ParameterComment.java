@@ -20,50 +20,47 @@ import static com.google.common.collect.Iterables.getLast;
 import static com.google.common.collect.Streams.forEachPair;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.Comments.findCommentsForArguments;
+import static com.google.errorprone.util.Comments.getTextFromComment;
 
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
-import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.Commented;
-import com.google.errorprone.util.Comments;
-import com.sun.source.tree.ExpressionTree;
+import com.google.errorprone.util.ErrorProneComment;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
-import com.sun.tools.javac.parser.Tokens.Comment;
 import java.util.stream.Stream;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "ParameterComment",
     summary = "Non-standard parameter comment; prefer `/* paramName= */ arg`",
-    severity = SUGGESTION,
-    tags = StandardTags.STYLE)
+    severity = SUGGESTION)
 public class ParameterComment extends BugChecker
     implements MethodInvocationTreeMatcher, NewClassTreeMatcher {
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     return matchNewClassOrMethodInvocation(
-        ASTHelpers.getSymbol(tree), Comments.findCommentsForArguments(tree, state), tree);
+        getSymbol(tree), findCommentsForArguments(tree, state), tree);
   }
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
     return matchNewClassOrMethodInvocation(
-        ASTHelpers.getSymbol(tree), Comments.findCommentsForArguments(tree, state), tree);
+        getSymbol(tree), findCommentsForArguments(tree, state), tree);
   }
 
   private Description matchNewClassOrMethodInvocation(
-      MethodSymbol symbol, ImmutableList<Commented<ExpressionTree>> arguments, Tree tree) {
+      MethodSymbol symbol, ImmutableList<Commented> arguments, Tree tree) {
     if (symbol.getParameters().isEmpty()) {
       return NO_MATCH;
     }
@@ -74,33 +71,29 @@ public class ParameterComment extends BugChecker
             symbol.getParameters().stream(),
             Stream.iterate(getLast(symbol.getParameters()), x -> x)),
         (commented, param) -> {
-          ImmutableList<Comment> comments =
+          if (commented.beforeComments().stream()
+              .anyMatch(c ->
+                  getTextFromComment(c).replace(" ", "").equals(param.getSimpleName() + "="))) {
+            return;
+          }
+          ImmutableList<ErrorProneComment> comments =
               commented.afterComments().isEmpty()
                   ? commented.beforeComments()
                   : commented.afterComments();
-          boolean matchStandardForm = !commented.afterComments().isEmpty();
           comments.stream()
-              .filter(c -> matchingParamComment(c, param, matchStandardForm))
+              .filter(c -> matchingParamComment(c, param))
               .findFirst()
               .ifPresent(c -> fixParamComment(fix, commented, param, c));
         });
     return fix.isEmpty() ? NO_MATCH : describeMatch(tree, fix.build());
   }
 
-  private static boolean matchingParamComment(
-      Comment c, VarSymbol param, boolean matchStandardForm) {
-    String text = Comments.getTextFromComment(c).trim();
-    if (text.endsWith("=")) {
-      if (!matchStandardForm) {
-        return false;
-      }
-      text = text.substring(0, text.length() - "=".length()).trim();
-    }
-    return param.getSimpleName().contentEquals(text);
+  private static boolean matchingParamComment(ErrorProneComment c, VarSymbol param) {
+    return param.getSimpleName().contentEquals(getTextFromComment(c).replaceAll("\\s*=\\s*$", ""));
   }
 
   private static void fixParamComment(
-      SuggestedFix.Builder fix, Commented<ExpressionTree> commented, VarSymbol param, Comment c) {
+      SuggestedFix.Builder fix, Commented commented, VarSymbol param, ErrorProneComment c) {
     fix.prefixWith(commented.tree(), String.format("/* %s= */ ", param.getSimpleName()))
         .replace(c.getSourcePos(0), c.getSourcePos(0) + c.getText().length(), "");
   }

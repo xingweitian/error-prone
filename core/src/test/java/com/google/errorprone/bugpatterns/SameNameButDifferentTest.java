@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
@@ -36,21 +37,27 @@ public final class SameNameButDifferentTest {
   public void simpleNameClash() {
     helper
         .addSourceLines(
-            "A.java", //
-            "class A {",
-            "  class Supplier {}",
-            "}")
+            "A.java",
+            """
+            class A {
+              class Supplier {}
+            }
+            """)
         .addSourceLines(
             "B.java",
-            "import java.util.function.Supplier;",
-            "class B {",
-            "  // BUG: Diagnostic contains:",
-            "  Supplier<Integer> supplier = () -> 1;",
-            "  class C extends A {",
-            "    // BUG: Diagnostic contains:",
-            "    Supplier supplier2 = new Supplier();",
-            "  }",
-            "}")
+            """
+            import java.util.function.Supplier;
+
+            class B {
+              // BUG: Diagnostic contains:
+              Supplier<Integer> supplier = () -> 1;
+
+              class C extends A {
+                // BUG: Diagnostic contains:
+                Supplier supplier2 = new Supplier();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -58,34 +65,47 @@ public final class SameNameButDifferentTest {
   public void simpleNameRefactoring() {
     refactoring
         .addInputLines(
-            "A.java", //
-            "package foo;",
-            "class A {",
-            "  class Supplier {}",
-            "}")
+            "A.java",
+            """
+            package foo;
+
+            class A {
+              class Supplier {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "B.java",
-            "package foo;",
-            "import java.util.function.Supplier;",
-            "class B {",
-            "  Supplier<Integer> supplier = () -> 1;",
-            "  class C extends A {",
-            "    Supplier supplier2 = new Supplier();",
-            "    Class<Supplier> clazz = Supplier.class;",
-            "  }",
-            "}")
+            """
+            package foo;
+
+            import java.util.function.Supplier;
+
+            class B {
+              Supplier<Integer> supplier = () -> 1;
+
+              class C extends A {
+                Supplier supplier2 = new Supplier();
+                Class<Supplier> clazz = Supplier.class;
+              }
+            }
+            """)
         .addOutputLines(
             "B.java",
-            "package foo;",
-            "import java.util.function.Supplier;",
-            "class B {",
-            "  Supplier<Integer> supplier = () -> 1;",
-            "  class C extends A {",
-            "    A.Supplier supplier2 = new A.Supplier();",
-            "    Class<A.Supplier> clazz = A.Supplier.class;",
-            "  }",
-            "}")
+            """
+            package foo;
+
+            import java.util.function.Supplier;
+
+            class B {
+              Supplier<Integer> supplier = () -> 1;
+
+              class C extends A {
+                A.Supplier supplier2 = new A.Supplier();
+                Class<A.Supplier> clazz = A.Supplier.class;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -93,43 +113,59 @@ public final class SameNameButDifferentTest {
   public void nestedClassNameClash() {
     refactoring
         .addInputLines(
-            "A.java", //
-            "package foo;",
-            "class A {",
-            "  static class B {",
-            "    static class C {}",
-            "  }",
-            "}")
+            "A.java",
+            """
+            package foo;
+
+            class A {
+              static class B {
+                static class C {}
+              }
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "D.java",
-            "package foo;",
-            "class D {",
-            "  static class B {",
-            "    static class C {}",
-            "  }",
-            "}")
+            """
+            package foo;
+
+            class D {
+              static class B {
+                static class C {}
+              }
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "E.java",
-            "package foo;",
-            "import foo.A.B;",
-            "class E {",
-            "  B.C foo = new B.C();",
-            "  class C extends D {",
-            "    B.C bar = new B.C();",
-            "  }",
-            "}")
+            """
+            package foo;
+
+            import foo.A.B;
+
+            class E {
+              B.C foo = new B.C();
+
+              class C extends D {
+                B.C bar = new B.C();
+              }
+            }
+            """)
         .addOutputLines(
             "E.java",
-            "package foo;",
-            "import foo.A.B;",
-            "class E {",
-            "  A.B.C foo = new A.B.C();",
-            "  class C extends D {",
-            "    D.B.C bar = new D.B.C();",
-            "  }",
-            "}")
+            """
+            package foo;
+
+            import foo.A.B;
+
+            class E {
+              A.B.C foo = new A.B.C();
+
+              class C extends D {
+                D.B.C bar = new D.B.C();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -137,19 +173,25 @@ public final class SameNameButDifferentTest {
   public void negativeAlreadyQualified() {
     helper
         .addSourceLines(
-            "A.java", //
-            "class A {",
-            "  class Supplier {}",
-            "}")
+            "A.java",
+            """
+            class A {
+              class Supplier {}
+            }
+            """)
         .addSourceLines(
             "B.java",
-            "import java.util.function.Supplier;",
-            "class B {",
-            "  Supplier<Integer> supplier = () -> 1;",
-            "  class C extends A {",
-            "    A.Supplier supplier2 = new A.Supplier();",
-            "  }",
-            "}")
+            """
+            import java.util.function.Supplier;
+
+            class B {
+              Supplier<Integer> supplier = () -> 1;
+
+              class C extends A {
+                A.Supplier supplier2 = new A.Supplier();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -158,16 +200,19 @@ public final class SameNameButDifferentTest {
     helper
         .addSourceLines(
             "A.java",
-            "class A {",
-            "  public void foo() {",
-            "    class B {}",
-            "    B b = new B();",
-            "  }",
-            "  public void bar() {",
-            "    class B {}",
-            "    B b = new B();",
-            "  }",
-            "}")
+            """
+            class A {
+              public void foo() {
+                class B {}
+                B b = new B();
+              }
+
+              public void bar() {
+                class B {}
+                B b = new B();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -176,18 +221,21 @@ public final class SameNameButDifferentTest {
     helper
         .addSourceLines(
             "A.java",
-            "class A {",
-            "  public void foo() {",
-            "    class B {}",
-            "    B b = new B();",
-            "  }",
-            "  public void bar() {",
-            "    class B {}",
-            "    class C {}",
-            "    C c = new C();",
-            "    B b = new B();",
-            "  }",
-            "}")
+            """
+            class A {
+              public void foo() {
+                class B {}
+                B b = new B();
+              }
+
+              public void bar() {
+                class B {}
+                class C {}
+                C c = new C();
+                B b = new B();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -196,15 +244,46 @@ public final class SameNameButDifferentTest {
     helper
         .addSourceLines(
             "B.java",
-            "import java.util.function.Supplier;",
-            "class B {",
-            "  Supplier<Integer> supplier = () -> 1;",
-            "  class C {",
-            "  class Supplier {",
-            "    Supplier s = new Supplier();",
-            "  }",
-            "  }",
-            "}")
+            """
+            import java.util.function.Supplier;
+
+            class B {
+              Supplier<Integer> supplier = () -> 1;
+
+              class C {
+                class Supplier {
+                  Supplier s = new Supplier();
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ungroupedOverloadsPositiveCasesCoveringOnlyFirstOverload() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              class One {
+                class Clash {}
+
+                // BUG: Diagnostic contains:
+                Clash a;
+                Clash b;
+              }
+
+              class Two {
+                class Clash {}
+
+                Clash a;
+                Clash b;
+              }
+            }
+            """)
+        .setArgs(ImmutableList.of("-XepOpt:SameNameButDifferent:BatchFindings"))
         .doTest();
   }
 }

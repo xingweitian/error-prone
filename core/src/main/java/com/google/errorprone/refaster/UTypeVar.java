@@ -24,14 +24,14 @@ import com.google.common.base.Objects;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UType} version of {@link TypeVar}.
  *
  * @author Louis Wasserman
  */
-public class UTypeVar extends UType {
+public final class UTypeVar extends UType {
   // This can't be @AutoValue'd, since the fields are mutable.
 
   /** Bindings key linked to a {@code UTypeVar}. */
@@ -54,8 +54,7 @@ public class UTypeVar extends UType {
 
     public abstract Type type();
 
-    @Nullable
-    abstract JCExpression expression();
+    abstract @Nullable JCExpression expression();
 
     @Override
     public JCExpression inline(Inliner inliner) {
@@ -113,12 +112,16 @@ public class UTypeVar extends UType {
     return upperBound;
   }
 
-  /** @param lowerBound the lowerBound to set */
+  /**
+   * @param lowerBound the lowerBound to set
+   */
   public void setLowerBound(UType lowerBound) {
     this.lowerBound = checkNotNull(lowerBound);
   }
 
-  /** @param upperBound the upperBound to set */
+  /**
+   * @param upperBound the upperBound to set
+   */
   public void setUpperBound(UType upperBound) {
     this.upperBound = checkNotNull(upperBound);
   }
@@ -137,8 +140,7 @@ public class UTypeVar extends UType {
   public boolean equals(@Nullable Object obj) {
     if (this == obj) {
       return true;
-    } else if (obj instanceof UTypeVar) {
-      UTypeVar typeVar = (UTypeVar) obj;
+    } else if (obj instanceof UTypeVar typeVar) {
       return name.equals(typeVar.name)
           && lowerBound.equals(typeVar.lowerBound)
           && upperBound.equals(typeVar.upperBound);

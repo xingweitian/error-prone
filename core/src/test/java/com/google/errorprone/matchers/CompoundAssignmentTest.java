@@ -30,7 +30,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author adgar@google.com (Mike Edgar) */
+/**
+ * @author adgar@google.com (Mike Edgar)
+ */
 @RunWith(JUnit4.class)
 public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
 
@@ -72,12 +74,14 @@ public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
   public void shouldMatch() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void getHash(int a, long b) {",
-        "    long c = a;",
-        "    c += b;",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void getHash(int a, long b) {
+            long c = a;
+            c += b;
+          }
+        }
+        """);
     Set<Kind> operators = EnumSet.noneOf(Kind.class);
     operators.add(Kind.PLUS_ASSIGNMENT);
     operators.add(Kind.LEFT_SHIFT_ASSIGNMENT);
@@ -94,12 +98,14 @@ public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
   public void shouldNotMatchWhenOperatorDiffers() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void getHash(int a, long b) {",
-        "    long c = a;",
-        "    c -= b;",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void getHash(int a, long b) {
+            long c = a;
+            c -= b;
+          }
+        }
+        """);
     Set<Kind> operators = EnumSet.noneOf(Kind.class);
     operators.add(Kind.PLUS_ASSIGNMENT);
     assertCompiles(
@@ -115,12 +121,14 @@ public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
   public void shouldNotMatchWhenLeftOperandMatcherFails() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void getHash(int a, long b) {",
-        "    long c = a;",
-        "    c += b;",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void getHash(int a, long b) {
+            long c = a;
+            c += b;
+          }
+        }
+        """);
     Set<Kind> operators = EnumSet.noneOf(Kind.class);
     operators.add(Kind.PLUS_ASSIGNMENT);
     assertCompiles(
@@ -136,12 +144,14 @@ public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
   public void shouldNotMatchWhenRightOperandMatcherFails() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void getHash(int a, long b) {",
-        "    long c = a;",
-        "    c += b;",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void getHash(int a, long b) {
+            long c = a;
+            c += b;
+          }
+        }
+        """);
     Set<Kind> operators = EnumSet.noneOf(Kind.class);
     operators.add(Kind.PLUS_ASSIGNMENT);
     assertCompiles(
@@ -153,8 +163,7 @@ public class CompoundAssignmentTest extends CompilerBasedAbstractTest {
                 Matchers.<ExpressionTree>isArrayType())));
   }
 
-  private Scanner compoundAssignmentMatches(
-      final boolean shouldMatch, final CompoundAssignment toMatch) {
+  private Scanner compoundAssignmentMatches(boolean shouldMatch, CompoundAssignment toMatch) {
     return new Scanner() {
       @Override
       public Void visitCompoundAssignment(CompoundAssignmentTree node, VisitorState visitorState) {

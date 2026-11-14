@@ -18,17 +18,17 @@ package com.google.errorprone;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static java.util.Arrays.stream;
 
+import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Streams;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.CheckReturnValue;
 import java.io.Serializable;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -42,7 +42,8 @@ import java.util.Set;
  * <p>To access ErrorProneFlags from a BugChecker class, add a constructor to the class that takes
  * one parameter of type ErrorProneFlags.
  *
- * <p>See <a href="https://errorprone.info/docs/flags">documentation</a> for full syntax description.
+ * <p>See <a href="https://errorprone.info/docs/flags">documentation</a> for full syntax
+ * description.
  */
 public final class ErrorProneFlags implements Serializable {
   public static final String PREFIX = "-XepOpt:";
@@ -62,7 +63,7 @@ public final class ErrorProneFlags implements Serializable {
   }
 
   public ImmutableMap<String, String> getFlagsMap() {
-    return ImmutableMap.copyOf(flagsMap);
+    return flagsMap;
   }
 
   /**
@@ -102,23 +103,23 @@ public final class ErrorProneFlags implements Serializable {
    */
   public <T extends Enum<T>> Optional<ImmutableSet<T>> getEnumSet(String key, Class<T> clazz) {
     return this.get(key)
-        .map(
-            value ->
-                Streams.stream(Splitter.on(',').omitEmptyStrings().split(value))
-                    .map(v -> asEnumValue(key, v, clazz))
-                    .collect(toImmutableSet()));
+        .map(value ->
+            COMMA_SPLITTER
+                .omitEmptyStrings()
+                .splitToStream(value)
+                .map(v -> asEnumValue(key, v, clazz))
+                .collect(toImmutableSet()));
   }
 
   private static <T extends Enum<T>> T asEnumValue(String key, String value, Class<T> clazz) {
-    try {
-      return Enum.valueOf(clazz, value);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(
-          String.format(
-              "Error Prone flag %s=%s could not be parsed as an enum constant of %s",
-              key, value, clazz),
-          e);
-    }
+    return stream(clazz.getEnumConstants())
+        .filter(c -> Ascii.equalsIgnoreCase(c.name(), value))
+        .findFirst()
+        .orElseThrow(() ->
+            new IllegalArgumentException(
+                String.format(
+                    "Error Prone flag %s=%s could not be parsed as an enum constant of %s",
+                    key, value, clazz)));
   }
 
   private static boolean parseBoolean(String value) {
@@ -145,24 +146,30 @@ public final class ErrorProneFlags implements Serializable {
   }
 
   /**
-   * Gets the flag value for the given key as a comma-separated {@link List} of Strings, wrapped in
-   * an {@link Optional}, which is empty if the flag is unset.
+   * Gets the flag value for the given key as a comma-separated {@link ImmutableList} of Strings, or
+   * an empty list if the flag is unset.
    *
    * <p>(note: empty strings included, e.g. {@code "-XepOpt:List=,1,,2," => ["","1","","2",""]})
    */
-  public Optional<List<String>> getList(String key) {
-    return this.get(key).map(v -> ImmutableList.copyOf(Splitter.on(',').split(v)));
+  public ImmutableList<String> getListOrEmpty(String key) {
+    return get(key)
+        .map(v -> ImmutableList.copyOf(COMMA_SPLITTER.split(v)))
+        .orElse(ImmutableList.of());
   }
 
   /**
-   * Gets the flag value for the given key as a comma-separated {@link Set} of Strings, wrapped in
-   * an {@link Optional}, which is empty if the flag is unset.
+   * Gets the flag value for the given key as a comma-separated {@link Set} of Strings, or an empty
+   * set if unset.
    *
    * <p>(note: empty strings included, e.g. {@code "-XepOpt:Set=,1,,1,2," => ["","1","2"]})
    */
-  public Optional<Set<String>> getSet(String key) {
-    return this.get(key).map(v -> ImmutableSet.copyOf(Splitter.on(',').split(v)));
+  public ImmutableSet<String> getSetOrEmpty(String key) {
+    return get(key)
+        .map(v -> ImmutableSet.copyOf(COMMA_SPLITTER.split(v)))
+        .orElse(ImmutableSet.of());
   }
+
+  private static final Splitter COMMA_SPLITTER = Splitter.on(',');
 
   /** Whether this Flags object is empty, i.e. no flags have been set. */
   public boolean isEmpty() {
@@ -182,7 +189,7 @@ public final class ErrorProneFlags implements Serializable {
   }
 
   /** Builder for Error Prone command-line flags object. Parses flags from strings. */
-  public static class Builder {
+  public static final class Builder {
 
     private final HashMap<String, String> flagsMap = new HashMap<>();
 

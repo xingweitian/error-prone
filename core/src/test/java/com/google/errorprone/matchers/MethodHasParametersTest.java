@@ -19,8 +19,9 @@ package com.google.errorprone.matchers;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.errorprone.matchers.ChildMultiMatcher.MatchType.ALL;
 import static com.google.errorprone.matchers.ChildMultiMatcher.MatchType.AT_LEAST_ONE;
-import static com.google.errorprone.matchers.Matchers.isPrimitiveType;
 import static com.google.errorprone.matchers.Matchers.variableType;
+import static com.google.errorprone.predicates.TypePredicates.isPrimitive;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
 
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.scanner.Scanner;
@@ -33,7 +34,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author eaftan@google.com (Eddie Aftandilian) */
+/**
+ * @author eaftan@google.com (Eddie Aftandilian)
+ */
 @RunWith(JUnit4.class)
 public class MethodHasParametersTest extends CompilerBasedAbstractTest {
 
@@ -43,9 +46,19 @@ public class MethodHasParametersTest extends CompilerBasedAbstractTest {
   public void setUp() {
     tests.clear();
     writeFile(
-        "SampleAnnotation1.java", "package com.google;", "public @interface SampleAnnotation1 {}");
+        "SampleAnnotation1.java",
+        """
+        package com.google;
+
+        public @interface SampleAnnotation1 {}
+        """);
     writeFile(
-        "SampleAnnotation2.java", "package com.google;", "public @interface SampleAnnotation2 {}");
+        "SampleAnnotation2.java",
+        """
+        package com.google;
+
+        public @interface SampleAnnotation2 {}
+        """);
   }
 
   @After
@@ -58,67 +71,88 @@ public class MethodHasParametersTest extends CompilerBasedAbstractTest {
   @Test
   public void shouldMatchSingleParameter() {
     writeFile(
-        "A.java", "package com.google;", "public class A {", "  public void A(int i) {}", "}");
+        "A.java",
+        """
+        package com.google;
+
+        public class A {
+          public void A(int i) {}
+        }
+        """);
     assertCompiles(
         methodMatches(
             /* shouldMatch= */ true,
-            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitiveType()))));
+            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitive()))));
     assertCompiles(
         methodMatches(
-            /* shouldMatch= */ true,
-            new MethodHasParameters(ALL, variableType(isPrimitiveType()))));
+            /* shouldMatch= */ true, new MethodHasParameters(ALL, variableType(isPrimitive()))));
   }
 
   @Test
   public void shouldNotMatchNoParameters() {
-    writeFile("A.java", "package com.google;", "public class A {", "  public void A() {}", "}");
+    writeFile(
+        "A.java",
+        """
+        package com.google;
+
+        public class A {
+          public void A() {}
+        }
+        """);
     assertCompiles(
         methodMatches(
             /* shouldMatch= */ false,
-            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitiveType()))));
+            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitive()))));
     assertCompiles(
         methodMatches(
-            /* shouldMatch= */ true,
-            new MethodHasParameters(ALL, variableType(isPrimitiveType()))));
+            /* shouldMatch= */ true, new MethodHasParameters(ALL, variableType(isPrimitive()))));
   }
 
   @Test
   public void shouldNotMatchNonmatchingParameter() {
     writeFile(
-        "A.java", "package com.google;", "public class A {", "  public void A(Object obj) {}", "}");
+        "A.java",
+        """
+        package com.google;
+
+        public class A {
+          public void A(Object obj) {}
+        }
+        """);
     assertCompiles(
         methodMatches(
             /* shouldMatch= */ false,
-            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitiveType()))));
+            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitive()))));
     assertCompiles(
         methodMatches(
-            /* shouldMatch= */ false,
-            new MethodHasParameters(ALL, variableType(isPrimitiveType()))));
+            /* shouldMatch= */ false, new MethodHasParameters(ALL, variableType(isPrimitive()))));
   }
 
   @Test
-  public void testMultipleParameters() {
+  public void multipleParameters() {
     writeFile(
         "A.java",
-        "package com.google;",
-        "public class A {",
-        "  public void A(int i, Object obj) {}",
-        "}");
+        """
+        package com.google;
+
+        public class A {
+          public void A(int i, Object obj) {}
+        }
+        """);
     assertCompiles(
         methodMatches(
             /* shouldMatch= */ true,
-            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitiveType()))));
+            new MethodHasParameters(AT_LEAST_ONE, variableType(isPrimitive()))));
     assertCompiles(
         methodMatches(
-            /* shouldMatch= */ false,
-            new MethodHasParameters(ALL, variableType(isPrimitiveType()))));
+            /* shouldMatch= */ false, new MethodHasParameters(ALL, variableType(isPrimitive()))));
   }
 
-  private abstract class ScannerTest extends Scanner {
-    public abstract void assertDone();
+  private abstract static class ScannerTest extends Scanner {
+    abstract void assertDone();
   }
 
-  private Scanner methodMatches(final boolean shouldMatch, final MethodHasParameters toMatch) {
+  private Scanner methodMatches(boolean shouldMatch, MethodHasParameters toMatch) {
     ScannerTest test =
         new ScannerTest() {
           private boolean matched = false;
@@ -133,7 +167,7 @@ public class MethodHasParametersTest extends CompilerBasedAbstractTest {
           }
 
           private boolean isConstructor(MethodTree node) {
-            return node.getName().contentEquals("<init>");
+            return getSymbol(node).isConstructor();
           }
 
           @Override

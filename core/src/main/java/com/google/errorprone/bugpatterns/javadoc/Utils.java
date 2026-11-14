@@ -17,25 +17,43 @@
 package com.google.errorprone.bugpatterns.javadoc;
 
 import static com.google.errorprone.names.LevenshteinEditDistance.getEditDistance;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isGeneratedConstructor;
+import static com.google.errorprone.util.ASTHelpers.isRecord;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.fixes.ErrorPronePosition;
+import com.google.errorprone.fixes.FixedPosition;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.doctree.DocCommentTree;
 import com.sun.source.doctree.DocTree;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.ModuleTree;
+import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.PackageTree;
 import com.sun.source.tree.Tree;
+import com.sun.source.tree.VariableTree;
 import com.sun.source.util.DocSourcePositions;
 import com.sun.source.util.DocTreePath;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.api.JavacTrees;
+import com.sun.tools.javac.code.Symbol;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
-import com.sun.tools.javac.tree.EndPosTable;
+import com.sun.tools.javac.tree.DocCommentTable;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.Position;
+import java.lang.reflect.Method;
 import java.util.Optional;
-import javax.annotation.Nullable;
+import javax.lang.model.element.ElementKind;
+import org.jspecify.annotations.Nullable;
 
 /** Common utility methods for fixing Javadocs. */
 final class Utils {
@@ -53,8 +71,26 @@ final class Utils {
   }
 
   static DCDocComment getDocComment(VisitorState state, Tree tree) {
-    return ((JCCompilationUnit) state.getPath().getCompilationUnit())
-        .docComments.getCommentTree((JCTree) tree);
+    return getCommentTree(
+        ((JCCompilationUnit) state.getPath().getCompilationUnit()).docComments, (JCTree) tree);
+  }
+
+  private static final Method COMMENT_TREE_METHOD = getCommentTreeMethod();
+
+  private static Method getCommentTreeMethod() {
+    try {
+      return DocCommentTable.class.getMethod("getCommentTree", JCTree.class);
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError(e.getMessage(), e);
+    }
+  }
+
+  private static DCDocComment getCommentTree(DocCommentTable docCommentTable, JCTree tree) {
+    try {
+      return (DCDocComment) COMMENT_TREE_METHOD.invoke(docCommentTable, tree);
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError(e.getMessage(), e);
+    }
   }
 
   static SuggestedFix replace(DocTree docTree, String replacement, VisitorState state) {
@@ -63,7 +99,7 @@ final class Utils {
     int startPos = getStartPosition(docTree, state);
     int endPos =
         (int) positions.getEndPosition(compilationUnitTree, getDocCommentTree(state), docTree);
-    if (endPos == Position.NOPOS) {
+    if (startPos == Position.NOPOS || endPos == Position.NOPOS) {
       return SuggestedFix.emptyFix();
     }
     return SuggestedFix.replace(startPos, endPos, replacement);
@@ -85,7 +121,7 @@ final class Utils {
    * Gets a {@link DiagnosticPosition} for the {@link DocTree} pointed to by {@code path}, attached
    * to the {@link Tree} which it documents.
    */
-  static DiagnosticPosition diagnosticPosition(DocTreePath path, VisitorState state) {
+  static ErrorPronePosition diagnosticPosition(DocTreePath path, VisitorState state) {
     int startPosition = getStartPosition(path.getLeaf(), state);
     Tree tree = path.getTreePath().getLeaf();
     if (startPosition == Position.NOPOS) {
@@ -96,32 +132,11 @@ final class Utils {
     return getDiagnosticPosition(startPosition, tree);
   }
 
-  static DiagnosticPosition getDiagnosticPosition(int startPosition, Tree tree) {
-    return new DiagnosticPosition() {
-      @Override
-      public JCTree getTree() {
-        return (JCTree) tree;
-      }
-
-      @Override
-      public int getStartPosition() {
-        return startPosition;
-      }
-
-      @Override
-      public int getPreferredPosition() {
-        return startPosition;
-      }
-
-      @Override
-      public int getEndPosition(EndPosTable endPosTable) {
-        return startPosition;
-      }
-    };
+  static ErrorPronePosition getDiagnosticPosition(int startPosition, Tree tree) {
+    return new FixedPosition(tree, startPosition);
   }
 
-  @Nullable
-  static DocTreePath getDocTreePath(VisitorState state) {
+  static @Nullable DocTreePath getDocTreePath(VisitorState state) {
     DocCommentTree docCommentTree = getDocCommentTree(state);
     if (docCommentTree == null) {
       return null;
@@ -129,9 +144,77 @@ final class Utils {
     return new DocTreePath(state.getPath(), docCommentTree);
   }
 
-  @Nullable
-  private static DocCommentTree getDocCommentTree(VisitorState state) {
+  private static @Nullable DocCommentTree getDocCommentTree(VisitorState state) {
     return JavacTrees.instance(state.context).getDocCommentTree(state.getPath());
+  }
+
+  /** Returns a map of positions to trees which can be documented by Javadoc. */
+  static ImmutableMap<Integer, TreePath> getJavadoccableTrees(CompilationUnitTree tree) {
+    ImmutableMap.Builder<Integer, TreePath> javadoccablePositions = ImmutableMap.builder();
+    new TreePathScanner<Void, Void>() {
+      @Override
+      public Void visitPackage(PackageTree packageTree, Void unused) {
+        javadoccablePositions.put(ASTHelpers.getStartPosition(packageTree), getCurrentPath());
+        return super.visitPackage(packageTree, null);
+      }
+
+      @Override
+      public Void visitClass(ClassTree classTree, Void unused) {
+        if (isJavadoccableClass(getSymbol(classTree))) {
+          javadoccablePositions.put(ASTHelpers.getStartPosition(classTree), getCurrentPath());
+        }
+        return super.visitClass(classTree, null);
+      }
+
+      @Override
+      public Void visitMethod(MethodTree methodTree, Void unused) {
+        if (!isGeneratedConstructor(methodTree) && isJavadoccableClass(getSymbol(methodTree))) {
+          javadoccablePositions.put(ASTHelpers.getStartPosition(methodTree), getCurrentPath());
+        }
+        return super.visitMethod(methodTree, null);
+      }
+
+      @Override
+      public Void visitVariable(VariableTree variableTree, Void unused) {
+        Symbol symbol = getSymbol(variableTree);
+        if (isJavadoccableClass(symbol)) {
+          ElementKind kind = symbol.getKind();
+          if (kind == ElementKind.FIELD && !isRecord(symbol)) {
+            javadoccablePositions.put(ASTHelpers.getStartPosition(variableTree), getCurrentPath());
+          }
+          // For enum constants, skip past the desugared class declaration.
+          if (kind == ElementKind.ENUM_CONSTANT) {
+            javadoccablePositions.put(ASTHelpers.getStartPosition(variableTree), getCurrentPath());
+            if (variableTree.getInitializer() instanceof NewClassTree newClassTree) {
+              ClassTree classBody = newClassTree.getClassBody();
+              if (classBody != null) {
+                scan(classBody.getMembers(), null);
+              }
+              return null;
+            }
+          }
+        }
+        return super.visitVariable(variableTree, null);
+      }
+
+      @Override
+      public Void visitModule(ModuleTree moduleTree, Void unused) {
+        javadoccablePositions.put(ASTHelpers.getStartPosition(moduleTree), getCurrentPath());
+        return super.visitModule(moduleTree, null);
+      }
+    }.scan(tree, null);
+    return javadoccablePositions.buildKeepingLast();
+  }
+
+  /**
+   * Returns true if the given symbol represents a class that can be documented by Javadoc.
+   *
+   * <p>Notably, anonymous classes and local classes <b>cannot</b> have Javadoc.
+   */
+  private static boolean isJavadoccableClass(Symbol sym) {
+    // enclClass returns sym if sym is a ClassSymbol, which is what we want in this case
+    ClassSymbol classSym = sym.enclClass();
+    return classSym != null && !classSym.isDirectlyOrIndirectlyLocal();
   }
 
   private Utils() {}

@@ -21,6 +21,7 @@ import static com.google.errorprone.FileObjects.forSourceLines;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.FileManagers;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.util.ASTHelpers;
@@ -34,9 +35,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import org.junit.Ignore;
@@ -49,72 +48,92 @@ import org.junit.runners.JUnit4;
 public class GuardedByBinderTest {
 
   @Test
-  public void testInherited() {
+  public void inherited() {
     assertThat(
             bind(
                 "Test",
                 "slock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Super {",
-                    "  final Object slock = new Object();",
-                    "}",
-                    "class Test extends Super {",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Super {
+                      final Object slock = new Object();
+                    }
+
+                    class Test extends Super {}
+                    """)))
         .isEqualTo("(SELECT (THIS) slock)");
   }
 
   @Test
-  public void testFinal() {
+  public void finalCase() {
     assertThat(
             bind(
                 "Test",
                 "lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Test {",
-                    "  final Object lock = new Object();",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Test {
+                      final Object lock = new Object();
+                    }
+                    """)))
         .isEqualTo("(SELECT (THIS) lock)");
   }
 
   @Test
-  public void testMethod() {
+  public void method() {
     assertThat(
             bind(
                 "Test",
                 "s.f.g().f.g().lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "import javax.annotation.concurrent.GuardedBy;",
-                    "class Super {",
-                    "  final Super f = null;",
-                    "  Super g() { return null; }",
-                    "  final Object lock = new Object();",
-                    "}",
-                    "class Test {",
-                    "  final Super s = null;",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    import javax.annotation.concurrent.GuardedBy;
+
+                    class Super {
+                      final Super f = null;
+
+                      Super g() {
+                        return null;
+                      }
+
+                      final Object lock = new Object();
+                    }
+
+                    class Test {
+                      final Super s = null;
+                    }
+                    """)))
         .isEqualTo(
             "(SELECT (SELECT (SELECT (SELECT (SELECT (SELECT " + "(THIS) s) f) g()) f) g()) lock)");
   }
 
   @Test
-  public void testBadSuperAccess() {
+  public void badSuperAccess() {
     bindFail(
         "Test",
         "Super.this.lock",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Super {}",
-            "class Test extends Super {",
-            "  final Object lock = new Object();",
-            "}"));
+            """
+            package threadsafety;
+
+            import javax.annotation.concurrent.GuardedBy;
+
+            class Super {}
+
+            class Test extends Super {
+              final Object lock = new Object();
+            }
+            """));
   }
 
   @Test
@@ -124,7 +143,12 @@ public class GuardedByBinderTest {
                 "Test",
                 "Test.class",
                 forSourceLines(
-                    "threadsafety/Test.java", "package threadsafety;", "class Test {", "}")))
+                    "threadsafety/Test.java",
+                    """
+                    package threadsafety;
+
+                    class Test {}
+                    """)))
         .isEqualTo("(CLASS_LITERAL threadsafety.Test)");
   }
 
@@ -136,9 +160,13 @@ public class GuardedByBinderTest {
                 "Super.class",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Super {}",
-                    "class Test extends Super {}")))
+                    """
+                    package threadsafety;
+
+                    class Super {}
+
+                    class Test extends Super {}
+                    """)))
         .isEqualTo("(CLASS_LITERAL threadsafety.Super)");
   }
 
@@ -149,12 +177,17 @@ public class GuardedByBinderTest {
         "t.class",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Super {}",
-            "class Test extends Super {",
-            "  Test t;",
-            "}"));
+            """
+            package threadsafety;
+
+            import javax.annotation.concurrent.GuardedBy;
+
+            class Super {}
+
+            class Test extends Super {
+              Test t;
+            }
+            """));
   }
 
   @Test
@@ -164,9 +197,13 @@ public class GuardedByBinderTest {
         "Super.class",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {}"));
+            """
+            package threadsafety;
+
+            import javax.annotation.concurrent.GuardedBy;
+
+            class Test {}
+            """));
   }
 
   @Test
@@ -176,9 +213,13 @@ public class GuardedByBinderTest {
         "Segment.this",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {}"));
+            """
+            package threadsafety;
+
+            import javax.annotation.concurrent.GuardedBy;
+
+            class Test {}
+            """));
   }
 
   @Test
@@ -189,11 +230,15 @@ public class GuardedByBinderTest {
                 "Outer.this.lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Outer {",
-                    "  final Object lock = new Object();",
-                    "  class Test {}",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Outer {
+                      final Object lock = new Object();
+
+                      class Test {}
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (THIS) outer$threadsafety.Outer) lock)");
   }
 
@@ -205,12 +250,17 @@ public class GuardedByBinderTest {
                 "lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "import javax.annotation.concurrent.GuardedBy;",
-                    "class Outer {",
-                    "  final Object lock = new Object();",
-                    "  class Test {}",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    import javax.annotation.concurrent.GuardedBy;
+
+                    class Outer {
+                      final Object lock = new Object();
+
+                      class Test {}
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (THIS) outer$threadsafety.Outer) lock)");
   }
 
@@ -222,12 +272,15 @@ public class GuardedByBinderTest {
                 "Other.lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Other {",
-                    "  static final Object lock = new Object();",
-                    "}",
-                    "class Test {",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Other {
+                      static final Object lock = new Object();
+                    }
+
+                    class Test {}
+                    """)))
         .isEqualTo("(SELECT (TYPE_LITERAL threadsafety.Other) lock)");
   }
 
@@ -239,13 +292,17 @@ public class GuardedByBinderTest {
                 "Other.lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Other {",
-                    "  static final Object lock = new Object();",
-                    "}",
-                    "class Test {",
-                    "  final Other Other = null;",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Other {
+                      static final Object lock = new Object();
+                    }
+
+                    class Test {
+                      final Other Other = null;
+                    }
+                    """)))
         .isEqualTo("(SELECT (TYPE_LITERAL threadsafety.Other) lock)");
   }
 
@@ -257,13 +314,17 @@ public class GuardedByBinderTest {
                 "Other.class",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Other {",
-                    "  static final Object lock = new Object();",
-                    "}",
-                    "class Test {",
-                    "  Other Other = null;",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Other {
+                      static final Object lock = new Object();
+                    }
+
+                    class Test {
+                      Other Other = null;
+                    }
+                    """)))
         .isEqualTo("(CLASS_LITERAL threadsafety.Other)");
   }
 
@@ -275,13 +336,17 @@ public class GuardedByBinderTest {
                 "Other",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Other {",
-                    "  static final Object lock = new Object();",
-                    "}",
-                    "class Test {",
-                    "  final Object Other = null;",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Other {
+                      static final Object lock = new Object();
+                    }
+
+                    class Test {
+                      final Object Other = null;
+                    }
+                    """)))
         .isEqualTo("(SELECT (THIS) Other)");
   }
 
@@ -293,10 +358,13 @@ public class GuardedByBinderTest {
                 "lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Test {",
-                    "  static final Object lock = new Object();",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Test {
+                      static final Object lock = new Object();
+                    }
+                    """)))
         .isEqualTo("(SELECT (TYPE_LITERAL threadsafety.Test) lock)");
   }
 
@@ -308,10 +376,15 @@ public class GuardedByBinderTest {
                 "lock()",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Test {",
-                    "  static Object lock() { return null; }",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Test {
+                      static Object lock() {
+                        return null;
+                      }
+                    }
+                    """)))
         .isEqualTo("(SELECT (TYPE_LITERAL threadsafety.Test) lock())");
   }
 
@@ -323,10 +396,13 @@ public class GuardedByBinderTest {
                 "Test.lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Test {",
-                    "  static final Object lock = new Object();",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Test {
+                      static final Object lock = new Object();
+                    }
+                    """)))
         .isEqualTo("(SELECT (TYPE_LITERAL threadsafety.Test) lock)");
   }
 
@@ -337,10 +413,13 @@ public class GuardedByBinderTest {
         "Test.lock",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "class Test {",
-            "  final Object lock = new Object();",
-            "}"));
+            """
+            package threadsafety;
+
+            class Test {
+              final Object lock = new Object();
+            }
+            """));
   }
 
   @Test
@@ -350,10 +429,15 @@ public class GuardedByBinderTest {
         "Test.lock()",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "class Test {",
-            "  final Object lock() { return null; }",
-            "}"));
+            """
+            package threadsafety;
+
+            class Test {
+              final Object lock() {
+                return null;
+              }
+            }
+            """));
   }
 
   @Test
@@ -364,13 +448,17 @@ public class GuardedByBinderTest {
                 "this.lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Outer {",
-                    "  Object lock;",
-                    "  class Inner {",
-                    "    int x;",
-                    "  }",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Outer {
+                      Object lock;
+
+                      class Inner {
+                        int x;
+                      }
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (THIS) outer$threadsafety.Outer) lock)");
   }
 
@@ -382,13 +470,17 @@ public class GuardedByBinderTest {
                 "lock",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Outer {",
-                    "  Object lock;",
-                    "  class Inner {",
-                    "    int x;",
-                    "  }",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Outer {
+                      Object lock;
+
+                      class Inner {
+                        int x;
+                      }
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (THIS) outer$threadsafety.Outer) lock)");
   }
 
@@ -400,16 +492,25 @@ public class GuardedByBinderTest {
                 "endpoint().lock()",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "class Outer {",
-                    "  class Endpoint {",
-                    "    Object lock() { return null; }",
-                    "  }",
-                    "  Endpoint endpoint() { return null; }",
-                    "  class Inner {",
-                    "    int x;",
-                    "  }",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    class Outer {
+                      class Endpoint {
+                        Object lock() {
+                          return null;
+                        }
+                      }
+
+                      Endpoint endpoint() {
+                        return null;
+                      }
+
+                      class Inner {
+                        int x;
+                      }
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (SELECT (THIS) outer$threadsafety.Outer) endpoint()) lock())");
   }
 
@@ -420,7 +521,12 @@ public class GuardedByBinderTest {
                 "Test",
                 "Test.this",
                 forSourceLines(
-                    "threadsafety/Test.java", "package threadsafety;", "class Test {", "}")))
+                    "threadsafety/Test.java",
+                    """
+                    package threadsafety;
+
+                    class Test {}
+                    """)))
         .isEqualTo("(THIS)");
   }
 
@@ -433,21 +539,28 @@ public class GuardedByBinderTest {
                 "mu",
                 forSourceLines(
                     "threadsafety/Test.java",
-                    "package threadsafety;",
-                    "import javax.annotation.concurrent.GuardedBy;",
-                    "public class Test {",
-                    "  public final Object mu = new Object();",
-                    "  @GuardedBy(\"mu\") int x = 1;",
-                    "  {",
-                    "    new Object() {",
-                    "      void f() {",
-                    "        synchronized (mu) {",
-                    "          x++;",
-                    "        }",
-                    "      }",
-                    "    };",
-                    "  }",
-                    "}")))
+                    """
+                    package threadsafety;
+
+                    import javax.annotation.concurrent.GuardedBy;
+
+                    public class Test {
+                      public final Object mu = new Object();
+
+                      @GuardedBy("mu")
+                      int x = 1;
+
+                      {
+                        new Object() {
+                          void f() {
+                            synchronized (mu) {
+                              x++;
+                            }
+                          }
+                        };
+                      }
+                    }
+                    """)))
         .isEqualTo("(SELECT (SELECT (THIS) outer$threadsafety.Test) mu)");
   }
 
@@ -460,13 +573,17 @@ public class GuardedByBinderTest {
         "Other.lock",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "class Other {",
-            "  static Object lock = new Object();",
-            "}",
-            "class Test {",
-            "  final Other Other = null;",
-            "}"));
+            """
+            package threadsafety;
+
+            class Other {
+              static Object lock = new Object();
+            }
+
+            class Test {
+              final Other Other = null;
+            }
+            """));
   }
 
   // TODO(cushon): disallow non-final lock expressions
@@ -478,10 +595,13 @@ public class GuardedByBinderTest {
         "lock",
         forSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "class Test {",
-            "  Object lock = new Object();",
-            "}"));
+            """
+            package threadsafety;
+
+            class Test {
+              Object lock = new Object();
+            }
+            """));
   }
 
   private static void bindFail(String className, String exprString, JavaFileObject fileObject) {
@@ -497,13 +617,13 @@ public class GuardedByBinderTest {
     JavacTaskImpl task =
         (JavacTaskImpl)
             javaCompiler.getTask(
-                new PrintWriter(
+                /* out= */ new PrintWriter(
                     new BufferedWriter(new OutputStreamWriter(System.err, UTF_8)), true),
-                FileManagers.testFileManager(),
-                null,
-                Collections.<String>emptyList(),
-                null,
-                Arrays.asList(fileObject));
+                /* fileManager= */ FileManagers.testFileManager(),
+                /* diagnosticListener= */ null,
+                /* options= */ ImmutableList.of("-proc:none"),
+                /* classes= */ null,
+                /* compilationUnits= */ Arrays.asList(fileObject));
     Iterable<? extends CompilationUnitTree> compilationUnits = task.parse();
     task.analyze();
     for (CompilationUnitTree compilationUnit : compilationUnits) {
@@ -511,20 +631,18 @@ public class GuardedByBinderTest {
       finder.visitTopLevel((JCTree.JCCompilationUnit) compilationUnit);
       for (JCTree.JCClassDecl classDecl : finder.decls) {
         if (classDecl.getSimpleName().contentEquals(className)) {
-          Optional<GuardedByExpression> guardExpression =
+          GuardedByExpression guardExpression =
               GuardedByBinder.bindString(
-                  exprString,
-                  GuardedBySymbolResolver.from(
-                      ASTHelpers.getSymbol(classDecl),
-                      compilationUnit,
-                      task.getContext(),
-                      null,
-                      VisitorState.createForUtilityPurposes(task.getContext())),
-                  GuardedByFlags.allOn());
-          if (!guardExpression.isPresent()) {
-            throw new IllegalGuardedBy(exprString);
-          }
-          return guardExpression.get().debugPrint();
+                      exprString,
+                      GuardedBySymbolResolver.from(
+                          ASTHelpers.getSymbol(classDecl),
+                          null,
+                          compilationUnit,
+                          task.getContext(),
+                          null,
+                          VisitorState.createForUtilityPurposes(task.getContext())))
+                  .orElseThrow(() -> new IllegalGuardedBy(exprString));
+          return guardExpression.debugPrint();
         }
       }
     }

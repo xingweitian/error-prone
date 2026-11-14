@@ -21,19 +21,74 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author sgoldfeder@google.com (Steven Goldfeder) */
+/**
+ * @author sgoldfeder@google.com (Steven Goldfeder)
+ */
 @RunWith(JUnit4.class)
 public class JavaxInjectOnFinalFieldTest {
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(JavaxInjectOnFinalField.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("JavaxInjectOnFinalFieldPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "JavaxInjectOnFinalFieldPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import javax.inject.Inject;
+
+            /**
+             * @author sgoldfeder@google.com (Steven Goldfeder)
+             */
+            public class JavaxInjectOnFinalFieldPositiveCases {
+
+              /** Class has a final injectable(javax.inject.Inject) field. */
+              public class TestClass1 {
+                // BUG: Diagnostic contains:
+                @Inject public final int n = 0;
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("JavaxInjectOnFinalFieldNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "JavaxInjectOnFinalFieldNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import javax.inject.Inject;
+
+            /**
+             * @author sgoldfeder@google.com (Steven Goldfeder)
+             */
+            public class JavaxInjectOnFinalFieldNegativeCases {
+
+              /** Class has no final fields or @Inject annotations. */
+              public class TestClass1 {}
+
+              /** Class has a final field that is not injectable. */
+              public class TestClass2 {
+                public final int n = 0;
+              }
+
+              /** Class has an injectable(javax.inject.Inject) field that is not final. */
+              public class TestClass3 {
+                @Inject public int n;
+              }
+
+              /** Class has an injectable(javax.inject.Inject), final method. */
+              public class TestClass4 {
+                @Inject
+                final void method() {}
+              }
+            }
+            """)
+        .doTest();
   }
 }

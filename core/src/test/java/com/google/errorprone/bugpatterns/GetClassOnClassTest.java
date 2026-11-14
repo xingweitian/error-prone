@@ -31,12 +31,69 @@ public class GetClassOnClassTest {
       CompilationTestHelper.newInstance(GetClassOnClass.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("GetClassOnClassPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "GetClassOnClassPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author chy@google.com (Christine Yang)
+             * @author kmuhlrad@google.com (Katy Muhlrad)
+             */
+            public class GetClassOnClassPositiveCases {
+
+              public void getClassOnClass(Class clazz) {
+                // BUG: Diagnostic contains: clazz.getName()
+                System.out.println(clazz.getClass().getName());
+              }
+
+              public void getClassOnClass2() {
+                String s = "hi";
+                // BUG: Diagnostic contains: s.getClass().getName()
+                s.getClass().getClass().getName();
+              }
+
+              public void getClassOnClass3() {
+                // BUG: Diagnostic contains: String.class.getName()
+                System.out.println(String.class.getClass().getName());
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("GetClassOnClassNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "GetClassOnClassNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author chy@google.com (Christine Yang)
+             * @author kmuhlrad@google.com (Katy Muhlrad)
+             */
+            public class GetClassOnClassNegativeCases {
+
+              public void getClassOnClass(Object obj) {
+                System.out.println(obj.getClass().getName());
+              }
+
+              public void getClassOnClass2() {
+                String s = "hi";
+                DummyObject.getClass(s);
+              }
+
+              public static class DummyObject {
+                public static boolean getClass(Object a) {
+                  return true;
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 }

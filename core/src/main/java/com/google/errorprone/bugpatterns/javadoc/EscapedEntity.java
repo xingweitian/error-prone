@@ -34,9 +34,9 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.DocTreePath;
 import com.sun.source.util.DocTreePathScanner;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 /**
  * Finds unescaped entities in Javadocs.
@@ -44,7 +44,6 @@ import javax.annotation.Nullable;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "EscapedEntity",
     summary = "HTML entities in @code/@literal tags will appear literally in the rendered javadoc.",
     severity = WARNING,
     documentSuppression = false)

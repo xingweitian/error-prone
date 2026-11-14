@@ -34,7 +34,7 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.TreePath;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Identify the backing collection source of a stream and reports if the source is mutated during
@@ -43,7 +43,6 @@ import javax.annotation.Nullable;
  * @author deltazulu@google.com (Donald Duo Zhao)
  */
 @BugPattern(
-    name = "ModifySourceCollectionInStream",
     summary = "Modifying the backing source during stream operations may cause unintended results.",
     severity = WARNING)
 public class ModifySourceCollectionInStream extends BugChecker
@@ -106,11 +105,11 @@ public class ModifySourceCollectionInStream extends BugChecker
 
     // Starting from the immediate enclosing method invocation of the lambda expression.
     Tree parentNode = pathToLambdaExpression.getParentPath().getLeaf();
-    if (!(parentNode instanceof ExpressionTree)) {
+    if (!(parentNode instanceof ExpressionTree expressionTree)) {
       return Description.NO_MATCH;
     }
 
-    return isStreamApiInvocationOnStreamSource((ExpressionTree) parentNode, mutatedReceiver, state)
+    return isStreamApiInvocationOnStreamSource(expressionTree, mutatedReceiver, state)
         ? describeMatch(tree)
         : Description.NO_MATCH;
   }
@@ -118,8 +117,11 @@ public class ModifySourceCollectionInStream extends BugChecker
   /**
    * Returns true if and only if the given MethodInvocationTree
    *
-   * <p>1) is a Stream API invocation, .e.g. map, filter, collect 2) the source of the stream has
-   * the same expression representation as streamSourceExpression.
+   * <ol>
+   *   <li>is a Stream API invocation (e.g. map, filter, collect);
+   *   <li>the source of the stream has the same expression representation as
+   *       streamSourceExpression.
+   * </ol>
    */
   private static boolean isStreamApiInvocationOnStreamSource(
       @Nullable ExpressionTree rootTree,

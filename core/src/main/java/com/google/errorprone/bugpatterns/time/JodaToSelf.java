@@ -37,7 +37,6 @@ import com.sun.source.tree.NewClassTree;
 
 /** Check for calls to Joda-Time's {@code foo.toFoo()} and {@code new Foo(foo)}. */
 @BugPattern(
-    name = "JodaToSelf",
     summary =
         "Use of Joda-Time's DateTime.toDateTime(), Duration.toDuration(), Instant.toInstant(), "
             + "Interval.toInterval(), and Period.toPeriod() are not allowed.",
@@ -59,12 +58,11 @@ public final class JodaToSelf extends BugChecker
       Matchers.allOf(
           Matchers.anyOf(
               TYPE_NAMES.stream()
-                  .map(
-                      typeName ->
-                          Matchers.instanceMethod()
-                              .onExactClass("org.joda.time." + typeName)
-                              .named("to" + typeName)
-                              .withParameters())
+                  .map(typeName ->
+                      Matchers.instanceMethod()
+                          .onExactClass("org.joda.time." + typeName)
+                          .named("to" + typeName)
+                          .withNoParameters())
                   .collect(toImmutableList())),
           // Allow usage by JodaTime itself
           Matchers.not(Matchers.packageStartsWith("org.joda.time")));
@@ -73,11 +71,10 @@ public final class JodaToSelf extends BugChecker
       Matchers.allOf(
           Matchers.anyOf(
               Streams.concat(TYPE_NAMES.stream(), TYPES_WITHOUT_METHOD.stream())
-                  .map(
-                      typeName ->
-                          Matchers.constructor()
-                              .forClass("org.joda.time." + typeName)
-                              .withParameters("java.lang.Object"))
+                  .map(typeName ->
+                      Matchers.constructor()
+                          .forClass("org.joda.time." + typeName)
+                          .withParameters("java.lang.Object"))
                   .collect(toImmutableList())),
           // Allow usage by JodaTime itself
           Matchers.not(Matchers.packageStartsWith("org.joda.time")));

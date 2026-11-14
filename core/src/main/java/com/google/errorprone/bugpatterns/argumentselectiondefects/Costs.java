@@ -30,12 +30,12 @@ import java.util.stream.Stream;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-class Costs {
+final class Costs {
 
   /** Formal parameters for the method being called. */
   private final ImmutableList<Parameter> formals;
 
-  /** Actual parameters (argments) for the method call. */
+  /** Actual parameters (arguments) for the method call. */
   private final ImmutableList<Parameter> actuals;
 
   /**
@@ -92,15 +92,6 @@ class Costs {
         .flatMap(f -> actuals.stream().map(a -> ParameterPair.create(f, a)))
         .filter(
             p -> costMatrix[p.formal().index()][p.actual().index()] != Double.POSITIVE_INFINITY);
-  }
-
-  /** Set the cost of all the alternatives for this formal parameter to be Inf. */
-  void invalidateAllAlternatives(Parameter formal) {
-    for (int actualIndex = 0; actualIndex < costMatrix[formal.index()].length; actualIndex++) {
-      if (actualIndex != formal.index()) {
-        costMatrix[formal.index()][actualIndex] = Double.POSITIVE_INFINITY;
-      }
-    }
   }
 
   /** Update the cost of the given pairing. */

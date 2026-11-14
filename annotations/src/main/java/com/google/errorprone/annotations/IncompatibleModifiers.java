@@ -21,22 +21,21 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import javax.lang.model.element.Modifier;
 
 /**
  * Annotation declaring that the target annotation is incompatible with any one of the provided
  * modifiers. For example, an annotation declared as:
  *
- * <pre>
- * {@literal @}IncompatibleModifiers(Modifier.PUBLIC)
- * {@literal @}interface MyAnnotation {}
+ * <pre>{@code
+ * @IncompatibleModifiers(modifier = Modifier.PUBLIC)
+ * @interface MyAnnotation {}
  * </pre>
  *
  * <p>will be considered illegal when used as:
  *
  * <pre>
- * {@literal @}MyAnnotation public void foo() {}
- * </pre>
+ * @MyAnnotation public void foo() {}
+ * }</pre>
  *
  * @author benyu@google.com (Jige Yu)
  */
@@ -44,6 +43,7 @@ import javax.lang.model.element.Modifier;
 @Retention(RetentionPolicy.CLASS) // Element's source might not be available during analysis
 @Target(ElementType.ANNOTATION_TYPE)
 public @interface IncompatibleModifiers {
+
   /**
    * The incompatible modifiers. The annotated element is illegal with the presence of any one or
    * more of these modifiers.
@@ -51,5 +51,5 @@ public @interface IncompatibleModifiers {
    * <p>Empty array has the same effect as not applying this annotation at all; duplicates are
    * allowed but have no effect.
    */
-  Modifier[] value();
+  Modifier[] modifier() default {};
 }

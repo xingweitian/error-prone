@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author eaftan@google.com (Eddie Aftandilian) */
+/**
+ * @author eaftan@google.com (Eddie Aftandilian)
+ */
 @RunWith(JUnit4.class)
 public class PrimitiveArrayPassedToVarargsMethodTest {
 
@@ -29,16 +31,74 @@ public class PrimitiveArrayPassedToVarargsMethodTest {
       CompilationTestHelper.newInstance(PrimitiveArrayPassedToVarargsMethod.class, getClass());
 
   @Test
-  public void testPositiveCase() {
+  public void positiveCase() {
     compilationHelper
-        .addSourceFile("PrimitiveArrayPassedToVarargsMethodPositiveCases.java")
+        .addSourceLines(
+            "PrimitiveArrayPassedToVarargsMethodPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import java.util.Arrays;
+
+            /**
+             * @author eaftan@google.com (Eddie Aftandilian)
+             */
+            public class PrimitiveArrayPassedToVarargsMethodPositiveCases {
+
+              public void objectVarargsMethod(Object... objs) {}
+
+              public <T> void genericVarargsMethod(T... genericArrays) {}
+
+              public void objectVarargsMethodWithMultipleParams(Object obj1, Object... objs) {}
+
+              public void doIt() {
+                int[] intArray = {1, 2, 3};
+
+                // BUG: Diagnostic contains:
+                objectVarargsMethod(intArray);
+
+                // BUG: Diagnostic contains:
+                genericVarargsMethod(intArray);
+
+                // BUG: Diagnostic contains:
+                objectVarargsMethodWithMultipleParams(new Object(), intArray);
+
+                // BUG: Diagnostic contains:
+                Arrays.asList(intArray);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
+  public void negativeCase() {
     compilationHelper
-        .addSourceFile("PrimitiveArrayPassedToVarargsMethodNegativeCases.java")
+        .addSourceLines(
+            "PrimitiveArrayPassedToVarargsMethodNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author eaftan@google.com (Eddie Aftandilian)
+             */
+            public class PrimitiveArrayPassedToVarargsMethodNegativeCases {
+
+              public void intVarargsMethod(int... ints) {}
+
+              public void intArrayVarargsMethod(int[]... intArrays) {}
+
+              public void objectVarargsMethodWithMultipleParams(Object obj1, Object... objs) {}
+
+              public void doIt() {
+                int[] intArray = {1, 2, 3};
+
+                intVarargsMethod(intArray);
+                intArrayVarargsMethod(intArray);
+                objectVarargsMethodWithMultipleParams(new Object());
+              }
+            }
+            """)
         .doTest();
   }
 }

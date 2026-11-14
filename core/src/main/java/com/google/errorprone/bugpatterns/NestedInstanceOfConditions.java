@@ -17,6 +17,7 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Matchers.contains;
+import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.stripParentheses;
 
 import com.google.errorprone.BugPattern;
@@ -24,7 +25,6 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.IfTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
@@ -38,7 +38,6 @@ import com.sun.tools.javac.code.Types;
  * @author mariasam@google.com (Maria Sam)
  */
 @BugPattern(
-    name = "NestedInstanceOfConditions",
     summary =
         "Nested instanceOf conditions of disjoint types create blocks of code that never execute",
     severity = WARNING)
@@ -49,8 +48,9 @@ public class NestedInstanceOfConditions extends BugChecker implements IfTreeMatc
 
     ExpressionTree expressionTree = stripParentheses(ifTree.getCondition());
 
-    if (expressionTree instanceof InstanceOfTree) {
-      InstanceOfTree instanceOfTree = (InstanceOfTree) expressionTree;
+    // Pattern matching instanceofs can have null type.
+    if (expressionTree instanceof InstanceOfTree instanceOfTree
+        && instanceOfTree.getType() != null) {
 
       if (!(instanceOfTree.getExpression() instanceof IdentifierTree)) {
         return Description.NO_MATCH;
@@ -78,19 +78,14 @@ public class NestedInstanceOfConditions extends BugChecker implements IfTreeMatc
     return Description.NO_MATCH;
   }
 
-  private static class AssignmentTreeMatcher implements Matcher<Tree> {
-    private final ExpressionTree variableExpressionTree;
-
-    public AssignmentTreeMatcher(ExpressionTree e) {
-      variableExpressionTree = e;
-    }
-
+  private record AssignmentTreeMatcher(ExpressionTree variableExpressionTree)
+      implements Matcher<Tree> {
     @Override
     public boolean matches(Tree tree, VisitorState visitorState) {
-      if (tree instanceof AssignmentTree) {
+      if (tree instanceof AssignmentTree assignmentTree) {
         return visitorState
             .getSourceForNode(variableExpressionTree)
-            .equals(visitorState.getSourceForNode(((AssignmentTree) tree).getVariable()));
+            .equals(visitorState.getSourceForNode(assignmentTree.getVariable()));
       }
 
       return false;
@@ -102,32 +97,27 @@ public class NestedInstanceOfConditions extends BugChecker implements IfTreeMatc
    * if an expression is an instanceof a type that is disjoint from the matcher's type that is set
    * beforehand.
    */
-  private static class NestedInstanceOfMatcher implements Matcher<Tree> {
-    private final ExpressionTree expressionTree;
-    private final Tree typeTree;
-
-    public NestedInstanceOfMatcher(ExpressionTree e, Tree t) {
-      expressionTree = e;
-      typeTree = t;
-    }
-
+  private record NestedInstanceOfMatcher(ExpressionTree expressionTree, Tree typeTree)
+      implements Matcher<Tree> {
     @Override
     public boolean matches(Tree tree, VisitorState state) {
-      if (tree instanceof IfTree) {
-        ExpressionTree conditionTree = ASTHelpers.stripParentheses(((IfTree) tree).getCondition());
+      if (tree instanceof IfTree ifTree) {
 
-        if (conditionTree instanceof InstanceOfTree) {
-          InstanceOfTree instanceOfTree = (InstanceOfTree) conditionTree;
+        // Pattern matching instanceofs can have null type.
+        if (stripParentheses(ifTree.getCondition()) instanceof InstanceOfTree instanceOfTree
+            && instanceOfTree.getType() != null) {
 
           Types types = state.getTypes();
 
           boolean isCastable =
               types.isCastable(
-                  types.erasure(ASTHelpers.getType(instanceOfTree.getType())),
-                  types.erasure(ASTHelpers.getType(typeTree)));
+                  types.erasure(getType(instanceOfTree.getType())),
+                  types.erasure(getType(typeTree)));
 
           boolean isSameExpression =
-              instanceOfTree.getExpression().toString().equals(expressionTree.toString());
+              state
+                  .getSourceForNode(instanceOfTree.getExpression())
+                  .equals(state.getSourceForNode(expressionTree));
 
           return isSameExpression && !isCastable;
         }

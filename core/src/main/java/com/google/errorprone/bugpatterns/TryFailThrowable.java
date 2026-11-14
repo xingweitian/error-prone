@@ -29,10 +29,8 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.isSameType;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
-import static com.sun.source.tree.Tree.Kind.BLOCK;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 import static com.sun.source.tree.Tree.Kind.EMPTY_STATEMENT;
-import static com.sun.source.tree.Tree.Kind.METHOD;
-import static com.sun.source.tree.Tree.Kind.METHOD_INVOCATION;
 import static java.lang.String.format;
 
 import com.google.errorprone.BugPattern;
@@ -48,6 +46,7 @@ import com.sun.source.tree.CatchTree;
 import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TryTree;
@@ -90,7 +89,6 @@ import java.util.List;
  * @author adamwos@google.com (Adam Wos)
  */
 @BugPattern(
-    name = "TryFailThrowable",
     summary = "Catching Throwable/Error masks failures from fail() or assert*() in the try block",
     severity = ERROR)
 public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
@@ -103,29 +101,26 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
           isSameType("junit.framework.AssertionFailedError"));
 
   private static final Matcher<ExpressionTree> failOrAssert =
-      new Matcher<ExpressionTree>() {
-        @Override
-        public boolean matches(ExpressionTree item, VisitorState state) {
-          if (item.getKind() != METHOD_INVOCATION) {
-            return false;
-          }
-          Symbol sym = getSymbol(item);
-          if (!(sym instanceof MethodSymbol)) {
-            throw new IllegalArgumentException("not a method call");
-          }
-          if (!sym.isStatic()) {
-            return false;
-          }
-
-          String methodName = sym.getQualifiedName().toString();
-          String className = sym.owner.getQualifiedName().toString();
-          // TODO(cpovirk): Look for literal "throw new AssertionError()," etc.
-          return (methodName.startsWith("assert") || methodName.startsWith("fail"))
-              && (className.equals("org.junit.Assert")
-                  || className.equals("junit.framework.Assert")
-                  || className.equals("junit.framework.TestCase")
-                  || className.endsWith("MoreAsserts"));
+      (ExpressionTree item, VisitorState state) -> {
+        if (!(item instanceof MethodInvocationTree)) {
+          return false;
         }
+        Symbol sym = getSymbol(item);
+        if (!(sym instanceof MethodSymbol)) {
+          throw new IllegalArgumentException("not a method call");
+        }
+        if (!isStatic(sym)) {
+          return false;
+        }
+
+        String methodName = sym.getQualifiedName().toString();
+        String className = sym.owner.getQualifiedName().toString();
+        // TODO(cpovirk): Look for literal "throw new AssertionError()," etc.
+        return (methodName.startsWith("assert") || methodName.startsWith("fail"))
+            && (className.equals("org.junit.Assert")
+                || className.equals("junit.framework.Assert")
+                || className.equals("junit.framework.TestCase")
+                || className.endsWith("MoreAsserts"));
       };
 
   @Override
@@ -135,7 +130,7 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
       return NO_MATCH;
     }
 
-    Description.Builder builder = buildDescription(tree.getCatches().get(0).getParameter());
+    Description.Builder builder = buildDescription(tree.getCatches().getFirst().getParameter());
     if (matchResult.caughtType == JAVA_LANG_THROWABLE) {
       builder.addFix(fixByCatchingException(tree));
     }
@@ -160,9 +155,9 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
       TryTree tryTree, StatementTree failStatement, VisitorState state) {
     Tree parent = state.getPath().getParentPath().getLeaf();
     Tree grandparent = state.getPath().getParentPath().getParentPath().getLeaf();
-    if (parent.getKind() == BLOCK
-        && grandparent.getKind() == METHOD
-        && tryTree == getLastStatement((BlockTree) parent)) {
+    if (parent instanceof BlockTree blockTree
+        && grandparent instanceof MethodTree
+        && tryTree == getLastStatement(blockTree)) {
       return fixWithReturn(tryTree, failStatement, state);
     } else {
       return fixWithBoolean(tryTree, failStatement, state);
@@ -199,7 +194,8 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
     String tail = hasOtherParameters == HasOtherParameters.TRUE ? ", " : "";
     // The above casts were checked earlier by failOrAssert.
     return hasInitialStringParameter(sym, state)
-        ? state.getSourceForNode(((MethodInvocationTree) expression).getArguments().get(0)) + tail
+        ? state.getSourceForNode(((MethodInvocationTree) expression).getArguments().getFirst())
+            + tail
         : "";
   }
 
@@ -216,7 +212,7 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
     Types types = state.getTypes();
     List<VarSymbol> parameters = sym.getParameters();
     return !parameters.isEmpty()
-        && types.isSameType(parameters.get(0).type, state.getSymtab().stringType);
+        && types.isSameType(parameters.getFirst().type, state.getSymtab().stringType);
   }
 
   private static MatchResult tryTreeMatches(TryTree tryTree, VisitorState state) {
@@ -230,10 +226,10 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
     // method that can throw an AssertionFailedError)
     StatementTree failStatement = null;
     for (StatementTree statement : statements) {
-      if (!(statement instanceof ExpressionStatementTree)) {
+      if (!(statement instanceof ExpressionStatementTree expressionStatementTree)) {
         continue;
       }
-      if (failOrAssert.matches(((ExpressionStatementTree) statement).getExpression(), state)) {
+      if (failOrAssert.matches(expressionStatementTree.getExpression(), state)) {
         failStatement = statement;
         break;
       }
@@ -249,7 +245,7 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
       // to be checked - it would either be Throwable or Error.
       return doesNotMatch();
     }
-    CatchTree catchTree = catches.get(0);
+    CatchTree catchTree = catches.getFirst();
     VariableTree catchType = catchTree.getParameter();
     boolean catchesThrowable = javaLangThrowable.matches(catchType, state);
     boolean catchesError = javaLangError.matches(catchType, state);
@@ -276,7 +272,7 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
             : catchesError ? JAVA_LANG_ERROR : SOME_ASSERTION_FAILURE);
   }
 
-  static final class MatchResult {
+  record MatchResult(StatementTree failStatement, CaughtType caughtType) {
     static final MatchResult DOES_NOT_MATCH = new MatchResult(null, null);
 
     static MatchResult matches(StatementTree failStatement, CaughtType caughtType) {
@@ -285,14 +281,6 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
 
     static MatchResult doesNotMatch() {
       return DOES_NOT_MATCH;
-    }
-
-    final StatementTree failStatement;
-    final CaughtType caughtType;
-
-    MatchResult(StatementTree failStatement, CaughtType caughtType) {
-      this.failStatement = failStatement;
-      this.caughtType = caughtType;
     }
 
     boolean matched() {
@@ -312,6 +300,6 @@ public class TryFailThrowable extends BugChecker implements TryTreeMatcher {
   }
 
   private static CatchTree getOnlyCatch(TryTree tryTree) {
-    return tryTree.getCatches().get(0);
+    return tryTree.getCatches().getFirst();
   }
 }

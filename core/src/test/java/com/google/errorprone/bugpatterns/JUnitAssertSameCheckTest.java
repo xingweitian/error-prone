@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns;
 
 import com.google.errorprone.CompilationTestHelper;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -29,20 +28,65 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class JUnitAssertSameCheckTest {
-  CompilationTestHelper compilationHelper;
+  private final CompilationTestHelper compilationHelper =
+      CompilationTestHelper.newInstance(JUnitAssertSameCheck.class, getClass());
 
-  @Before
-  public void setUp() {
-    compilationHelper = CompilationTestHelper.newInstance(JUnitAssertSameCheck.class, getClass());
+  @Test
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "JUnitAssertSameCheckPositiveCase.java",
+"""
+package com.google.errorprone.bugpatterns.testdata;
+
+/**
+ * Positive test cases for {@link JUnitAssertSameCheck} check.
+ *
+ * @author bhagwani@google.com (Sumit Bhagwani)
+ */
+public class JUnitAssertSameCheckPositiveCase {
+
+  public void test(Object obj) {
+    // BUG: Diagnostic contains: An object is tested for reference equality to itself using JUnit
+    org.junit.Assert.assertSame(obj, obj);
+
+    // BUG: Diagnostic contains: An object is tested for reference equality to itself using JUnit
+    org.junit.Assert.assertSame("message", obj, obj);
+
+    // BUG: Diagnostic contains: An object is tested for reference equality to itself using JUnit
+    junit.framework.Assert.assertSame(obj, obj);
+
+    // BUG: Diagnostic contains: An object is tested for reference equality to itself using JUnit
+    junit.framework.Assert.assertSame("message", obj, obj);
+  }
+}
+""")
+        .doTest();
   }
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("JUnitAssertSameCheckPositiveCase.java").doTest();
-  }
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "JUnitAssertSameCheckNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
 
-  @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("JUnitAssertSameCheckNegativeCases.java").doTest();
+            /**
+             * Negative test cases for {@link JUnitAssertSameCheck} check.
+             *
+             * @author bhagwani@google.com (Sumit Bhagwani)
+             */
+            public class JUnitAssertSameCheckNegativeCases {
+
+              public void test(Object obj1, Object obj2) {
+                org.junit.Assert.assertSame(obj1, obj2);
+                org.junit.Assert.assertSame("message", obj1, obj2);
+                junit.framework.Assert.assertSame(obj1, obj2);
+                junit.framework.Assert.assertSame("message", obj1, obj2);
+              }
+            }
+            """)
+        .doTest();
   }
 }

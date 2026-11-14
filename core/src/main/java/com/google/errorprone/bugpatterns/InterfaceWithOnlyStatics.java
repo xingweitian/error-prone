@@ -19,9 +19,12 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.Iterables.getLast;
 import static com.google.errorprone.bugpatterns.inject.dagger.DaggerAnnotations.isAnyModule;
 import static com.google.errorprone.util.ASTHelpers.createPrivateConstructor;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.VisitorState;
@@ -46,7 +49,6 @@ import javax.lang.model.element.Modifier;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "InterfaceWithOnlyStatics",
     summary =
         "This interface only contains static fields and methods; consider making it a final class "
             + "instead to prevent subclassing.",
@@ -62,7 +64,7 @@ public final class InterfaceWithOnlyStatics extends BugChecker implements ClassT
     }
     List<? extends Tree> members = tree.getMembers();
     ClassSymbol symbol = getSymbol(tree);
-    if (symbol == null || !symbol.isInterface() || symbol.isAnnotationType()) {
+    if (!symbol.isInterface() || symbol.isAnnotationType() || symbol.isSealed()) {
       return Description.NO_MATCH;
     }
     int staticMembers = 0;
@@ -72,7 +74,7 @@ public final class InterfaceWithOnlyStatics extends BugChecker implements ClassT
       if (memberSymbol == null) {
         return Description.NO_MATCH;
       }
-      if (memberSymbol.isStatic()) {
+      if (isStatic(memberSymbol)) {
         staticMembers++;
       } else {
         nonStaticMembers++;
@@ -83,16 +85,15 @@ public final class InterfaceWithOnlyStatics extends BugChecker implements ClassT
     }
     SuggestedFix.Builder suggestedFix = SuggestedFix.builder();
     for (Tree member : members) {
-      if (member instanceof VariableTree) {
-        VariableTree variableTree = (VariableTree) member;
-        SuggestedFixes.addModifiers(
-                variableTree, state, Modifier.FINAL, Modifier.STATIC, Modifier.PUBLIC)
-            .ifPresent(suggestedFix::merge);
-      }
-      if (member instanceof MethodTree) {
-        MethodTree methodTree = (MethodTree) member;
-        SuggestedFixes.addModifiers(methodTree, state, Modifier.PUBLIC)
-            .ifPresent(suggestedFix::merge);
+      switch (member) {
+        case VariableTree variableTree -> {
+          suggestedFix.merge(SuggestedFixes.Visibility.PUBLIC.refactor(variableTree, state));
+          SuggestedFixes.addModifiers(variableTree, state, Modifier.FINAL, Modifier.STATIC)
+              .ifPresent(suggestedFix::merge);
+        }
+        case MethodTree methodTree ->
+            suggestedFix.merge(SuggestedFixes.Visibility.PUBLIC.refactor(methodTree, state));
+        default -> {}
       }
     }
     suggestedFix
@@ -103,10 +104,10 @@ public final class InterfaceWithOnlyStatics extends BugChecker implements ClassT
 
   private static SuggestedFix fixClass(ClassTree classTree, VisitorState state) {
     int startPos = getStartPosition(classTree);
-    int endPos = getStartPosition(classTree.getMembers().get(0));
-    List<ErrorProneToken> tokens = state.getOffsetTokens(startPos, endPos);
+    int endPos = getStartPosition(classTree.getMembers().getFirst());
+    ImmutableList<ErrorProneToken> tokens = state.getOffsetTokens(startPos, endPos);
     String modifiers =
-        getSymbol(classTree).owner.enclClass() == null ? "final class" : "static final class";
+        enclosingClass(getSymbol(classTree)) == null ? "final class" : "static final class";
     SuggestedFix.Builder fix = SuggestedFix.builder();
     for (ErrorProneToken token : tokens) {
       if (token.kind() == TokenKind.INTERFACE) {

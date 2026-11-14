@@ -18,12 +18,13 @@ package com.google.errorprone.bugpatterns.inject;
 
 import static com.google.errorprone.matchers.ChildMultiMatcher.MatchType.AT_LEAST_ONE;
 import static com.google.errorprone.matchers.InjectMatchers.IS_APPLICATION_OF_AT_INJECT;
-import static com.google.errorprone.matchers.InjectMatchers.IS_BINDING_ANNOTATION;
+import static com.google.errorprone.matchers.InjectMatchers.IS_QUALIFIER_ANNOTATION;
 import static com.google.errorprone.matchers.InjectMatchers.IS_SCOPING_ANNOTATION;
 import static com.google.errorprone.matchers.InjectMatchers.hasProvidesAnnotation;
 import static com.google.errorprone.matchers.Matchers.annotations;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -42,9 +43,10 @@ import com.sun.source.tree.MethodTree;
 import java.util.ArrayList;
 import java.util.List;
 
-/** @author Nick Glorioso (glorioso@google.com) */
+/**
+ * @author Nick Glorioso (glorioso@google.com)
+ */
 @BugPattern(
-    name = "QualifierOrScopeOnInjectMethod",
     summary =
         "Qualifiers/Scope annotations on @Inject methods don't have any effect."
             + " Move the qualifier annotation to the binding location.",
@@ -53,7 +55,7 @@ import java.util.List;
 public class QualifierOrScopeOnInjectMethod extends BugChecker implements MethodTreeMatcher {
 
   private static final MultiMatcher<MethodTree, AnnotationTree> QUALIFIER_ANNOTATION_FINDER =
-      annotations(AT_LEAST_ONE, anyOf(IS_BINDING_ANNOTATION, IS_SCOPING_ANNOTATION));
+      annotations(AT_LEAST_ONE, anyOf(IS_QUALIFIER_ANNOTATION, IS_SCOPING_ANNOTATION));
 
   private static final MultiMatcher<MethodTree, AnnotationTree> HAS_INJECT =
       annotations(AT_LEAST_ONE, IS_APPLICATION_OF_AT_INJECT);
@@ -70,7 +72,7 @@ public class QualifierOrScopeOnInjectMethod extends BugChecker implements Method
     }
 
     SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
-    List<AnnotationTree> matchingAnnotations = qualifierAnnotations.matchingNodes();
+    ImmutableList<AnnotationTree> matchingAnnotations = qualifierAnnotations.matchingNodes();
 
     // If we're looking at an @Inject constructor, move the scope annotation to the class instead,
     // and delete all of the other qualifiers
@@ -82,11 +84,10 @@ public class QualifierOrScopeOnInjectMethod extends BugChecker implements Method
       }
 
       ClassTree outerClass = ASTHelpers.findEnclosingNode(state.getPath(), ClassTree.class);
-      scopes.forEach(
-          a -> {
-            fixBuilder.delete(a);
-            fixBuilder.prefixWith(outerClass, state.getSourceForNode(a) + " ");
-          });
+      scopes.forEach(a -> {
+        fixBuilder.delete(a);
+        fixBuilder.prefixWith(outerClass, state.getSourceForNode(a) + " ");
+      });
       deleteAll(qualifiers, fixBuilder);
       return describeMatch(tree, fixBuilder.build());
     }
@@ -95,12 +96,12 @@ public class QualifierOrScopeOnInjectMethod extends BugChecker implements Method
     // should be semantics-preserving (since Modules aren't generally themselves @Injected).
     if (PROVIDES_METHOD.matches(tree, state)) {
       deleteAll(injectAnnotations.matchingNodes(), fixBuilder);
-      return describeMatch(injectAnnotations.matchingNodes().get(0), fixBuilder.build());
+      return describeMatch(injectAnnotations.matchingNodes().getFirst(), fixBuilder.build());
     }
 
     // Don't know what else to do here, deleting is the no-op change.
     deleteAll(matchingAnnotations, fixBuilder);
-    return describeMatch(matchingAnnotations.get(0), fixBuilder.build());
+    return describeMatch(matchingAnnotations.getFirst(), fixBuilder.build());
   }
 
   private static void deleteAll(List<AnnotationTree> scopes, SuggestedFix.Builder fixBuilder) {

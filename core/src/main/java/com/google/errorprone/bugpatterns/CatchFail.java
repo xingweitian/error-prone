@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getLast;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static com.google.common.collect.Streams.stream;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
@@ -38,10 +39,10 @@ import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.JUnitMatchers;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.CatchTree;
 import com.sun.source.tree.ExpressionStatementTree;
-import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
@@ -54,7 +55,7 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.UnionClassType;
 import com.sun.tools.javac.code.Types;
-import java.util.Collection;
+import com.sun.tools.javac.util.Name;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -62,14 +63,10 @@ import java.util.stream.Stream;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "CatchFail",
     summary =
         "Ignoring exceptions and calling fail() is unnecessary, and makes test output less useful",
     severity = WARNING)
 public class CatchFail extends BugChecker implements TryTreeMatcher {
-
-  public static final Matcher<ExpressionTree> ASSERT_WITH_MESSAGE =
-      staticMethod().onClass("com.google.common.truth.Truth").named("assertWithMessage");
 
   private static final Matcher<StatementTree> FAIL_METHOD =
       expressionStatement(
@@ -86,10 +83,9 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
     // Find catch blocks that contain only a call to fail, and that ignore the caught exception.
     ImmutableList<CatchTree> catchBlocks =
         tree.getCatches().stream()
-            .filter(
-                c ->
-                    c.getBlock().getStatements().size() == 1
-                        && FAIL_METHOD.matches(getOnlyElement(c.getBlock().getStatements()), state))
+            .filter(c ->
+                c.getBlock().getStatements().size() == 1
+                    && FAIL_METHOD.matches(getOnlyElement(c.getBlock().getStatements()), state))
             .filter(c -> !catchVariableIsUsed(c))
             .collect(toImmutableList());
     if (catchBlocks.isEmpty()) {
@@ -107,7 +103,7 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
           + state
               .getSourceCode()
               .subSequence(
-                  getStartPosition(tree.getArguments().get(0)),
+                  getStartPosition(tree.getArguments().getFirst()),
                   state.getEndPosition(getLast(tree.getArguments())))
           + ")";
     }
@@ -117,27 +113,23 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
   private static Optional<Fix> rethrowFix(
       ImmutableList<CatchTree> catchBlocks, VisitorState state) {
     SuggestedFix.Builder fix = SuggestedFix.builder();
-    catchBlocks.forEach(
-        c -> {
-          // e.g.
-          // fail("message") -> throw new AssertionError("message", cause);
-          // assertWithMessage("message format %s", 42) ->
-          //     throw new AssertionError(String.format("message format %s", 42), cause);
-          StatementTree statementTree = getOnlyElement(c.getBlock().getStatements());
-          MethodInvocationTree methodInvocationTree =
-              (MethodInvocationTree) ((ExpressionStatementTree) statementTree).getExpression();
-          String message = null;
-          if (message == null && !methodInvocationTree.getArguments().isEmpty()) {
-            message = getMessageOrFormat(methodInvocationTree, state);
-          }
-          if (message != null) {
-            // only catch and rethrow to add additional context, not for raw `fail()` calls
-            fix.replace(
-                statementTree,
-                String.format(
-                    "throw new AssertionError(%s, %s);", message, c.getParameter().getName()));
-          }
-        });
+    catchBlocks.forEach(c -> {
+      // e.g.
+      // fail("message") -> throw new AssertionError("message", cause);
+      // assertWithMessage("message format %s", 42) ->
+      //     throw new AssertionError(String.format("message format %s", 42), cause);
+      StatementTree statementTree = getOnlyElement(c.getBlock().getStatements());
+      MethodInvocationTree methodInvocationTree =
+          (MethodInvocationTree) ((ExpressionStatementTree) statementTree).getExpression();
+      if (!methodInvocationTree.getArguments().isEmpty()) {
+        String message = getMessageOrFormat(methodInvocationTree, state);
+        // only catch and rethrow to add additional context, not for raw `fail()` calls
+        fix.replace(
+            statementTree,
+            String.format(
+                "throw new AssertionError(%s, %s);", message, c.getParameter().getName()));
+      }
+    });
     return fix.isEmpty() ? Optional.empty() : Optional.of(fix.build());
   }
 
@@ -168,7 +160,7 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
         fix.replace(
             tree,
             source.substring(
-                getStartPosition(tryStatements.get(0)),
+                getStartPosition(tryStatements.getFirst()),
                 state.getEndPosition(getLast(tryStatements))));
       }
     }
@@ -184,18 +176,17 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
     }
 
     // Fix up the enclosing method's throws declaration to include the new thrown exception types.
-    Collection<Type> thrownTypes = ASTHelpers.getSymbol(enclosing).getThrownTypes();
+    List<Type> thrownTypes = ASTHelpers.getSymbol(enclosing).getThrownTypes();
     Types types = state.getTypes();
     // Find all types in the deleted catch blocks that are not already in the throws declaration.
     ImmutableList<Type> toThrow =
         catchBlocks.stream()
             .map(c -> ASTHelpers.getType(c.getParameter()))
             // convert multi-catch to a list of component types
-            .flatMap(
-                t ->
-                    t instanceof UnionClassType
-                        ? ImmutableList.copyOf(((UnionClassType) t).getAlternativeTypes()).stream()
-                        : Stream.of(t))
+            .flatMap(t ->
+                t instanceof UnionClassType unionClassType
+                    ? stream(unionClassType.getAlternativeTypes())
+                    : Stream.of(t))
             .filter(t -> thrownTypes.stream().noneMatch(x -> types.isAssignable(t, x)))
             .collect(toImmutableList());
     if (!toThrow.isEmpty()) {
@@ -222,12 +213,11 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
 
   /** Returns true if the given method symbol has a {@code @Test(expected=...)} annotation. */
   private static boolean isExpectedExceptionTest(MethodSymbol sym, VisitorState state) {
-    Compound attribute =
-        sym.attribute(state.getSymbolFromString(JUnitMatchers.JUNIT4_TEST_ANNOTATION));
+    Compound attribute = sym.attribute(JUnitMatchers.JUNIT4_TEST_ANNOTATION.symbol(state));
     if (attribute == null) {
       return false;
     }
-    return attribute.member(state.getName("expected")) != null;
+    return attribute.member(EXPECTED.get(state)) != null;
   }
 
   private boolean catchVariableIsUsed(CatchTree c) {
@@ -241,10 +231,13 @@ public class CatchFail extends BugChecker implements TryTreeMatcher {
                 if (Objects.equals(sym, ASTHelpers.getSymbol(node))) {
                   found[0] = true;
                 }
-                return super.visitIdentifier(node, unused);
+                return super.visitIdentifier(node, null);
               }
             },
             null);
     return found[0];
   }
+
+  private static final Supplier<Name> EXPECTED =
+      VisitorState.memoize(state -> state.getName("expected"));
 }

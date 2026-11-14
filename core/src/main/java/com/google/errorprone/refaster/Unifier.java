@@ -16,19 +16,22 @@ package com.google.errorprone.refaster;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.sun.tools.javac.util.List.nil;
 
 import com.google.common.base.Function;
-import com.google.common.base.Optional;
-import com.google.errorprone.SubContext;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.Context;
 import java.util.ArrayList;
 import java.util.List;
-import javax.annotation.Nullable;
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A mutable representation of an attempt to match a template source tree against a target source
@@ -40,15 +43,39 @@ public final class Unifier {
   private final Bindings bindings;
 
   private final Context context;
+  private final Types types;
+  private final TreeMaker treeMaker;
+  private final JCCompilationUnit compilationUnit;
 
-  public Unifier(Context context) {
+  public Unifier(Context context, JCCompilationUnit compilationUnit) {
     this.bindings = Bindings.create();
     this.context = checkNotNull(context);
+    this.types = Types.instance(context);
+    this.treeMaker = TreeMaker.instance(context);
+    this.compilationUnit = checkNotNull(compilationUnit);
   }
 
-  private Unifier(Context context, Bindings bindings) {
-    this.context = new SubContext(context);
+  public Unifier(Context context) {
+    this(context, defaultCompilationUnit(context));
+  }
+
+  private static JCCompilationUnit defaultCompilationUnit(Context context) {
+    JCCompilationUnit compilationUnit = TreeMaker.instance(context).TopLevel(nil());
+    compilationUnit.packge = Symtab.instance(context).unnamedModule.unnamedPackage;
+    return compilationUnit;
+  }
+
+  private Unifier(
+      Context context,
+      Bindings bindings,
+      Types types,
+      TreeMaker treeMaker,
+      JCCompilationUnit compilationUnit) {
+    this.context = context;
     this.bindings = Bindings.create(bindings);
+    this.types = types;
+    this.treeMaker = treeMaker;
+    this.compilationUnit = checkNotNull(compilationUnit);
   }
 
   /**
@@ -56,26 +83,30 @@ public final class Unifier {
    * succeed or fail independently of this {@code Unifier}.
    */
   public Unifier fork() {
-    return new Unifier(context, bindings);
+    return new Unifier(context, bindings, types, treeMaker, compilationUnit);
+  }
+
+  public JCCompilationUnit compilationUnit() {
+    return compilationUnit;
   }
 
   public Types types() {
-    return Types.instance(context);
+    return types;
   }
 
   public JCExpression thisExpression(Type type) {
-    return TreeMaker.instance(context).This(type);
+    return treeMaker.This(type);
   }
 
   public Inliner createInliner() {
-    return new Inliner(context, bindings);
+    return new Inliner(context, bindings, compilationUnit);
   }
 
-  @Nullable
-  public <V> V getBinding(Bindings.Key<V> key) {
+  public <V> @Nullable V getBinding(Bindings.Key<V> key) {
     return bindings.getBinding(key);
   }
 
+  @CanIgnoreReturnValue
   public <V> V putBinding(Bindings.Key<V> key, V value) {
     checkArgument(!bindings.containsKey(key), "Cannot bind %s more than once", key);
     return bindings.putBinding(key, value);
@@ -87,11 +118,11 @@ public final class Unifier {
   }
 
   public void clearBinding(Bindings.Key<?> key) {
-    bindings.remove(key);
+    bindings.clearBinding(key);
   }
 
   public Bindings getBindings() {
-    return bindings.unmodifiable();
+    return bindings;
   }
 
   public Context getContext() {
@@ -104,12 +135,12 @@ public final class Unifier {
   }
 
   public static <T, U extends Unifiable<? super T>> Function<Unifier, Choice<Unifier>> unifications(
-      @Nullable final U unifiable, @Nullable final T target) {
+      @Nullable U unifiable, @Nullable T target) {
     return (Unifier unifier) -> unifyNullable(unifier, unifiable, target);
   }
 
   public static <T, U extends Unifiable<? super T>> Choice<Unifier> unifyNullable(
-      Unifier unifier, @Nullable final U unifiable, @Nullable final T target) {
+      Unifier unifier, @Nullable U unifiable, @Nullable T target) {
     if (target == null && unifiable == null) {
       return Choice.of(unifier);
     } else if (target == null || unifiable == null) {
@@ -120,14 +151,12 @@ public final class Unifier {
   }
 
   public static <T, U extends Unifiable<? super T>> Function<Unifier, Choice<Unifier>> unifications(
-      @Nullable final List<U> toUnify, @Nullable final List<? extends T> targets) {
+      @Nullable List<U> toUnify, @Nullable List<? extends T> targets) {
     return unifications(toUnify, targets, /* allowVarargs= */ false);
   }
 
   public static <T, U extends Unifiable<? super T>> Function<Unifier, Choice<Unifier>> unifications(
-      @Nullable final List<U> toUnify,
-      @Nullable final List<? extends T> targets,
-      final boolean allowVarargs) {
+      @Nullable List<U> toUnify, @Nullable List<? extends T> targets, boolean allowVarargs) {
     return (Unifier unifier) -> unifyList(unifier, toUnify, targets, allowVarargs);
   }
 
@@ -136,7 +165,7 @@ public final class Unifier {
    * specified lists, disallowing varargs.
    */
   public static <T, U extends Unifiable<? super T>> Choice<Unifier> unifyList(
-      Unifier unifier, @Nullable List<U> toUnify, @Nullable final List<? extends T> targets) {
+      Unifier unifier, @Nullable List<U> toUnify, @Nullable List<? extends T> targets) {
     return unifyList(unifier, toUnify, targets, /* allowVarargs= */ false);
   }
 
@@ -147,7 +176,7 @@ public final class Unifier {
   public static <T, U extends Unifiable<? super T>> Choice<Unifier> unifyList(
       Unifier unifier,
       @Nullable List<U> toUnify,
-      @Nullable final List<? extends T> targets,
+      @Nullable List<? extends T> targets,
       boolean allowVarargs) {
     if (toUnify == null && targets == null) {
       return Choice.of(unifier);
@@ -162,37 +191,33 @@ public final class Unifier {
     int index;
     for (index = 0; index < toUnify.size(); index++) {
       U toUnifyNext = toUnify.get(index);
-      if (allowVarargs && toUnifyNext instanceof URepeated) {
-        final URepeated repeated = (URepeated) toUnifyNext;
-        final int startIndex = index;
-        return choice
-            .condition(index + 1 == toUnify.size())
-            .thenOption(
-                new Function<Unifier, Optional<Unifier>>() {
-                  @Override
-                  public Optional<Unifier> apply(Unifier unifier) {
-                    List<JCExpression> expressions = new ArrayList<>();
-                    for (int j = startIndex; j < targets.size(); j++) {
-                      Optional<Unifier> forked =
-                          repeated.unify((JCTree) targets.get(j), unifier.fork()).first();
-                      if (!forked.isPresent()) {
-                        return Optional.absent();
-                      }
-                      JCExpression boundExpr = repeated.getUnderlyingBinding(forked.get());
-                      if (boundExpr == null) {
-                        return Optional.absent();
-                      }
-                      expressions.add(boundExpr);
-                    }
-                    unifier.putBinding(repeated.key(), expressions);
-                    return Optional.of(unifier);
-                  }
-                });
+      if (allowVarargs && toUnifyNext instanceof URepeated repeated) {
+        int startIndex = index;
+        if (index + 1 != toUnify.size()) {
+          return Choice.none();
+        }
+        return choice.mapIfPresent(u -> {
+          List<JCExpression> expressions = new ArrayList<>();
+          for (int j = startIndex; j < targets.size(); j++) {
+            Optional<Unifier> forked =
+                repeated.unify((JCTree) targets.get(j), u.fork()).findFirst();
+            if (forked.isEmpty()) {
+              return Optional.empty();
+            }
+            JCExpression boundExpr = repeated.getUnderlyingBinding(forked.get());
+            if (boundExpr == null) {
+              return Optional.empty();
+            }
+            expressions.add(boundExpr);
+          }
+          u.putBinding(repeated.key(), expressions);
+          return Optional.of(u);
+        });
       }
       if (index >= targets.size()) {
         return Choice.none();
       }
-      choice = choice.thenChoose(unifications(toUnifyNext, targets.get(index)));
+      choice = choice.flatMap(unifications(toUnifyNext, targets.get(index)));
     }
     if (index < targets.size()) {
       return Choice.none();

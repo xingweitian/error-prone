@@ -32,17 +32,100 @@ public class CannotMockFinalClassTest {
       CompilationTestHelper.newInstance(CannotMockFinalClass.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("CannotMockFinalClassPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "CannotMockFinalClassPositiveCases.java",
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+            import org.mockito.Mockito;
+
+            /** Test for CannotMockFinalClass. */
+            @RunWith(JUnit4.class)
+            public class CannotMockFinalClassPositiveCases {
+              static final class FinalClass {}
+
+              // BUG: Diagnostic contains: Mockito cannot mock
+              @Mock FinalClass impossible;
+
+              public void method() {
+                // BUG: Diagnostic contains: Mockito cannot mock
+                FinalClass local = Mockito.mock(FinalClass.class);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("CannotMockFinalClassNegativeCases.java").doTest();
+  public void positiveCase_record() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              record Record() {}
+
+              // BUG: Diagnostic contains:
+              @Mock Record record;
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase2() {
-    compilationHelper.addSourceFile("CannotMockFinalClassNegativeCases2.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "CannotMockFinalClassNegativeCases.java",
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+            import org.mockito.Mockito;
+
+            /** Test for CannotMockFinalClass. */
+            @RunWith(JUnit4.class)
+            public class CannotMockFinalClassNegativeCases {
+              static class NonFinalClass {}
+
+              @Mock NonFinalClass okToMock;
+
+              public void method() {
+                NonFinalClass local = Mockito.mock(NonFinalClass.class);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeCase2() {
+    compilationHelper
+        .addSourceLines(
+            "CannotMockFinalClassNegativeCases2.java",
+            """
+            import org.mockito.Mock;
+            import org.mockito.Mockito;
+
+            /** Test for CannotMockFinalClass in the absence of @RunWith(JUnit4.class). */
+            public class CannotMockFinalClassNegativeCases2 {
+              static final class FinalClass {}
+
+              @Mock FinalClass impossible;
+
+              public void method() {
+                FinalClass local = Mockito.mock(FinalClass.class);
+              }
+            }
+            """)
+        .doTest();
   }
 }

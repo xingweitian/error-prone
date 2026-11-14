@@ -26,6 +26,7 @@ import static com.google.errorprone.matchers.Matchers.kindIs;
 import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.Matchers.sameVariable;
 import static com.google.errorprone.matchers.Matchers.toType;
+import static com.google.errorprone.util.ASTHelpers.stripParentheses;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -46,7 +47,6 @@ import javax.lang.model.element.Modifier;
 
 /** Detects non-atomic updates to volatile variables. */
 @BugPattern(
-    name = "NonAtomicVolatileUpdate",
     summary = "This update of a volatile variable is non-atomic",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
@@ -54,36 +54,23 @@ public class NonAtomicVolatileUpdate extends BugChecker
     implements UnaryTreeMatcher, CompoundAssignmentTreeMatcher, AssignmentTreeMatcher {
 
   /** Extracts the expression from a UnaryTree and applies a matcher to it. */
-  private static Matcher<UnaryTree> expressionFromUnaryTree(
-      final Matcher<ExpressionTree> exprMatcher) {
-    return new Matcher<UnaryTree>() {
-      @Override
-      public boolean matches(UnaryTree tree, VisitorState state) {
-        return exprMatcher.matches(tree.getExpression(), state);
-      }
-    };
+  private static Matcher<UnaryTree> expressionFromUnaryTree(Matcher<ExpressionTree> exprMatcher) {
+    return (UnaryTree tree, VisitorState state) ->
+        exprMatcher.matches(stripParentheses(tree.getExpression()), state);
   }
 
   /** Extracts the variable from a CompoundAssignmentTree and applies a matcher to it. */
   private static Matcher<CompoundAssignmentTree> variableFromCompoundAssignmentTree(
-      final Matcher<ExpressionTree> exprMatcher) {
-    return new Matcher<CompoundAssignmentTree>() {
-      @Override
-      public boolean matches(CompoundAssignmentTree tree, VisitorState state) {
-        return exprMatcher.matches(tree.getVariable(), state);
-      }
-    };
+      Matcher<ExpressionTree> exprMatcher) {
+    return (CompoundAssignmentTree tree, VisitorState state) ->
+        exprMatcher.matches(stripParentheses(tree.getVariable()), state);
   }
 
   /** Extracts the variable from an AssignmentTree and applies a matcher to it. */
   private static Matcher<AssignmentTree> variableFromAssignmentTree(
-      final Matcher<ExpressionTree> exprMatcher) {
-    return new Matcher<AssignmentTree>() {
-      @Override
-      public boolean matches(AssignmentTree tree, VisitorState state) {
-        return exprMatcher.matches(tree.getVariable(), state);
-      }
-    };
+      Matcher<ExpressionTree> exprMatcher) {
+    return (AssignmentTree tree, VisitorState state) ->
+        exprMatcher.matches(stripParentheses(tree.getVariable()), state);
   }
 
   /**
@@ -147,7 +134,8 @@ public class NonAtomicVolatileUpdate extends BugChecker
 
   @Override
   public Description matchAssignment(AssignmentTree tree, VisitorState state) {
-    if (assignmentIncrementDecrementMatcher(tree.getVariable()).matches(tree, state)) {
+    if (assignmentIncrementDecrementMatcher(stripParentheses(tree.getVariable()))
+        .matches(tree, state)) {
       return describeMatch(tree);
     }
     return Description.NO_MATCH;

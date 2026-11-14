@@ -20,6 +20,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.findPathFromEnclosingNodeToTopLevel;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
 import static com.google.errorprone.util.FindIdentifiers.findIdent;
 import static java.util.stream.Collectors.joining;
 
@@ -27,6 +28,7 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -44,44 +46,51 @@ import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import javax.inject.Inject;
 import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.Name;
+import org.jspecify.annotations.Nullable;
 
 /** Looks for types being shadowed by other types in a way that may be confusing. */
 @BugPattern(
-    name = "SameNameButDifferent",
     summary = "This type name shadows another in a way that may be confusing.",
     severity = WARNING)
 public final class SameNameButDifferent extends BugChecker implements CompilationUnitTreeMatcher {
+  private final Boolean batchFindings;
+
+  @Inject
+  SameNameButDifferent(ErrorProneFlags flags) {
+    batchFindings = flags.getBoolean("SameNameButDifferent:BatchFindings").orElse(false);
+  }
+
   @Override
   public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
     Table<String, TypeSymbol, List<TreePath>> table = HashBasedTable.create();
-    new SuppressibleTreePathScanner<Void, Void>() {
+    new SuppressibleTreePathScanner<Void, Void>(state) {
       @Override
       public Void visitMemberSelect(MemberSelectTree memberSelectTree, Void unused) {
-        if (!shouldIgnore()) {
-          handle(memberSelectTree);
+        // Check the symbol first: most member selects are field accesses or method calls.
+        if (getSymbol(memberSelectTree) instanceof ClassSymbol symbol && !shouldIgnore()) {
+          handle(memberSelectTree, symbol);
         }
         return super.visitMemberSelect(memberSelectTree, null);
       }
 
       @Override
       public Void visitIdentifier(IdentifierTree identifierTree, Void unused) {
-        if (shouldIgnore()) {
-          return null;
-        }
-        if (!(getSymbol(identifierTree) instanceof ClassSymbol)) {
+        if (!(getSymbol(identifierTree) instanceof ClassSymbol symbol) || shouldIgnore()) {
           return null;
         }
         TreePath enclosingClass =
             findPathFromEnclosingNodeToTopLevel(getCurrentPath(), ClassTree.class);
-        if (enclosingClass != null
-            && getSymbol(enclosingClass.getLeaf()) == getSymbol(identifierTree)) {
+        if (enclosingClass != null && getSymbol(enclosingClass.getLeaf()) == symbol) {
           return null;
         }
-        handle(identifierTree);
+        handle(identifierTree, symbol);
         return null;
       }
 
@@ -93,24 +102,35 @@ public final class SameNameButDifferent extends BugChecker implements Compilatio
             && getSymbol(parentTree) instanceof ClassSymbol;
       }
 
-      private void handle(Tree tree) {
-        if (tree instanceof IdentifierTree
-            && ((IdentifierTree) tree).getName().contentEquals("Builder")) {
+      private @Nullable String qualifiedName(Tree tree) {
+        ArrayDeque<Name> parts = new ArrayDeque<>();
+        while (tree instanceof MemberSelectTree) {
+          MemberSelectTree select = (MemberSelectTree) tree;
+          parts.addFirst(select.getIdentifier());
+          tree = select.getExpression();
+        }
+        if (!(tree instanceof IdentifierTree identifierTree)) {
+          return null;
+        }
+        parts.addFirst(identifierTree.getName());
+        return Joiner.on('.').join(parts);
+      }
+
+      private void handle(Tree tree, ClassSymbol symbol) {
+        if (tree instanceof IdentifierTree identifierTree
+            && identifierTree.getName().contentEquals("Builder")) {
           return;
         }
-        String treeSource = state.getSourceForNode(tree);
-        if (treeSource == null) {
+        String qualifiedName = qualifiedName(tree);
+        if (qualifiedName == null) {
           return;
         }
-        Symbol symbol = getSymbol(tree);
-        if (symbol instanceof ClassSymbol) {
-          List<TreePath> treePaths = table.get(treeSource, symbol.type.tsym);
-          if (treePaths == null) {
-            treePaths = new ArrayList<>();
-            table.put(treeSource, symbol.type.tsym, treePaths);
-          }
-          treePaths.add(getCurrentPath());
+        List<TreePath> treePaths = table.get(qualifiedName, symbol.type.tsym);
+        if (treePaths == null) {
+          treePaths = new ArrayList<>();
+          table.put(qualifiedName, symbol.type.tsym, treePaths);
         }
+        treePaths.add(getCurrentPath());
       }
     }.scan(state.getPath(), null);
 
@@ -118,7 +138,19 @@ public final class SameNameButDifferent extends BugChecker implements Compilatio
     // class.
     Table<String, TypeSymbol, List<TreePath>> trimmedTable = HashBasedTable.create();
     for (Map.Entry<String, Map<TypeSymbol, List<TreePath>>> row : table.rowMap().entrySet()) {
-      Map<TypeSymbol, List<TreePath>> columns = row.getValue();
+      if (row.getValue().size() <= 1) {
+        continue;
+      }
+      // Synthetic trees are filtered out here rather than while scanning, since looking up end
+      // positions is relatively expensive, and most names only ever refer to a single type.
+      Map<TypeSymbol, List<TreePath>> columns = new LinkedHashMap<>();
+      for (Map.Entry<TypeSymbol, List<TreePath>> cell : row.getValue().entrySet()) {
+        List<TreePath> treePaths = cell.getValue();
+        treePaths.removeIf(treePath -> !hasExplicitSource(treePath.getLeaf(), state));
+        if (!treePaths.isEmpty()) {
+          columns.put(cell.getKey(), treePaths);
+        }
+      }
       if (columns.size() <= 1) {
         continue;
       }
@@ -134,18 +166,17 @@ public final class SameNameButDifferent extends BugChecker implements Compilatio
       String simpleName = row.getKey();
       Map<TypeSymbol, List<TreePath>> columns = row.getValue();
 
-      SuggestedFix.Builder fix = SuggestedFix.builder();
+      SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
       if (columns.size() > 1) {
         for (Map.Entry<TypeSymbol, List<TreePath>> cell : columns.entrySet()) {
           for (TreePath treePath : cell.getValue()) {
             TypeSymbol typeSymbol = cell.getKey();
             getBetterImport(typeSymbol, simpleName)
-                .ifPresent(
-                    imp -> {
-                      String qualifiedName = qualifyType(state.withPath(treePath), fix, imp);
-                      String newSimpleName = qualifiedName + "." + simpleName;
-                      fix.replace(treePath.getLeaf(), newSimpleName);
-                    });
+                .ifPresent(imp -> {
+                  String qualifiedName = qualifyType(state.withPath(treePath), fixBuilder, imp);
+                  String newSimpleName = qualifiedName + "." + simpleName;
+                  fixBuilder.replace(treePath.getLeaf(), newSimpleName);
+                });
           }
         }
         String message =
@@ -156,27 +187,25 @@ public final class SameNameButDifferent extends BugChecker implements Compilatio
                 columns.keySet().stream()
                     .map(t -> t.getQualifiedName().toString())
                     .collect(joining(", ", "[", "]")));
-        for (List<TreePath> treePaths : trimmedTable.row(simpleName).values()) {
-          for (TreePath treePath : treePaths) {
-            state.reportMatch(
-                buildDescription(treePath.getLeaf())
-                    .setMessage(message)
-                    .addFix(fix.build())
-                    .build());
-          }
-        }
+        SuggestedFix fix = fixBuilder.build();
+        trimmedTable.row(simpleName).values().stream()
+            .flatMap(List::stream)
+            .limit(batchFindings ? 1 : Long.MAX_VALUE)
+            .forEach(treePath ->
+                state.reportMatch(
+                    buildDescription(treePath.getLeaf()).setMessage(message).addFix(fix).build()));
       }
     }
     return NO_MATCH;
   }
 
   private static boolean shadowsClass(VisitorState state, TreePath treePath) {
-    if (!(treePath.getLeaf() instanceof IdentifierTree)) {
+    if (!(treePath.getLeaf() instanceof IdentifierTree identifierTree)) {
       return true;
     }
 
     TreePath enclosingClass = findPathFromEnclosingNodeToTopLevel(treePath, ClassTree.class);
-    String name = ((IdentifierTree) treePath.getLeaf()).getName().toString();
+    String name = identifierTree.getName().toString();
     return findIdent(name, state.withPath(enclosingClass), KindSelector.VAL_TYP) != null;
   }
 
@@ -184,6 +213,9 @@ public final class SameNameButDifferent extends BugChecker implements Compilatio
     Symbol owner = classSymbol;
     long dots = simpleName.chars().filter(c -> c == '.').count();
     for (long i = 0; i < dots + 1; ++i) {
+      if (owner == null) {
+        return Optional.empty();
+      }
       owner = owner.owner;
     }
     if (owner instanceof ClassSymbol) {

@@ -28,8 +28,6 @@ import static com.google.errorprone.bugpatterns.inject.dagger.Util.makeConcreteC
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
-import static com.sun.source.tree.Tree.Kind.ASSIGNMENT;
-import static com.sun.source.tree.Tree.Kind.RETURN;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -42,62 +40,56 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.AnnotationTree;
+import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.ModifiersTree;
 import com.sun.source.tree.ReturnTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
+import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
-import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Flags.Flag;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.tree.JCTree.JCAnnotation;
-import com.sun.tools.javac.tree.JCTree.JCAssign;
-import com.sun.tools.javac.tree.JCTree.JCClassDecl;
-import com.sun.tools.javac.tree.JCTree.JCExpression;
-import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
-import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.util.Name;
-import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import javax.lang.model.element.Modifier;
 
 @BugPattern(
-    name = "UseBinds",
     summary = "@Binds is a more efficient and declarative mechanism for delegating a binding.",
     severity = WARNING)
 public class UseBinds extends BugChecker implements MethodTreeMatcher {
   private static final Matcher<MethodTree> SIMPLE_METHOD =
-      new Matcher<MethodTree>() {
-        @Override
-        public boolean matches(MethodTree t, VisitorState state) {
-          List<? extends VariableTree> parameters = t.getParameters();
-          if (parameters.size() != 1) {
-            return false;
-          }
-          final VariableTree onlyParameter = Iterables.getOnlyElement(parameters);
-
-          BlockTree body = t.getBody();
-          if (body == null) {
-            return false;
-          }
-          List<? extends StatementTree> statements = body.getStatements();
-          if (statements.size() != 1) {
-            return false;
-          }
-          StatementTree onlyStatement = Iterables.getOnlyElement(statements);
-
-          if (!onlyStatement.getKind().equals(RETURN)) {
-            return false;
-          }
-          Symbol returnedSymbol = getSymbol(((ReturnTree) onlyStatement).getExpression());
-          if (returnedSymbol == null) {
-            return false;
-          }
-
-          return getSymbol(onlyParameter).equals(returnedSymbol);
+      (MethodTree t, VisitorState state) -> {
+        List<? extends VariableTree> parameters = t.getParameters();
+        if (parameters.size() != 1) {
+          return false;
         }
+        VariableTree onlyParameter = Iterables.getOnlyElement(parameters);
+
+        BlockTree body = t.getBody();
+        if (body == null) {
+          return false;
+        }
+        List<? extends StatementTree> statements = body.getStatements();
+        if (statements.size() != 1) {
+          return false;
+        }
+        StatementTree onlyStatement = Iterables.getOnlyElement(statements);
+
+        if (!(onlyStatement instanceof ReturnTree returnTree)) {
+          return false;
+        }
+        Symbol returnedSymbol = getSymbol(returnTree.getExpression());
+        if (returnedSymbol == null) {
+          return false;
+        }
+
+        return getSymbol(onlyParameter).equals(returnedSymbol);
       };
 
   private static final Matcher<MethodTree> CAN_BE_A_BINDS_METHOD =
@@ -109,7 +101,7 @@ public class UseBinds extends BugChecker implements MethodTreeMatcher {
       return NO_MATCH;
     }
 
-    JCClassDecl enclosingClass = ASTHelpers.findEnclosingNode(state.getPath(), JCClassDecl.class);
+    ClassTree enclosingClass = ASTHelpers.findEnclosingNode(state.getPath(), ClassTree.class);
 
     // Dagger 1 modules don't support @Binds.
     if (!IS_DAGGER_2_MODULE.matches(enclosingClass, state)) {
@@ -121,8 +113,7 @@ public class UseBinds extends BugChecker implements MethodTreeMatcher {
     }
 
     for (Tree member : enclosingClass.getMembers()) {
-      if (member.getKind().equals(Tree.Kind.METHOD) && !getSymbol(member).isConstructor()) {
-        MethodTree siblingMethod = (MethodTree) member;
+      if (member instanceof MethodTree siblingMethod && !getSymbol(member).isConstructor()) {
         Set<Modifier> siblingFlags = siblingMethod.getModifiers().getFlags();
         if (!(siblingFlags.contains(Modifier.STATIC) || siblingFlags.contains(Modifier.ABSTRACT))
             && !CAN_BE_A_BINDS_METHOD.matches(siblingMethod, state)) {
@@ -135,49 +126,49 @@ public class UseBinds extends BugChecker implements MethodTreeMatcher {
   }
 
   private Description fixByModifyingMethod(
-      VisitorState state, JCClassDecl enclosingClass, MethodTree method) {
+      VisitorState state, ClassTree enclosingClass, MethodTree method) {
     return describeMatch(
         method,
         SuggestedFix.builder()
             .addImport("dagger.Binds")
-            .merge(convertMethodToBinds(method, state))
+            .merge(convertMethodToBinds(method, enclosingClass, state))
             .merge(makeConcreteClassAbstract(enclosingClass, state))
             .build());
   }
 
-  private static SuggestedFix.Builder convertMethodToBinds(MethodTree method, VisitorState state) {
+  private static SuggestedFix.Builder convertMethodToBinds(
+      MethodTree method, ClassTree enclosingClass, VisitorState state) {
     SuggestedFix.Builder fix = SuggestedFix.builder();
 
-    JCModifiers modifiers = ((JCMethodDecl) method).getModifiers();
+    ModifiersTree modifiers = method.getModifiers();
     ImmutableList.Builder<String> modifierStringsBuilder =
         ImmutableList.<String>builder().add("@Binds");
 
-    for (JCAnnotation annotation : modifiers.annotations) {
+    for (AnnotationTree annotation : modifiers.getAnnotations()) {
       Name annotationQualifiedName = getSymbol(annotation).getQualifiedName();
       if (annotationQualifiedName.contentEquals(PROVIDES_CLASS_NAME)
           || annotationQualifiedName.contentEquals(PRODUCES_CLASS_NAME)) {
-        List<JCExpression> arguments = annotation.getArguments();
+        List<? extends ExpressionTree> arguments = annotation.getArguments();
         if (!arguments.isEmpty()) {
-          JCExpression argument = Iterables.getOnlyElement(arguments);
-          checkState(argument.getKind().equals(ASSIGNMENT));
-          JCAssign assignment = (JCAssign) argument;
+          ExpressionTree argument = Iterables.getOnlyElement(arguments);
+          checkState(argument instanceof AssignmentTree);
+          AssignmentTree assignment = (AssignmentTree) argument;
           checkState(getSymbol(assignment.getVariable()).getSimpleName().contentEquals("type"));
           String typeName = getSymbol(assignment.getExpression()).getSimpleName().toString();
           switch (typeName) {
-            case "SET":
+            case "SET" -> {
               modifierStringsBuilder.add("@IntoSet");
               fix.addImport(INTO_SET_CLASS_NAME);
-              break;
-            case "SET_VALUES":
+            }
+            case "SET_VALUES" -> {
               modifierStringsBuilder.add("@ElementsIntoSet");
               fix.addImport(ELEMENTS_INTO_SET_CLASS_NAME);
-              break;
-            case "MAP":
+            }
+            case "MAP" -> {
               modifierStringsBuilder.add("@IntoMap");
               fix.addImport(INTO_MAP_CLASS_NAME);
-              break;
-            default:
-              throw new AssertionError("Unknown type name: " + typeName);
+            }
+            default -> throw new AssertionError("Unknown type name: " + typeName);
           }
         }
       } else {
@@ -185,12 +176,13 @@ public class UseBinds extends BugChecker implements MethodTreeMatcher {
       }
     }
 
-    EnumSet<Flag> methodFlags = Flags.asFlagSet(modifiers.flags);
-    methodFlags.remove(Flags.Flag.STATIC);
-    methodFlags.remove(Flags.Flag.FINAL);
-    methodFlags.add(Flags.Flag.ABSTRACT);
-
-    for (Flag flag : methodFlags) {
+    Set<Modifier> methodFlags = new HashSet<>(modifiers.getFlags());
+    methodFlags.remove(Modifier.STATIC);
+    methodFlags.remove(Modifier.FINAL);
+    if (!enclosingClass.getKind().equals(Kind.INTERFACE)) {
+      methodFlags.add(Modifier.ABSTRACT);
+    }
+    for (Modifier flag : methodFlags) {
       modifierStringsBuilder.add(flag.toString());
     }
 

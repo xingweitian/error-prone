@@ -32,22 +32,28 @@ public final class InitializeInlineTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  void test() {",
-            "    int a;",
-            "    a = 1;",
-            "    final int b;",
-            "    b = 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test() {
+                int a;
+                a = 1;
+                final int b;
+                b = 1;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  void test() {",
-            "    int a = 1;",
-            "    final int b = 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test() {
+
+                int a = 1;
+
+                final int b = 1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -56,13 +62,37 @@ public final class InitializeInlineTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  void test() {",
-            "    int a;",
-            "    a = 1;",
-            "    a = 2;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test() {
+                int a;
+                a = 1;
+                a = 2;
+              }
+            }
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void multipleAssignment_withinBlock() {
+    compilationHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              int test() {
+                int a;
+                if (true) {
+                  a = 1;
+                  return a;
+                }
+                a = 2;
+                return a;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -72,17 +102,19 @@ public final class InitializeInlineTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  int test() {",
-            "    int c;",
-            "    try {",
-            "      c = 1;",
-            "    } catch (Exception e) {",
-            "      throw e;",
-            "    }",
-            "    return c;",
-            "  }",
-            "}")
+            """
+            class Test {
+              int test() {
+                int c;
+                try {
+                  c = 1;
+                } catch (Exception e) {
+                  throw e;
+                }
+                return c;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -92,14 +124,16 @@ public final class InitializeInlineTest {
     compilationHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  int test() {",
-            "    int c;",
-            "    if (hashCode() == 0) c = 1;",
-            "    else c = 2;",
-            "    return c;",
-            "  }",
-            "}")
+            """
+            class Test {
+              int test() {
+                int c;
+                if (hashCode() == 0) c = 1;
+                else c = 2;
+                return c;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }

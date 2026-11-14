@@ -42,13 +42,16 @@ public final class PrivateConstructorForUtilityClassTest {
   public void privateClassesGetLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  private static class Blah {",
-            "    static void blah() {}",
-            "  }",
-            "  private Test() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              private static class Blah {
+                static void blah() {}
+              }
+
+              private Test() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -57,19 +60,24 @@ public final class PrivateConstructorForUtilityClassTest {
   public void subClassesGetLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Foo.java", //
-            "public class Foo<E> {",
-            "  private E entity;",
-            "  public E getEntity() {",
-            "    return entity;",
-            "  }",
-            "  public void setEntity(E anEntity) {",
-            "    entity = anEntity;",
-            "  }",
-            "  public static class BooleanFoo extends Foo<Boolean> {",
-            "    private static final long serialVersionUID = 123456789012L;",
-            "  }",
-            "}")
+            "in/Foo.java",
+            """
+            public class Foo<E> {
+              private E entity;
+
+              public E getEntity() {
+                return entity;
+              }
+
+              public void setEntity(E anEntity) {
+                entity = anEntity;
+              }
+
+              public static class BooleanFoo extends Foo<Boolean> {
+                private static final long serialVersionUID = 123456789012L;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -78,20 +86,26 @@ public final class PrivateConstructorForUtilityClassTest {
   public void implementingClassesGetLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Foo.java", //
-            "import java.io.Serializable;",
-            "public class Foo {",
-            "  private int entity;",
-            "  public int getEntity() {",
-            "    return entity;",
-            "  }",
-            "  public void setEntity(int anEntity) {",
-            "    entity = anEntity;",
-            "  }",
-            "  public static class Bar implements Serializable {",
-            "    private static final long serialVersionUID = 123456789012L;",
-            "  }",
-            "}")
+            "in/Foo.java",
+            """
+            import java.io.Serializable;
+
+            public class Foo {
+              private int entity;
+
+              public int getEntity() {
+                return entity;
+              }
+
+              public void setEntity(int anEntity) {
+                entity = anEntity;
+              }
+
+              public static class Bar implements Serializable {
+                private static final long serialVersionUID = 123456789012L;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -100,15 +114,18 @@ public final class PrivateConstructorForUtilityClassTest {
   public void privateScopedClassesGetLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  private static class Blah {",
-            "    static class Bleh {",
-            "      static void bleh() {}",
-            "    }",
-            "  }",
-            "  private Test() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              private static class Blah {
+                static class Bleh {
+                  static void bleh() {}
+                }
+              }
+
+              private Test() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -118,17 +135,20 @@ public final class PrivateConstructorForUtilityClassTest {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "",
-            "final class Test {",
-            "  static final String SOME_CONSTANT = \"\";",
-            "}")
+            """
+            final class Test {
+              static final String SOME_CONSTANT = "";
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "",
-            "final class Test {",
-            "  static final String SOME_CONSTANT = \"\";",
-            "  private Test() {}",
-            "}")
+            """
+            final class Test {
+              static final String SOME_CONSTANT = "";
+
+              private Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -136,17 +156,21 @@ public final class PrivateConstructorForUtilityClassTest {
   public void utilityClassesGetAPrivateConstructor_onlyMethods() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  static void blah() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              static void blah() {}
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "",
-            "final class Test {",
-            "  static void blah() {}",
-            "  private Test() {}",
-            "}")
+            """
+            final class Test {
+              static void blah() {}
+
+              private Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -154,17 +178,21 @@ public final class PrivateConstructorForUtilityClassTest {
   public void utilityClassesGetAPrivateConstructor_onlyNestedClasses() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  static class Blah {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              static class Blah {}
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "",
-            "final class Test {",
-            "  static class Blah {}",
-            "  private Test() {}",
-            "}")
+            """
+            final class Test {
+              static class Blah {}
+
+              private Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -172,16 +200,23 @@ public final class PrivateConstructorForUtilityClassTest {
   public void utilityClassesGetAPrivateConstructor_onlyStaticInitializer() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  static {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              static {
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java", //
-            "final class Test {",
-            "  static {}",
-            "  private Test() {}",
-            "}")
+            "out/Test.java",
+            """
+            final class Test {
+              static {
+              }
+
+              private Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -189,11 +224,14 @@ public final class PrivateConstructorForUtilityClassTest {
   public void utilityClassesWithAConstructorGetLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  static void blah() {}",
-            "  Test() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              static void blah() {}
+
+              Test() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -202,10 +240,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_field() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  private Object blah;",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              private Object blah;
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -214,10 +254,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_method() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  void blah() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              void blah() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -226,10 +268,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_innerClass() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  class Blah {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              class Blah {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -238,10 +282,13 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_initializer() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              {
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -250,10 +297,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_constructor() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "final class Test {",
-            "  Test() {}",
-            "}")
+            "in/Test.java",
+            """
+            final class Test {
+              Test() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -262,10 +311,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_interface() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "interface Test {",
-            "  void blah();",
-            "}")
+            "in/Test.java",
+            """
+            interface Test {
+              void blah();
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -274,10 +325,12 @@ public final class PrivateConstructorForUtilityClassTest {
   public void otherClassesGetLeftAlone_enum() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "enum Test {",
-            "  INSTANCE;",
-            "}")
+            "in/Test.java",
+            """
+            enum Test {
+              INSTANCE;
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -287,12 +340,16 @@ public final class PrivateConstructorForUtilityClassTest {
     CompilationTestHelper.newInstance(PrivateConstructorForUtilityClass.class, getClass())
         .addSourceLines(
             "Foo.java",
-            "// BUG: Diagnostic contains:",
-            "public class Foo {",
-            "  enum Enum {}",
-            "  @interface Annotation {}",
-            "  interface Interface {}",
-            "}")
+            """
+            // BUG: Diagnostic contains:
+            public class Foo {
+              enum Enum {}
+
+              @interface Annotation {}
+
+              interface Interface {}
+            }
+            """)
         .doTest();
   }
 
@@ -301,15 +358,18 @@ public final class PrivateConstructorForUtilityClassTest {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "@RunWith(JUnit4.class)",
-            "final class Test {",
-            "  @RunWith(JUnit4.class)",
-            "  private static class Blah {",
-            "    static void blah() {}",
-            "  }",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+
+            @RunWith(JUnit4.class)
+            final class Test {
+              @RunWith(JUnit4.class)
+              private static class Blah {
+                static void blah() {}
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -318,18 +378,21 @@ public final class PrivateConstructorForUtilityClassTest {
   public void finalAdded() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "",
-            "class Test {",
-            "  static final String SOME_CONSTANT = \"\";",
-            "}")
+            "in/Test.java",
+            """
+            class Test {
+              static final String SOME_CONSTANT = "";
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "",
-            "final class Test {",
-            "  static final String SOME_CONSTANT = \"\";",
-            "  private Test() {}",
-            "}")
+            """
+            final class Test {
+              static final String SOME_CONSTANT = "";
+
+              private Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -337,12 +400,43 @@ public final class PrivateConstructorForUtilityClassTest {
   public void abstractClass_noPrivateConstructor() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "",
-            "abstract class Test {",
-            "  static final String SOME_CONSTANT = \"\";",
-            "}")
+            "in/Test.java",
+            """
+            abstract class Test {
+              static final String SOME_CONSTANT = "";
+            }
+            """)
         .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void record() {
+    CompilationTestHelper.newInstance(PrivateConstructorForUtilityClass.class, getClass())
+        .addSourceLines(
+            "ExampleUtilityClass.java",
+            """
+            package example;
+
+            // BUG: Diagnostic contains:
+            public final class ExampleUtilityClass {
+              public record SomeRecord(String value) {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ignoreAutoValue() {
+    CompilationTestHelper.newInstance(PrivateConstructorForUtilityClass.class, getClass())
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            public abstract class Foo {}
+            """)
         .doTest();
   }
 }

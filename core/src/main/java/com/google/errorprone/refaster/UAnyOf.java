@@ -50,11 +50,10 @@ public abstract class UAnyOf extends UExpression {
   }
 
   @Override
-  protected Choice<Unifier> defaultAction(final Tree tree, final Unifier unifier) {
+  protected Choice<Unifier> defaultAction(Tree tree, Unifier unifier) {
     return Choice.from(expressions())
-        .thenChoose(
-            (UExpression expression) ->
-                expression.unify(ASTHelpers.stripParentheses(tree), unifier.fork()));
+        .flatMap((UExpression expression) ->
+            expression.unify(ASTHelpers.stripParentheses(tree), unifier.fork()));
   }
 
   @Override
@@ -64,7 +63,7 @@ public abstract class UAnyOf extends UExpression {
 
   @Override
   public <R, D> R accept(TreeVisitor<R, D> visitor, D data) {
-    return expressions().get(0).accept(visitor, data);
+    return visitor.visitOther(this, data);
   }
 
   @Override

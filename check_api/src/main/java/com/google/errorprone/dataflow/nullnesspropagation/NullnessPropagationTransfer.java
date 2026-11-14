@@ -17,7 +17,6 @@
 package com.google.errorprone.dataflow.nullnesspropagation;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.dataflow.nullnesspropagation.Nullness.BOTTOM;
 import static com.google.errorprone.dataflow.nullnesspropagation.Nullness.NONNULL;
@@ -25,27 +24,24 @@ import static com.google.errorprone.dataflow.nullnesspropagation.Nullness.NULL;
 import static com.google.errorprone.dataflow.nullnesspropagation.Nullness.NULLABLE;
 import static com.sun.tools.javac.code.TypeTag.BOOLEAN;
 import static javax.lang.model.element.ElementKind.EXCEPTION_PARAMETER;
-import static org.checkerframework.shaded.javacutil.TreePathUtil.enclosingOfClass;
-import static org.checkerframework.shaded.javacutil.TreeUtils.elementFromDeclaration;
+import static org.checkerframework.errorprone.javacutil.TreePathUtil.enclosingOfClass;
+import static org.checkerframework.errorprone.javacutil.TreeUtils.elementFromDeclaration;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.base.Strings;
 import com.google.common.base.Verify;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSetMultimap;
 import com.google.common.io.Files;
 import com.google.common.primitives.UnsignedInteger;
 import com.google.common.primitives.UnsignedLong;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.dataflow.AccessPath;
 import com.google.errorprone.dataflow.AccessPathStore;
 import com.google.errorprone.dataflow.AccessPathValues;
 import com.google.errorprone.dataflow.nullnesspropagation.inference.InferredNullability;
 import com.google.errorprone.dataflow.nullnesspropagation.inference.NullnessQualifierInference;
-import com.google.errorprone.util.MoreAnnotations;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
@@ -85,27 +81,29 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import javax.annotation.Nullable;
-import javax.lang.model.element.VariableElement;
+import java.util.function.Predicate;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.type.TypeVariable;
-import org.checkerframework.shaded.dataflow.analysis.Analysis;
-import org.checkerframework.shaded.dataflow.analysis.ForwardAnalysisImpl;
-import org.checkerframework.shaded.dataflow.cfg.ControlFlowGraph;
-import org.checkerframework.shaded.dataflow.cfg.UnderlyingAST;
-import org.checkerframework.shaded.dataflow.cfg.builder.CFGBuilder;
-import org.checkerframework.shaded.dataflow.cfg.node.ArrayAccessNode;
-import org.checkerframework.shaded.dataflow.cfg.node.ArrayCreationNode;
-import org.checkerframework.shaded.dataflow.cfg.node.AssignmentNode;
-import org.checkerframework.shaded.dataflow.cfg.node.EqualToNode;
-import org.checkerframework.shaded.dataflow.cfg.node.FieldAccessNode;
-import org.checkerframework.shaded.dataflow.cfg.node.FunctionalInterfaceNode;
-import org.checkerframework.shaded.dataflow.cfg.node.InstanceOfNode;
-import org.checkerframework.shaded.dataflow.cfg.node.LocalVariableNode;
-import org.checkerframework.shaded.dataflow.cfg.node.MethodInvocationNode;
-import org.checkerframework.shaded.dataflow.cfg.node.Node;
-import org.checkerframework.shaded.dataflow.cfg.node.NotEqualNode;
-import org.checkerframework.shaded.dataflow.cfg.node.TypeCastNode;
-import org.checkerframework.shaded.dataflow.cfg.node.VariableDeclarationNode;
+import org.checkerframework.errorprone.dataflow.analysis.Analysis;
+import org.checkerframework.errorprone.dataflow.analysis.ForwardAnalysisImpl;
+import org.checkerframework.errorprone.dataflow.cfg.ControlFlowGraph;
+import org.checkerframework.errorprone.dataflow.cfg.UnderlyingAST;
+import org.checkerframework.errorprone.dataflow.cfg.builder.CFGBuilder;
+import org.checkerframework.errorprone.dataflow.cfg.node.ArrayAccessNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.ArrayCreationNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.AssignmentNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.EqualToNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.FieldAccessNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.FunctionalInterfaceNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.InstanceOfNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.LocalVariableNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.MethodInvocationNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.Node;
+import org.checkerframework.errorprone.dataflow.cfg.node.NotEqualNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.SwitchExpressionNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.TypeCastNode;
+import org.checkerframework.errorprone.dataflow.cfg.node.VariableDeclarationNode;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The {@code TransferFunction} for our nullability analysis. This analysis determines, for all
@@ -199,10 +197,9 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
             String.class.getName());
 
     @Override
-    public boolean apply(MethodInfo methodInfo) {
+    public boolean test(MethodInfo methodInfo) {
       // Any method explicitly annotated is trusted to behave as advertised.
-      Optional<Nullness> fromAnnotations =
-          NullnessAnnotations.fromAnnotations(methodInfo.annotations());
+      Optional<Nullness> fromAnnotations = methodInfo.nullnessFromDirectAnnotations();
       if (fromAnnotations.isPresent()) {
         return fromAnnotations.get() == NONNULL;
       }
@@ -244,7 +241,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
   private transient CompilationUnitTree compilationUnit;
 
   /** Cached local inference results for nullability annotations on type parameters */
-  @Nullable private transient InferredNullability inferenceResults;
+  private transient @Nullable InferredNullability inferenceResults;
 
   @Override
   public AccessPathStore<Nullness> initialStore(
@@ -307,7 +304,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    * returning methods.
    */
   public NullnessPropagationTransfer(Predicate<MethodInfo> additionalNonNullReturningMethods) {
-    this(NULLABLE, Predicates.or(new ReturnValueIsNonNull(), additionalNonNullReturningMethods));
+    this(NULLABLE, new ReturnValueIsNonNull().or(additionalNonNullReturningMethods));
   }
 
   /**
@@ -327,6 +324,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    * Stores the given Javac context to find and analyze field initializers. Set before analyzing a
    * method and reset after.
    */
+  @CanIgnoreReturnValue
   NullnessPropagationTransfer setContext(@Nullable Context context) {
     // This is a best-effort check (similar to ArrayList iterators, for instance), no guarantee
     Preconditions.checkArgument(
@@ -345,6 +343,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    * unit. Analyzing initializers from other compilation units tends to fail because type
    * information is sometimes missing on nodes returned from {@link Trees}.
    */
+  @CanIgnoreReturnValue
   NullnessPropagationTransfer setCompilationUnit(@Nullable CompilationUnitTree compilationUnit) {
     this.compilationUnit = compilationUnit;
     return this;
@@ -403,11 +402,8 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
 
   @Override
   Nullness visitTypeCast(TypeCastNode node, SubNodeValues inputs) {
-    ImmutableList<String> annotations =
-        node.getType().getAnnotationMirrors().stream()
-            .map(Object::toString)
-            .collect(ImmutableList.toImmutableList());
-    return NullnessAnnotations.fromAnnotations(annotations)
+    List<? extends AnnotationMirror> annotations = node.getType().getAnnotationMirrors();
+    return NullnessAnnotations.fromAnnotationMirrors(annotations)
         .orElseGet(
             () -> hasPrimitiveType(node) ? NONNULL : inputs.valueOfSubNode(node.getOperand()));
   }
@@ -467,16 +463,15 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
     Nullness value = inputs.valueOfSubNode(node.getExpression());
 
     Node target = node.getTarget();
-    if (target instanceof LocalVariableNode) {
-      updates.set((LocalVariableNode) target, value);
+    if (target instanceof LocalVariableNode localVariableNode) {
+      updates.set(localVariableNode, value);
     }
 
-    if (target instanceof ArrayAccessNode) {
-      setNonnullIfTrackable(updates, ((ArrayAccessNode) target).getArray());
+    if (target instanceof ArrayAccessNode arrayAccessNode) {
+      setNonnullIfTrackable(updates, arrayAccessNode.getArray());
     }
 
-    if (target instanceof FieldAccessNode) {
-      FieldAccessNode fieldAccess = (FieldAccessNode) target;
+    if (target instanceof FieldAccessNode fieldAccess) {
       if (!fieldAccess.isStatic()) {
         setNonnullIfTrackable(updates, fieldAccess.getReceiver());
       }
@@ -499,7 +494,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
      * It's not clear to me that this is technically correct, but it works in practice with the
      * bytecode generated by both javac and ecj.
      *
-     * http://stackoverflow.com/q/12850676/28465
+     * https://stackoverflow.com/q/12850676/28465
      */
     return value;
   }
@@ -516,7 +511,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    * <p>Edge case: {@code node} can be a captured local variable accessed from inside a local or
    * anonymous inner class, or possibly from inside a lambda expression (even though these manifest
    * as fields in bytecode). As of 7/2016 this analysis doesn't have any knowledge of captured local
-   * variables will essentially assume whatever default is used in {@link #values}.
+   * variables will essentially assume whatever default is used in {@code values}.
    */
   @Override
   Nullness visitLocalVariable(LocalVariableNode node, AccessPathValues<Nullness> values) {
@@ -569,7 +564,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
   Nullness visitMethodInvocation(
       MethodInvocationNode node, Updates thenUpdates, Updates elseUpdates, Updates bothUpdates) {
     ClassAndMethod callee = tryGetMethodSymbol(node.getTree(), Types.instance(context));
-    if (callee != null && !callee.isStatic) {
+    if (callee != null && !callee.isStatic()) {
       setNonnullIfTrackable(bothUpdates, node.getTarget().getReceiver());
     }
     setUnconditionalArgumentNullness(bothUpdates, node.getArguments(), callee);
@@ -581,6 +576,11 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
         Types.instance(context),
         Symtab.instance(context));
     return returnValueNullness(node, callee);
+  }
+
+  @Override
+  Nullness visitSwitchExpression(SwitchExpressionNode node, SubNodeValues inputs, Updates updates) {
+    return NULLABLE;
   }
 
   @Override
@@ -667,27 +667,21 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
   }
 
   private static boolean hasNonNullConstantValue(LocalVariableNode node) {
-    if (node.getElement() instanceof VariableElement) {
-      VariableElement element = (VariableElement) node.getElement();
-      return (element.getConstantValue() != null);
-    }
-    return false;
+    return node.getElement() != null && node.getElement().getConstantValue() != null;
   }
 
-  @Nullable
-  private static ClassAndField tryGetFieldSymbol(Tree tree) {
+  private static @Nullable ClassAndField tryGetFieldSymbol(Tree tree) {
     Symbol symbol = tryGetSymbol(tree);
-    if (symbol instanceof VarSymbol) {
-      return ClassAndField.make((VarSymbol) symbol);
+    if (symbol instanceof VarSymbol varSymbol) {
+      return ClassAndField.make(varSymbol);
     }
     return null;
   }
 
-  @Nullable
-  static ClassAndMethod tryGetMethodSymbol(MethodInvocationTree tree, Types types) {
+  static @Nullable ClassAndMethod tryGetMethodSymbol(MethodInvocationTree tree, Types types) {
     Symbol symbol = tryGetSymbol(tree.getMethodSelect());
-    if (symbol instanceof MethodSymbol) {
-      return ClassAndMethod.make((MethodSymbol) symbol, types);
+    if (symbol instanceof MethodSymbol methodSymbol) {
+      return ClassAndMethod.make(methodSymbol, types);
     }
     return null;
   }
@@ -696,16 +690,15 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    * We can't use ASTHelpers here. It's in core, which depends on jdk8, so we can't make jdk8 depend
    * back on core.
    */
-  @Nullable
-  private static Symbol tryGetSymbol(Tree tree) {
-    if (tree instanceof JCIdent) {
-      return ((JCIdent) tree).sym;
+  private static @Nullable Symbol tryGetSymbol(Tree tree) {
+    if (tree instanceof JCIdent jCIdent) {
+      return jCIdent.sym;
     }
-    if (tree instanceof JCFieldAccess) {
-      return ((JCFieldAccess) tree).sym;
+    if (tree instanceof JCFieldAccess jCFieldAccess) {
+      return jCFieldAccess.sym;
     }
-    if (tree instanceof JCVariableDecl) {
-      return ((JCVariableDecl) tree).sym;
+    if (tree instanceof JCVariableDecl jCVariableDecl) {
+      return jCVariableDecl.sym;
     }
     return null;
   }
@@ -759,10 +752,10 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
     }
 
     Optional<Nullness> declaredNullness = NullnessAnnotations.fromAnnotationsOn(accessed.symbol);
-    if (!declaredNullness.isPresent()) {
+    if (declaredNullness.isEmpty()) {
       Type ftype = accessed.symbol.type;
-      if (ftype instanceof TypeVariable) {
-        declaredNullness = NullnessAnnotations.getUpperBound((TypeVariable) ftype);
+      if (ftype instanceof TypeVariable typeVariable) {
+        declaredNullness = NullnessAnnotations.getUpperBound(typeVariable);
       } else {
         declaredNullness = NullnessAnnotations.fromDefaultAnnotations(accessed.symbol);
       }
@@ -774,7 +767,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
     if (callee == null) {
       return defaultAssumption;
     }
-    Optional<Nullness> declaredNullness = NullnessAnnotations.fromAnnotations(callee.annotations);
+    Optional<Nullness> declaredNullness = callee.nullnessFromDirectAnnotations();
     if (declaredNullness.isPresent()) {
       return declaredNullness.get();
     }
@@ -783,8 +776,8 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
       return NONNULL;
     }
 
-    Nullness assumedNullness = methodReturnsNonNull.apply(callee) ? NONNULL : NULLABLE;
-    if (!callee.isGenericResult) {
+    Nullness assumedNullness = methodReturnsNonNull.test(callee) ? NONNULL : NULLABLE;
+    if (!callee.isGenericResult()) {
       // We only care about inference results for methods that return a type variable.
       return assumedNullness;
     }
@@ -792,8 +785,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
     return getInferredNullness(node).orElse(assumedNullness);
   }
 
-  @Nullable
-  private Nullness fieldInitializerNullnessIfAvailable(ClassAndField accessed) {
+  private @Nullable Nullness fieldInitializerNullnessIfAvailable(ClassAndField accessed) {
     if (!traversed.add(accessed.symbol)) {
       // Circular dependency between initializers results in null.  Note static fields can also be
       // null if they're observed before initialized, but we're ignoring that case for simplicity.
@@ -808,11 +800,11 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
       // missing types.
       if (fieldDeclPath == null
           || fieldDeclPath.getCompilationUnit() != compilationUnit
-          || !(fieldDeclPath.getLeaf() instanceof VariableTree)) {
+          || !(fieldDeclPath.getLeaf() instanceof VariableTree variableTree)) {
         return null;
       }
 
-      ExpressionTree initializer = ((VariableTree) fieldDeclPath.getLeaf()).getInitializer();
+      ExpressionTree initializer = variableTree.getInitializer();
       if (initializer == null) {
         return null;
       }
@@ -828,8 +820,8 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
           CFGBuilder.build(
               initializerPath,
               ast,
-              /*assumeAssertionsEnabled=*/ false,
-              /*assumeAssertionsDisabled=*/ false,
+              /* assumeAssertionsEnabled= */ false,
+              /* assumeAssertionsDisabled= */ false,
               javacEnv);
       Analysis<Nullness, AccessPathStore<Nullness>, NullnessPropagationTransfer> analysis =
           new ForwardAnalysisImpl<>(this);
@@ -841,12 +833,12 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
   }
 
   private static void setNonnullIfTrackable(Updates updates, Node node) {
-    if (node instanceof LocalVariableNode) {
-      updates.set((LocalVariableNode) node, NONNULL);
-    } else if (node instanceof FieldAccessNode) {
-      updates.set((FieldAccessNode) node, NONNULL);
-    } else if (node instanceof VariableDeclarationNode) {
-      updates.set((VariableDeclarationNode) node, NONNULL);
+    if (node instanceof LocalVariableNode localVariableNode) {
+      updates.set(localVariableNode, NONNULL);
+    } else if (node instanceof FieldAccessNode fieldAccessNode) {
+      updates.set(fieldAccessNode, NONNULL);
+    } else if (node instanceof VariableDeclarationNode variableDeclarationNode) {
+      updates.set(variableDeclarationNode, NONNULL);
     }
   }
 
@@ -857,7 +849,8 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
    */
   private static void setUnconditionalArgumentNullness(
       Updates bothUpdates, List<Node> arguments, ClassAndMethod callee) {
-    Set<Integer> requiredNonNullParameters = REQUIRED_NON_NULL_PARAMETERS.get(callee.name());
+    ImmutableSet<Integer> requiredNonNullParameters =
+        REQUIRED_NON_NULL_PARAMETERS.get(callee.name());
     for (LocalVariableNode var : variablesAtIndexes(requiredNonNullParameters, arguments)) {
       bothUpdates.set(var, NONNULL);
     }
@@ -891,7 +884,7 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
       elseUpdates.set(var, NONNULL);
     }
     if (isEqualsMethod(calleeName, arguments, types, symtab)) {
-      LocalVariableNode var = variablesAtIndexes(ImmutableSet.of(0), arguments).get(0);
+      LocalVariableNode var = variablesAtIndexes(ImmutableSet.of(0), arguments).getFirst();
       thenUpdates.set(var, NONNULL);
     }
   }
@@ -900,14 +893,14 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
       MemberName calleeName, List<Node> arguments, Types types, Symtab symtab) {
     // we don't care about class name -- we're matching against Object.equals(Object)
     // this implies that non-overriding methods are assumed to be null-guaranteeing.
-    // Also see http://errorprone.info/bugpattern/NonOverridingEquals
+    // Also see https://errorprone.info/bugpattern/NonOverridingEquals
     if (!calleeName.member.equals("equals") || arguments.size() != 1) {
       return false;
     }
-    if (!(getOnlyElement(arguments).getTree() instanceof JCIdent)) {
+    if (!(getOnlyElement(arguments).getTree() instanceof JCIdent jCIdent)) {
       return false;
     }
-    Symbol sym = ((JCIdent) getOnlyElement(arguments).getTree()).sym;
+    Symbol sym = jCIdent.sym;
     if (sym == null || sym.type == null) {
       return false;
     }
@@ -925,8 +918,8 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
       // TODO(cpovirk): better handling of varargs
       if (i >= 0 && i < arguments.size()) {
         Node argument = arguments.get(i);
-        if (argument instanceof LocalVariableNode) {
-          result.add((LocalVariableNode) argument);
+        if (argument instanceof LocalVariableNode localVariableNode) {
+          result.add(localVariableNode);
         }
       }
     }
@@ -952,76 +945,15 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
   }
 
   @VisibleForTesting
-  static final class MemberName {
-    final String clazz;
-    final String member;
+  record MemberName(String clazz, String member) {}
 
-    MemberName(String clazz, String member) {
-      this.clazz = clazz;
-      this.member = member;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-      if (obj instanceof MemberName) {
-        MemberName other = (MemberName) obj;
-        return clazz.equals(other.clazz) && member.equals(other.member);
-      }
-      return false;
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(clazz, member);
-    }
-  }
-
-  static final class ClassAndMethod implements Member, MethodInfo {
-    final String clazz;
-    final String method;
-    final ImmutableList<String> annotations;
-    final boolean isStatic;
-    final boolean isPrimitive;
-    final boolean isBoolean;
-    final boolean isGenericResult;
-    final boolean isNonNullReturning;
-
-    private ClassAndMethod(
-        String clazz,
-        String method,
-        ImmutableList<String> annotations,
-        boolean isStatic,
-        boolean isPrimitive,
-        boolean isBoolean,
-        boolean isGenericResult,
-        boolean isNonNullReturning) {
-      this.clazz = clazz;
-      this.method = method;
-      this.annotations = annotations;
-      this.isStatic = isStatic;
-      this.isPrimitive = isPrimitive;
-      this.isBoolean = isBoolean;
-      this.isGenericResult = isGenericResult;
-      this.isNonNullReturning = isNonNullReturning;
-    }
+  static final record ClassAndMethod(
+      MethodSymbol methodSymbol, ClassSymbol classSymbol, @Nullable Types types)
+      implements Member, MethodInfo {
 
     static ClassAndMethod make(MethodSymbol methodSymbol, @Nullable Types types) {
-      // TODO(b/71812955): consider just wrapping methodSymbol instead of copying everything out.
-      ImmutableList<String> annotations =
-          MoreAnnotations.getDeclarationAndTypeAttributes(methodSymbol)
-              .map(Object::toString)
-              .collect(toImmutableList());
-
       ClassSymbol clazzSymbol = (ClassSymbol) methodSymbol.owner;
-      return new ClassAndMethod(
-          clazzSymbol.getQualifiedName().toString(),
-          methodSymbol.getSimpleName().toString(),
-          annotations,
-          methodSymbol.isStatic(),
-          methodSymbol.getReturnType().isPrimitive(),
-          methodSymbol.getReturnType().getTag() == BOOLEAN,
-          hasGenericResult(methodSymbol),
-          knownNonNullMethod(methodSymbol, clazzSymbol, types));
+      return new ClassAndMethod(methodSymbol, clazzSymbol, types);
     }
 
     /**
@@ -1060,36 +992,44 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
 
     @Override
     public boolean isStatic() {
-      return isStatic;
+      return methodSymbol.isStatic();
     }
 
     MemberName name() {
-      return new MemberName(this.clazz, this.method);
+      return new MemberName(clazz(), method());
     }
 
     @Override
     public String clazz() {
-      return clazz;
+      return classSymbol.getQualifiedName().toString();
     }
 
     @Override
     public String method() {
-      return method;
+      return methodSymbol.getSimpleName().toString();
     }
 
     @Override
-    public ImmutableList<String> annotations() {
-      return annotations;
+    public Optional<Nullness> nullnessFromDirectAnnotations() {
+      return NullnessAnnotations.fromAnnotationsOn(methodSymbol);
     }
 
     @Override
     public boolean isPrimitive() {
-      return isPrimitive;
+      return methodSymbol.getReturnType().isPrimitive();
     }
 
     @Override
     public boolean isKnownNonNullReturning() {
-      return isNonNullReturning;
+      return knownNonNullMethod(methodSymbol, classSymbol, types);
+    }
+
+    public boolean isGenericResult() {
+      return hasGenericResult(methodSymbol);
+    }
+
+    public boolean isBoolean() {
+      return methodSymbol.getReturnType().hasTag(BOOLEAN);
     }
   }
 
@@ -1168,14 +1108,14 @@ class NullnessPropagationTransfer extends AbstractNullnessPropagationTransfer
           .build();
 
   /**
-   * Maps from non-null test methods to indices of arguments that are comapred against null. These
+   * Maps from non-null test methods to indices of arguments that are compared against null. These
    * methods must guarantee non-nullness if {@code true} <b>and nullness if {@code false}</b>.
    */
   private static final ImmutableSetMultimap<MemberName, Integer> NONNULL_IFF_TRUE_PARAMETERS =
       ImmutableSetMultimap.of(member(Objects.class, "nonNull"), 0);
 
   /**
-   * Maps from null test methods to indices of arguments that are comapred against null. These
+   * Maps from null test methods to indices of arguments that are compared against null. These
    * methods must guarantee nullness if {@code true} <b>and non-nullness if {@code false}</b>.
    */
   private static final ImmutableSetMultimap<MemberName, Integer> NULL_IFF_TRUE_PARAMETERS =

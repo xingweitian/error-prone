@@ -50,13 +50,10 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.TypeTag;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "ForEachIterable",
-    summary = "This loop can be replaced with an enhanced for loop.",
-    severity = SUGGESTION)
+@BugPattern(summary = "This loop can be replaced with an enhanced for loop.", severity = SUGGESTION)
 public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
 
   private static final Matcher<ExpressionTree> HAS_NEXT =
@@ -66,7 +63,7 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
       instanceMethod().onDescendantOf("java.util.Iterator").named("next");
 
   private static final Matcher<ExpressionTree> ITERATOR =
-      instanceMethod().onDescendantOf("java.lang.Iterable").named("iterator").withParameters();
+      instanceMethod().onDescendantOf("java.lang.Iterable").named("iterator").withNoParameters();
 
   @Override
   public Description matchVariable(VariableTree tree, VisitorState state) {
@@ -74,11 +71,11 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
       return NO_MATCH;
     }
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (parent instanceof BlockTree) {
-      return matchWhile(tree, (BlockTree) parent, state);
+    if (parent instanceof BlockTree blockTree) {
+      return matchWhile(tree, blockTree, state);
     }
-    if (parent instanceof ForLoopTree) {
-      return matchFor(tree, (ForLoopTree) parent, state);
+    if (parent instanceof ForLoopTree forLoopTree) {
+      return matchFor(tree, forLoopTree, state);
     }
     return NO_MATCH;
   }
@@ -111,7 +108,7 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
       return NO_MATCH;
     }
     StatementTree next = statements.get(nextIdx);
-    if (!(next instanceof WhileLoopTree)) {
+    if (!(next instanceof WhileLoopTree whileLoop)) {
       return NO_MATCH;
     }
     VarSymbol iterator = getSymbol(tree);
@@ -120,7 +117,6 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
         return NO_MATCH;
       }
     }
-    WhileLoopTree whileLoop = (WhileLoopTree) next;
     return match(
         tree, state, getStartPosition(tree), whileLoop.getCondition(), whileLoop.getStatement());
   }
@@ -155,31 +151,27 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
       fix.delete(existingVariable);
     } else {
       replacement = "element";
-      uses.forEach(
-          p -> {
-            TreePath path = p.getParentPath().getParentPath();
-            switch (path.getParentPath().getLeaf().getKind()) {
-              case EXPRESSION_STATEMENT:
-                fix.delete(path.getParentPath().getLeaf());
-                break;
-              default:
-                fix.replace(path.getLeaf(), replacement);
-                break;
-            }
-          });
+      uses.forEach(p -> {
+        TreePath path = p.getParentPath().getParentPath();
+        switch (path.getParentPath().getLeaf().getKind()) {
+          case EXPRESSION_STATEMENT -> fix.delete(path.getParentPath().getLeaf());
+          default -> fix.replace(path.getLeaf(), replacement);
+        }
+      });
     }
     Type elementType = getOnlyElement(iteratorType.getTypeArguments());
     if (elementType.hasTag(TypeTag.WILDCARD)) {
       elementType = getUpperBound(elementType, state.getTypes());
     }
+    Tree iterableExprNode = getReceiver(tree.getInitializer());
+    String iterableExpr =
+        iterableExprNode != null ? state.getSourceForNode(iterableExprNode) : "this";
     fix.replace(
         startPosition,
         getStartPosition(body),
         String.format(
             "for (%s %s : %s) ",
-            SuggestedFixes.prettyType(state, fix, elementType),
-            replacement,
-            state.getSourceForNode(getReceiver(tree.getInitializer()))));
+            SuggestedFixes.prettyType(state, fix, elementType), replacement, iterableExpr));
     return describeMatch(tree, fix.build());
   }
 
@@ -198,21 +190,19 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
     return uses.build();
   }
 
-  @Nullable
-  private static VariableTree existingVariable(
+  private static @Nullable VariableTree existingVariable(
       VarSymbol varSymbol, StatementTree body, VisitorState state) {
-    if (!(body instanceof BlockTree)) {
+    if (!(body instanceof BlockTree blockTree)) {
       return null;
     }
-    List<? extends StatementTree> statements = ((BlockTree) body).getStatements();
+    List<? extends StatementTree> statements = blockTree.getStatements();
     if (statements.isEmpty()) {
       return null;
     }
     StatementTree first = statements.iterator().next();
-    if (!(first instanceof VariableTree)) {
+    if (!(first instanceof VariableTree variableTree)) {
       return null;
     }
-    VariableTree variableTree = (VariableTree) first;
     if (variableTree.getInitializer() == null) {
       return null;
     }
@@ -227,10 +217,9 @@ public class ForEachIterable extends BugChecker implements VariableTreeMatcher {
 
   private static boolean isNext(VariableTree tree, VisitorState state, TreePath p) {
     Tree parentTree = p.getParentPath().getLeaf();
-    if (!(parentTree instanceof ExpressionTree)) {
+    if (!(parentTree instanceof ExpressionTree parent)) {
       return false;
     }
-    ExpressionTree parent = (ExpressionTree) parentTree;
     return NEXT.matches(parent, state) && getSymbol(tree).equals(getSymbol(getReceiver(parent)));
   }
 

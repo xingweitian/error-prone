@@ -23,6 +23,7 @@ import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
 import static com.google.errorprone.util.ASTHelpers.isBugCheckerCode;
 
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.matchers.Matcher;
@@ -32,19 +33,19 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Type;
 import java.util.Optional;
+import javax.inject.Inject;
 
 /**
- * Flags {@code com.sun.tools.javac.code.Symbol#toString} usage in {@link BugChecker}s.
+ * Flags {@code javax.lang.model.element.Element#toString} usage in {@link BugChecker}s.
  *
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "SymbolToString",
-    summary = "Symbol#toString shouldn't be used for comparison as it is expensive and fragile.",
+    summary = "Element#toString shouldn't be used for comparison as it is expensive and fragile.",
     severity = SUGGESTION)
 public class SymbolToString extends AbstractToString {
 
-  private static final TypePredicate IS_SYMBOL = isDescendantOf("com.sun.tools.javac.code.Symbol");
+  private static final TypePredicate IS_SYMBOL = isDescendantOf("javax.lang.model.element.Element");
 
   private static final Matcher<Tree> STRING_EQUALS =
       toType(
@@ -55,8 +56,13 @@ public class SymbolToString extends AbstractToString {
     if (!isBugCheckerCode(state)) {
       return false;
     }
-    Tree parentTree = state.getPath().getParentPath().getLeaf();
-    return IS_SYMBOL.apply(type, state) && STRING_EQUALS.matches(parentTree, state);
+    Tree equalsMethodSelect = state.getPath().getParentPath().getLeaf();
+    return IS_SYMBOL.apply(type, state) && STRING_EQUALS.matches(equalsMethodSelect, state);
+  }
+
+  @Inject
+  SymbolToString(ErrorProneFlags flags) {
+    super(flags);
   }
 
   @Override
@@ -66,16 +72,17 @@ public class SymbolToString extends AbstractToString {
 
   @Override
   protected Optional<String> descriptionMessageForDefaultMatch(Type type, VisitorState state) {
-    return Optional.of("Symbol#toString shouldn't be used as it is expensive and fragile.");
+    return Optional.of("Element#toString shouldn't be used as it is expensive and fragile.");
   }
 
   @Override
-  protected Optional<Fix> implicitToStringFix(ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> implicitToStringFix(ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 
   @Override
-  protected Optional<Fix> toStringFix(Tree parent, ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> toStringFix(
+      Tree toStringCall, ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 }

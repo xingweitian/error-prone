@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns.threadsafety;
 
 import static com.google.errorprone.bugpatterns.threadsafety.IllegalGuardedBy.checkGuardedBy;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 
 import com.google.auto.value.AutoValue;
 import com.sun.tools.javac.code.Flags;
@@ -103,7 +104,7 @@ public abstract class GuardedByExpression {
   /** A simple 'this literal. */
   // Don't use AutoValue here, since sym and type need to be 'null'. (And since
   // it's a singleton we don't need to implement equals() or hashCode()).
-  public static class ThisLiteral extends GuardedByExpression {
+  public static final class ThisLiteral extends GuardedByExpression {
 
     static final ThisLiteral INSTANCE = new ThisLiteral();
 
@@ -133,6 +134,15 @@ public abstract class GuardedByExpression {
 
     public static Select create(GuardedByExpression base, Symbol sym, Type type) {
       return new AutoValue_GuardedByExpression_Select(Kind.SELECT, sym, type, base);
+    }
+
+    /** Finds this {@link Select}'s nearest non-Select ancestor. */
+    public GuardedByExpression root() {
+      GuardedByExpression exp = this.base();
+      while (exp.kind() == Kind.SELECT) {
+        exp = ((Select) exp).base();
+      }
+      return exp;
     }
   }
 
@@ -171,7 +181,7 @@ public abstract class GuardedByExpression {
       GuardedByExpression base = thisliteral();
       Symbol curr = access;
       do {
-        curr = curr.owner.enclClass();
+        curr = enclosingClass(curr);
         if (curr == null) {
           break;
         }
@@ -183,7 +193,7 @@ public abstract class GuardedByExpression {
 
     private static class EnclosingInstanceSymbol extends VarSymbol {
 
-      public EnclosingInstanceSymbol(Names names, Symbol curr) {
+      EnclosingInstanceSymbol(Names names, Symbol curr) {
         super(
             Flags.SYNTHETIC,
             names.fromString(GuardedByExpression.ENCLOSING_INSTANCE_NAME),
@@ -198,10 +208,9 @@ public abstract class GuardedByExpression {
 
       @Override
       public boolean equals(Object other) {
-        if (!(other instanceof VarSymbol)) {
+        if (!(other instanceof VarSymbol that)) {
           return false;
         }
-        VarSymbol that = (VarSymbol) other;
         if (!that.getSimpleName().contentEquals(ENCLOSING_INSTANCE_NAME)) {
           return false;
         }
@@ -218,11 +227,11 @@ public abstract class GuardedByExpression {
     }
 
     Select select(GuardedByExpression base, Symbol member) {
-      if (member instanceof VarSymbol) {
-        return select(base, (VarSymbol) member);
+      if (member instanceof VarSymbol varSymbol) {
+        return select(base, varSymbol);
       }
-      if (member instanceof MethodSymbol) {
-        return select(base, (MethodSymbol) member);
+      if (member instanceof MethodSymbol methodSymbol) {
+        return select(base, methodSymbol);
       }
       throw new IllegalStateException("Bad select expression: expected symbol " + member.getKind());
     }
@@ -270,7 +279,7 @@ public abstract class GuardedByExpression {
   /** Pretty printer for lock expressions. */
   private static class PrettyPrinter {
 
-    public static String print(GuardedByExpression exp) {
+    static String print(GuardedByExpression exp) {
       StringBuilder sb = new StringBuilder();
       pprint(exp, sb);
       return sb.toString();
@@ -278,22 +287,11 @@ public abstract class GuardedByExpression {
 
     private static void pprint(GuardedByExpression exp, StringBuilder sb) {
       switch (exp.kind()) {
-        case CLASS_LITERAL:
-          sb.append(String.format("%s.class", exp.sym().name));
-          break;
-        case THIS:
-          sb.append("this");
-          break;
-        case TYPE_LITERAL:
-        case LOCAL_VARIABLE:
-          sb.append(exp.sym().name);
-          break;
-        case SELECT:
-          pprintSelect((Select) exp, sb);
-          break;
-        case ERROR:
-          sb.append(((Erroneous) exp).guardString());
-          break;
+        case CLASS_LITERAL -> sb.append(String.format("%s.class", exp.sym().name));
+        case THIS -> sb.append("this");
+        case TYPE_LITERAL, LOCAL_VARIABLE -> sb.append(exp.sym().name);
+        case SELECT -> pprintSelect((Select) exp, sb);
+        case ERROR -> sb.append(((Erroneous) exp).guardString());
       }
     }
 
@@ -324,7 +322,7 @@ public abstract class GuardedByExpression {
 
   /** s-exp pretty printer for lock expressions. */
   private static class DebugPrinter {
-    public static String print(GuardedByExpression exp) {
+    static String print(GuardedByExpression exp) {
       StringBuilder sb = new StringBuilder();
       pprint(exp, sb);
       return sb.toString();
@@ -332,20 +330,11 @@ public abstract class GuardedByExpression {
 
     private static void pprint(GuardedByExpression exp, StringBuilder sb) {
       switch (exp.kind()) {
-        case TYPE_LITERAL:
-        case CLASS_LITERAL:
-        case LOCAL_VARIABLE:
-          sb.append(String.format("(%s %s)", exp.kind(), exp.sym()));
-          break;
-        case THIS:
-          sb.append("(THIS)");
-          break;
-        case SELECT:
-          pprintSelect((Select) exp, sb);
-          break;
-        case ERROR:
-          sb.append("(ERROR)");
-          break;
+        case TYPE_LITERAL, CLASS_LITERAL, LOCAL_VARIABLE ->
+            sb.append(String.format("(%s %s)", exp.kind(), exp.sym()));
+        case THIS -> sb.append("(THIS)");
+        case SELECT -> pprintSelect((Select) exp, sb);
+        case ERROR -> sb.append("(ERROR)");
       }
     }
 

@@ -22,50 +22,19 @@ import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.bugpatterns.BugChecker;
-import com.sun.source.tree.Tree;
-import com.sun.source.tree.TreeVisitor;
-import com.sun.tools.javac.tree.EndPosTable;
-import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
+import com.google.errorprone.fixes.ErrorPronePosition;
+import com.google.errorprone.fixes.FixedPosition;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 @RunWith(JUnit4.class)
 public class DescriptionTest {
 
-  private static class MockTree implements Tree, DiagnosticPosition {
-    @Override
-    public <R, D> R accept(TreeVisitor<R, D> arg0, D arg1) {
-      return null;
-    }
-
-    @Override
-    public Kind getKind() {
-      return null;
-    }
-
-    @Override
-    public JCTree getTree() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int getStartPosition() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int getPreferredPosition() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int getEndPosition(EndPosTable endPosTable) {
-      throw new UnsupportedOperationException();
-    }
-  }
+  private static final ErrorPronePosition POSITION = new FixedPosition(null, 0);
 
   @BugPattern(
       name = "DeadException",
@@ -74,14 +43,14 @@ public class DescriptionTest {
       severity = ERROR)
   public static class MyChecker extends BugChecker {
     Description getDescription() {
-      return describeMatch(new MockTree());
+      return describeMatch(POSITION);
     }
   }
 
   private static final String URL = "  (see https://errorprone.info/bugpattern/DeadException)";
 
   @Test
-  public void testDescriptionFromBugPattern() {
+  public void descriptionFromBugPattern() {
     Description description = new MyChecker().getDescription();
     assertThat(description.checkName).isEqualTo("DeadException");
     assertThat(description.getMessageWithoutCheckName())
@@ -91,19 +60,15 @@ public class DescriptionTest {
   }
 
   @Test
-  public void testCustomDescription() {
+  public void customDescription() {
     Description description =
-        new MyChecker()
-            .buildDescription((DiagnosticPosition) new MockTree())
-            .setMessage("custom message")
-            .build();
+        new MyChecker().buildDescription(POSITION).setMessage("custom message").build();
     assertThat(description.checkName).isEqualTo("DeadException");
     assertThat(description.getMessageWithoutCheckName()).isEqualTo("custom message\n" + URL);
     assertThat(description.getMessage()).isEqualTo("[DeadException] custom message\n" + URL);
   }
 
   @BugPattern(
-      name = "CustomLinkChecker",
       summary = "Exception created but not thrown",
       explanation = "",
       severity = ERROR,
@@ -111,29 +76,26 @@ public class DescriptionTest {
       link = "https://www.google.com/")
   public static class CustomLinkChecker extends BugChecker {
     Description getDescription() {
-      return describeMatch(new MockTree());
+      return describeMatch(POSITION);
     }
   }
 
   @Test
-  public void testCustomLink() {
+  public void customLink() {
     Description description =
-        new CustomLinkChecker()
-            .buildDescription((DiagnosticPosition) new MockTree())
-            .setMessage("custom message")
-            .build();
+        new CustomLinkChecker().buildDescription(POSITION).setMessage("custom message").build();
     assertThat(description.getMessage())
         .isEqualTo("[CustomLinkChecker] custom message\n  (see https://www.google.com/)");
   }
 
   @Test
-  public void testCustomLinkOverride() {
+  public void customLinkOverride() {
     Description description =
         new CustomLinkChecker()
-            .buildDescription((DiagnosticPosition) new MockTree())
+            .buildDescription(POSITION)
             .setMessage("custom message")
-            .setLinkUrl("http://foo")
+            .setLinkUrl("https://foo")
             .build();
-    assertThat(description.getMessage()).contains("http://foo");
+    assertThat(description.getMessage()).contains("https://foo");
   }
 }

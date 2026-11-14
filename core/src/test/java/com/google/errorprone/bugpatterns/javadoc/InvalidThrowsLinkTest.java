@@ -16,8 +16,6 @@
 
 package com.google.errorprone.bugpatterns.javadoc;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,23 +32,31 @@ public final class InvalidThrowsLinkTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "import java.io.IOException;",
-            "interface Test {",
-            "  /**",
-            "   * @throws {@link IOException} when failed",
-            "   */",
-            "  void foo(int a, int b) throws IOException;",
-            "}")
+            """
+            import java.io.IOException;
+
+            interface Test {
+              /**
+               * @throws {@link IOException} when failed
+               * @throws {@code IllegalArgumentException} if a < 0
+               */
+              void foo(int a, int b) throws IOException;
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.io.IOException;",
-            "interface Test {",
-            "  /**",
-            "   * @throws IOException when failed",
-            "   */",
-            "  void foo(int a, int b) throws IOException;",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            import java.io.IOException;
+
+            interface Test {
+              /**
+               * @throws IOException when failed
+               * @throws IllegalArgumentException if a < 0
+               */
+              void foo(int a, int b) throws IOException;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -58,14 +64,17 @@ public final class InvalidThrowsLinkTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "import java.io.IOException;",
-            "interface Test {",
-            "  /**",
-            "   * @throws IOException when failed",
-            "   */",
-            "  void foo(int a, int b) throws IOException;",
-            "}")
+            """
+            import java.io.IOException;
+
+            interface Test {
+              /**
+               * @throws IOException when failed
+               */
+              void foo(int a, int b) throws IOException;
+            }
+            """)
         .expectUnchanged()
-        .doTest(TEXT_MATCH);
+        .doTest();
   }
 }

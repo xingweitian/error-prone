@@ -42,8 +42,6 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
-import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Flags.Flag;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
@@ -57,9 +55,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-/** @author gak@google.com (Gregory Kick) */
+/**
+ * @author gak@google.com (Gregory Kick)
+ */
 @BugPattern(
-    name = "EmptySetMultibindingContributions",
     summary =
         "@Multibinds is a more efficient and declarative mechanism for ensuring that a set"
             + " multibinding is present in the graph.",
@@ -84,7 +83,7 @@ public final class EmptySetMultibindingContributions extends BugChecker
           .onClassAny(
               ImmutableSet.class.getCanonicalName(), ImmutableSortedSet.class.getCanonicalName())
           .named("of")
-          .withParameters();
+          .withNoParameters();
 
   private static final Matcher<ExpressionTree> SET_CONSTRUCTORS =
       anyOf(
@@ -94,7 +93,7 @@ public final class EmptySetMultibindingContributions extends BugChecker
 
   @SuppressWarnings("rawtypes")
   private static Matcher<ExpressionTree> noArgSetConstructor(Class<? extends Set> setClass) {
-    return MethodMatchers.constructor().forClass(setClass.getCanonicalName()).withParameters();
+    return MethodMatchers.constructor().forClass(setClass.getCanonicalName()).withNoParameters();
   }
 
   private static final Matcher<ExpressionTree> SET_FACTORY_METHODS =
@@ -107,7 +106,7 @@ public final class EmptySetMultibindingContributions extends BugChecker
     return MethodMatchers.staticMethod()
         .onClass(Sets.class.getCanonicalName())
         .named(factoryName)
-        .withParameters();
+        .withNoParameters();
   }
 
   private static final Matcher<ExpressionTree> ENUM_SET_NONE_OF =
@@ -125,15 +124,12 @@ public final class EmptySetMultibindingContributions extends BugChecker
       Matchers.singleStatementReturnMatcher(EMPTY_SET);
 
   private static final Matcher<MethodTree> RETURNS_EMPTY_SET =
-      new Matcher<MethodTree>() {
-        @Override
-        public boolean matches(MethodTree method, VisitorState state) {
-          List<? extends VariableTree> parameters = method.getParameters();
-          if (!parameters.isEmpty()) {
-            return false;
-          }
-          return DIRECTLY_RETURNS_EMPTY_SET.matches(method, state);
+      (MethodTree method, VisitorState state) -> {
+        List<? extends VariableTree> parameters = method.getParameters();
+        if (!parameters.isEmpty()) {
+          return false;
         }
+        return DIRECTLY_RETURNS_EMPTY_SET.matches(method, state);
       };
 
   private static final Matcher<Tree> ANNOTATED_WITH_PRODUCES_OR_PROVIDES =
@@ -201,14 +197,12 @@ public final class EmptySetMultibindingContributions extends BugChecker
       }
     }
 
-    EnumSet<Flag> methodFlags = Flags.asFlagSet(modifiers.flags);
-    methodFlags.remove(Flags.Flag.STATIC);
-    methodFlags.remove(Flags.Flag.FINAL);
-    methodFlags.add(Flags.Flag.ABSTRACT);
+    Set<String> methodFlags = new LinkedHashSet<>(ASTHelpers.asFlagSet(modifiers.flags));
+    methodFlags.remove("static");
+    methodFlags.remove("final");
+    methodFlags.add("abstract");
 
-    for (Flag flag : methodFlags) {
-      modifierStringsBuilder.add(flag.toString());
-    }
+    modifierStringsBuilder.addAll(methodFlags);
 
     return Joiner.on(' ').join(modifierStringsBuilder.build());
   }
@@ -221,12 +215,11 @@ public final class EmptySetMultibindingContributions extends BugChecker
       classModifierStringsBuilder.add(state.getSourceForNode(annotation));
     }
 
-    EnumSet<Flag> classFlags = Flags.asFlagSet(enclosingClassModifiers.flags);
-    classFlags.remove(Flags.Flag.FINAL);
-    classFlags.add(Flags.Flag.ABSTRACT);
-    for (Flag flag : classFlags) {
-      classModifierStringsBuilder.add(flag.toString());
-    }
+    Set<String> classFlags =
+        new LinkedHashSet<>(ASTHelpers.asFlagSet(enclosingClassModifiers.flags));
+    classFlags.remove("final");
+    classFlags.add("abstract");
+    classModifierStringsBuilder.addAll(classFlags);
 
     return Joiner.on(' ').join(classModifierStringsBuilder.build());
   }

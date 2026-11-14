@@ -28,66 +28,86 @@ public class SynchronizeOnNonFinalFieldTest {
       CompilationTestHelper.newInstance(SynchronizeOnNonFinalField.class, getClass());
 
   @Test
-  public void testPositive1() {
+  public void positive1() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "class Test {",
-            "  Object lock = new Object();",
-            "  void m() {",
-            "    // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe",
-            "    synchronized (lock) {}",
-            "  }",
-            "}")
+            """
+            package threadsafety.Test;
+
+            class Test {
+              Object lock = new Object();
+
+              void m() {
+                // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe
+                synchronized (lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositive2() {
+  public void positive2() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "class Test {",
-            "  Object lock = new Object();",
-            "  Test[] tx = null;",
-            "  void m(int i) {",
-            "    // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe",
-            "    synchronized (this.tx[i].lock) {}",
-            "  }",
-            "}")
+            """
+            package threadsafety.Test;
+
+            class Test {
+              Object lock = new Object();
+              Test[] tx = null;
+
+              void m(int i) {
+                // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe
+                synchronized (this.tx[i].lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositive3() {
+  public void positive3() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "class Test {",
-            "  Object lock = new Object();",
-            "  void m(Test t) {",
-            "    // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe",
-            "    synchronized (t.lock) {}",
-            "  }",
-            "}")
+            """
+            package threadsafety.Test;
+
+            class Test {
+              Object lock = new Object();
+
+              void m(Test t) {
+                // BUG: Diagnostic contains: Synchronizing on non-final fields is not safe
+                synchronized (t.lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegative() {
+  public void negative() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "class Test {",
-            "  final Object lock = new Object();",
-            "  void m() {",
-            "    synchronized (lock) {}",
-            "  }",
-            "}")
+            """
+            package threadsafety.Test;
+
+            class Test {
+              final Object lock = new Object();
+
+              void m() {
+                synchronized (lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -96,28 +116,38 @@ public class SynchronizeOnNonFinalFieldTest {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import com.google.errorprone.annotations.concurrent.LazyInit;",
-            "class Test {",
-            "  @LazyInit transient Object lock = new Object();",
-            "  void m() {",
-            "    synchronized (lock) {}",
-            "  }",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.LazyInit;
+
+            class Test {
+              @LazyInit transient Object lock = new Object();
+
+              void m() {
+                synchronized (lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void negative_Writer() {
+  public void negative_writer() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.io.Writer;",
-            "abstract class Test extends Writer {",
-            "  void m() {",
-            "    synchronized (lock) {}",
-            "  }",
-            "}")
+            """
+            import java.io.Writer;
+
+            abstract class Test extends Writer {
+              void m() {
+                synchronized (lock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

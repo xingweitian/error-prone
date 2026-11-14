@@ -21,7 +21,6 @@ import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.enclosingClass;
 import static com.google.errorprone.matchers.Matchers.hasMethod;
-import static com.google.errorprone.matchers.Matchers.isSameType;
 import static com.google.errorprone.matchers.Matchers.isStatic;
 import static com.google.errorprone.matchers.Matchers.methodHasParameters;
 import static com.google.errorprone.matchers.Matchers.methodHasVisibility;
@@ -29,9 +28,12 @@ import static com.google.errorprone.matchers.Matchers.methodIsNamed;
 import static com.google.errorprone.matchers.Matchers.methodReturns;
 import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.Matchers.variableType;
+import static com.google.errorprone.predicates.TypePredicates.isExactType;
 import static com.google.errorprone.suppliers.Suppliers.BOOLEAN_TYPE;
 import static com.google.errorprone.suppliers.Suppliers.JAVA_LANG_BOOLEAN_TYPE;
 import static com.google.errorprone.suppliers.Suppliers.OBJECT_TYPE;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.AnnotationNames.OVERRIDE_ANNOTATION;
 import static com.sun.tools.javac.code.Flags.ENUM;
 
 import com.google.errorprone.BugPattern;
@@ -42,7 +44,7 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.MethodVisibility.Visibility;
-import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.predicates.TypePredicates;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MethodTree;
@@ -54,7 +56,6 @@ import com.sun.tools.javac.util.Name;
 
 /** Bug checker for equals methods that don't actually override equals. */
 @BugPattern(
-    name = "NonOverridingEquals",
     summary = "equals method doesn't override Object.equals",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
@@ -63,13 +64,18 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
   private static final String MESSAGE_BASE = "equals method doesn't override Object.equals";
 
   /**
-   * Matches any method definition that: 1) is named `equals` 2) takes a single argument of a type
-   * other than Object 3) returns a boolean or Boolean
+   * Matches any method definition that:
+   *
+   * <ol>
+   *   <li>is named {@code equals};
+   *   <li>takes a single argument of a type other than {@code Object};
+   *   <li>returns a {@code boolean} or {@code Boolean}.
+   * </ol>
    */
   private static final Matcher<MethodTree> MATCHER =
       allOf(
           methodIsNamed("equals"),
-          methodHasParameters(variableType(not(isSameType("java.lang.Object")))),
+          methodHasParameters(variableType(TypePredicates.not(isExactType(OBJECT_TYPE)))),
           anyOf(methodReturns(BOOLEAN_TYPE), methodReturns(JAVA_LANG_BOOLEAN_TYPE)));
 
   /** Matches if the enclosing class overrides Object#equals. */
@@ -79,7 +85,7 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
               allOf(
                   methodIsNamed("equals"),
                   methodReturns(BOOLEAN_TYPE),
-                  methodHasParameters(variableType(isSameType(OBJECT_TYPE))),
+                  methodHasParameters(variableType(isExactType(OBJECT_TYPE))),
                   not(isStatic()))));
 
   /**
@@ -88,9 +94,9 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
    * doesn't work:
    *
    * <ul>
-   *   <li>the method is static
-   *   <li>the method is not public
-   *   <li>the method returns a boxed Boolean
+   *   <li>the method is static;
+   *   <li>the method is not public;
+   *   <li>the method returns a boxed Boolean.
    * </ul>
    */
   private static final Matcher<MethodTree> noFixMatcher =
@@ -141,13 +147,13 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
       SuggestedFix.Builder fix = SuggestedFix.builder();
 
       // Add @Override annotation if not present.
-      if (ASTHelpers.getAnnotation(methodTree, Override.class) == null) {
+      if (!hasAnnotation(methodTree, OVERRIDE_ANNOTATION, state)) {
         fix.prefixWith(methodTree, "@Override\n");
       }
 
       // Change method signature, substituting Object for parameter type.
-      JCTree parameterType = (JCTree) methodTree.getParameters().get(0).getType();
-      Name parameterName = ((JCVariableDecl) methodTree.getParameters().get(0)).getName();
+      JCTree parameterType = (JCTree) methodTree.getParameters().getFirst().getType();
+      Name parameterName = ((JCVariableDecl) methodTree.getParameters().getFirst()).getName();
       fix.replace(parameterType, "Object");
 
       // If there is a method body...
@@ -162,7 +168,7 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
                 + ")) {\n"
                 + "  return false;\n"
                 + "}\n";
-        fix.prefixWith(methodTree.getBody().getStatements().get(0), typeCheckStmt);
+        fix.prefixWith(methodTree.getBody().getStatements().getFirst(), typeCheckStmt);
 
         // Cast all uses of the parameter name using a recursive TreeScanner.
         new CastScanner()
@@ -175,17 +181,7 @@ public class NonOverridingEquals extends BugChecker implements MethodTreeMatcher
     }
   }
 
-  private static class CastState {
-    final Name name;
-    final String castToType;
-    final SuggestedFix.Builder fix;
-
-    public CastState(Name name, String castToType, SuggestedFix.Builder fix) {
-      this.name = name;
-      this.castToType = castToType;
-      this.fix = fix;
-    }
-  }
+  private record CastState(Name name, String castToType, SuggestedFix.Builder fix) {}
 
   /** A Scanner used to replace all references to a variable with a casted version. */
   private static class CastScanner extends TreeScanner<Void, CastState> {

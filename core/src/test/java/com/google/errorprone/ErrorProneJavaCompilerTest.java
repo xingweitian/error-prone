@@ -17,13 +17,12 @@
 package com.google.errorprone;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
-import static com.google.errorprone.DiagnosticTestHelper.diagnosticMessage;
+import static com.google.errorprone.DiagnosticTestHelper.DIAGNOSTIC_CONTAINING;
 import static com.google.errorprone.FileObjects.forResources;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Locale.ENGLISH;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.hasItem;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -36,6 +35,7 @@ import com.google.errorprone.bugpatterns.ArrayEquals;
 import com.google.errorprone.bugpatterns.BadShiftAmount;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.bugpatterns.ChainingConstructorIgnoresParameter;
 import com.google.errorprone.bugpatterns.Finally;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -44,37 +44,45 @@ import com.google.errorprone.scanner.ScannerSupplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.VariableTree;
+import com.sun.tools.javac.api.BasicJavacTask;
 import com.sun.tools.javac.file.JavacFileManager;
+import com.sun.tools.javac.util.Constants;
+import com.sun.tools.javac.util.Context;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import javax.inject.Inject;
 import javax.lang.model.SourceVersion;
-import javax.tools.Diagnostic;
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
-import org.hamcrest.Matcher;
+import javax.tools.SimpleJavaFileObject;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 @RunWith(JUnit4.class)
 public class ErrorProneJavaCompilerTest {
 
   @Rule public final TemporaryFolder tempDir = new TemporaryFolder();
 
   @Test
-  public void testIsSupportedOption() {
+  public void isSupportedOption() {
     ErrorProneJavaCompiler compiler = new ErrorProneJavaCompiler();
 
     // javac options should be passed through
@@ -92,19 +100,19 @@ public class ErrorProneJavaCompilerTest {
   interface JavaFileObjectDiagnosticListener extends DiagnosticListener<JavaFileObject> {}
 
   @Test
-  public void testGetStandardJavaFileManager() {
+  public void getStandardJavaFileManager() {
     JavaCompiler mockCompiler = mock(JavaCompiler.class);
     ErrorProneJavaCompiler compiler = new ErrorProneJavaCompiler(mockCompiler);
 
     JavaFileObjectDiagnosticListener listener = mock(JavaFileObjectDiagnosticListener.class);
     Locale locale = Locale.CANADA;
 
-    compiler.getStandardFileManager(listener, locale, null);
+    var unused = compiler.getStandardFileManager(listener, locale, null);
     verify(mockCompiler).getStandardFileManager(listener, locale, null);
   }
 
   @Test
-  public void testRun() {
+  public void run() {
     JavaCompiler mockCompiler = mock(JavaCompiler.class);
     ErrorProneJavaCompiler compiler = new ErrorProneJavaCompiler(mockCompiler);
 
@@ -113,15 +121,50 @@ public class ErrorProneJavaCompilerTest {
     OutputStream err = mock(OutputStream.class);
     String[] arguments = {"-source", "8", "-target", "8"};
 
-    compiler.run(in, out, err, arguments);
+    var unused = compiler.run(in, out, err, arguments);
     verify(mockCompiler).run(in, out, err, arguments);
   }
 
   @Test
-  public void testSourceVersion() {
+  public void sourceVersion() {
     ErrorProneJavaCompiler compiler = new ErrorProneJavaCompiler();
     assertThat(compiler.getSourceVersions()).contains(SourceVersion.latest());
     assertThat(compiler.getSourceVersions()).doesNotContain(SourceVersion.RELEASE_5);
+  }
+
+  @Test
+  public void printTimingsReportsEveryCheckThatRan() {
+    CompilationResult result =
+        doCompile(
+            ImmutableList.of("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
+            ImmutableList.of("-XepPrintTimings"),
+            ImmutableList.of());
+    // A header alone would pass with nothing recorded, because it is printed before the rows.
+    assertThat(result.output).containsMatch("Error Prone ran [1-9]\\d* checks");
+    assertThat(result.output).containsMatch("\\d+ ms\\s+[\\d.]+%");
+    assertThat(ErrorProneTimings.instance(result.context()).timings()).isNotEmpty();
+  }
+
+  @Test
+  public void withoutPrintTimingsNoReportIsPrinted() {
+    CompilationResult result =
+        doCompile(
+            ImmutableList.of("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
+            ImmutableList.of(),
+            ImmutableList.of());
+    assertThat(result.output).doesNotContain("Error Prone ran");
+    assertThat(ErrorProneTimings.instance(result.context()).timings()).isEmpty();
+  }
+
+  @Test
+  public void recordTimingsCollectsWithoutPrintingReport() {
+    CompilationResult result =
+        doCompile(
+            ImmutableList.of("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
+            ImmutableList.of("-XepRecordTimings"),
+            ImmutableList.of());
+    assertThat(result.output).doesNotContain("Error Prone ran");
+    assertThat(ErrorProneTimings.instance(result.context()).timings()).isNotEmpty();
   }
 
   @Test
@@ -132,13 +175,13 @@ public class ErrorProneJavaCompilerTest {
             Collections.<String>emptyList(),
             Collections.<Class<? extends BugChecker>>emptyList());
     assertThat(result.succeeded).isFalse();
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[SelfAssignment]")));
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[SelfAssignment]");
   }
 
   @Test
-  public void testWithDisabledCheck() {
+  public void withDisabledCheck() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
@@ -151,21 +194,20 @@ public class ErrorProneJavaCompilerTest {
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
             Arrays.asList("-Xep:SelfAssignment:OFF"),
             Collections.<Class<? extends BugChecker>>emptyList());
-    assertThat(result.succeeded).isTrue();
+    assertSucceeded(result);
   }
 
   @Test
-  public void testWithCheckPromotedToError() {
+  public void withCheckPromotedToError() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/WaitNotInLoopPositiveCases.java"),
             Collections.<String>emptyList(),
             Collections.<Class<? extends BugChecker>>emptyList());
-    assertThat(result.succeeded).isTrue();
-    assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[WaitNotInLoop]")));
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertSucceeded(result);
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[WaitNotInLoop]");
 
     result =
         doCompile(
@@ -173,41 +215,42 @@ public class ErrorProneJavaCompilerTest {
             Arrays.asList("-Xep:WaitNotInLoop:ERROR"),
             Collections.<Class<? extends BugChecker>>emptyList());
     assertThat(result.succeeded).isFalse();
-    assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[WaitNotInLoop]");
   }
 
   @Test
-  public void testWithCheckDemotedToWarning() {
+  public void withCheckDemotedToWarning() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
             Collections.<String>emptyList(),
             Collections.<Class<? extends BugChecker>>emptyList());
     assertThat(result.succeeded).isFalse();
-    assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[SelfAssignment]")));
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[SelfAssignment]");
 
     result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
             Arrays.asList("-Xep:SelfAssignment:WARN"),
             Collections.<Class<? extends BugChecker>>emptyList());
-    assertThat(result.succeeded).isTrue();
-    assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertSucceeded(result);
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[SelfAssignment]");
   }
 
   @Test
-  public void testWithNonDefaultCheckOn() {
+  public void withNonDefaultCheckOn() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/EmptyIfStatementPositiveCases.java"),
             Collections.<String>emptyList(),
             Collections.<Class<? extends BugChecker>>emptyList());
-    assertThat(result.succeeded).isTrue();
+    assertSucceeded(result);
     assertThat(result.diagnosticHelper.getDiagnostics()).isEmpty();
 
     result =
@@ -217,13 +260,13 @@ public class ErrorProneJavaCompilerTest {
             Collections.<Class<? extends BugChecker>>emptyList());
     assertThat(result.succeeded).isFalse();
     assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[EmptyIf]")));
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[EmptyIf]");
   }
 
   @Test
-  public void testBadFlagThrowsException() {
+  public void badFlagThrowsException() {
     try {
       doCompile(
           Arrays.asList("bugpatterns/testdata/EmptyIfStatementPositiveCases.java"),
@@ -244,7 +287,7 @@ public class ErrorProneJavaCompilerTest {
   public static class UnsuppressibleArrayEquals extends ArrayEquals {}
 
   @Test
-  public void testCantDisableNonDisableableCheck() {
+  public void cantDisableNonDisableableCheck() {
     try {
       doCompile(
           Arrays.asList("bugpatterns/testdata/ArrayEqualsPositiveCases.java"),
@@ -257,7 +300,7 @@ public class ErrorProneJavaCompilerTest {
   }
 
   @Test
-  public void testWithCustomCheckPositive() {
+  public void withCustomCheckPositive() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/BadShiftAmountPositiveCases.java"),
@@ -265,24 +308,24 @@ public class ErrorProneJavaCompilerTest {
             Arrays.<Class<? extends BugChecker>>asList(BadShiftAmount.class));
     assertThat(result.succeeded).isFalse();
     assertThat(result.diagnosticHelper.getDiagnostics().size()).isGreaterThan(0);
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[BadShiftAmount]")));
-    assertThat(matcher.matches(result.diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(result.diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[BadShiftAmount]");
   }
 
   @Test
-  public void testWithCustomCheckNegative() {
+  public void withCustomCheckNegative() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
             Collections.<String>emptyList(),
             Arrays.<Class<? extends BugChecker>>asList(Finally.class));
-    assertThat(result.succeeded).isTrue();
+    assertSucceeded(result);
     assertThat(result.diagnosticHelper.getDiagnostics()).isEmpty();
   }
 
   @Test
-  public void testSeverityResetsAfterOverride() throws IOException {
+  public void severityResetsAfterOverride() throws IOException {
     DiagnosticTestHelper diagnosticHelper = new DiagnosticTestHelper();
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     PrintWriter printWriter = new PrintWriter(new OutputStreamWriter(outputStream, UTF_8), true);
@@ -294,7 +337,7 @@ public class ErrorProneJavaCompilerTest {
             tempDir.getRoot().getAbsolutePath(),
             "-proc:none",
             "-Xep:ChainingConstructorIgnoresParameter:WARN");
-    List<JavaFileObject> sources =
+    ImmutableList<JavaFileObject> sources =
         forResources(
             ChainingConstructorIgnoresParameter.class,
             "testdata/ChainingConstructorIgnoresParameterPositiveCases.java");
@@ -304,9 +347,9 @@ public class ErrorProneJavaCompilerTest {
             printWriter, fileManager, diagnosticHelper.collector, args, null, sources);
     boolean succeeded = task.call();
     assertThat(succeeded).isTrue();
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[ChainingConstructorIgnoresParameter]")));
-    assertThat(matcher.matches(diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[ChainingConstructorIgnoresParameter]");
 
     // reset state between compilations
     diagnosticHelper.clearDiagnostics();
@@ -321,18 +364,20 @@ public class ErrorProneJavaCompilerTest {
             printWriter, fileManager, diagnosticHelper.collector, args, null, sources);
     succeeded = task.call();
     assertThat(succeeded).isFalse();
-    assertThat(matcher.matches(diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[ChainingConstructorIgnoresParameter]");
   }
 
   @Test
-  public void testMaturityResetsAfterOverride() throws Exception {
+  public void maturityResetsAfterOverride() throws Exception {
     DiagnosticTestHelper diagnosticHelper = new DiagnosticTestHelper();
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     PrintWriter printWriter = new PrintWriter(new OutputStreamWriter(outputStream, UTF_8), true);
     JavaCompiler errorProneJavaCompiler = new ErrorProneJavaCompiler();
     List<String> args =
         Lists.newArrayList("-d", tempDir.getRoot().getAbsolutePath(), "-proc:none", "-Xep:EmptyIf");
-    List<JavaFileObject> sources =
+    ImmutableList<JavaFileObject> sources =
         forResources(BadShiftAmount.class, "testdata/EmptyIfStatementPositiveCases.java");
 
     JavaCompiler.CompilationTask task =
@@ -340,9 +385,9 @@ public class ErrorProneJavaCompilerTest {
             printWriter, null, diagnosticHelper.collector, args, null, sources);
     boolean succeeded = task.call();
     assertThat(succeeded).isFalse();
-    Matcher<? super Iterable<Diagnostic<? extends JavaFileObject>>> matcher =
-        hasItem(diagnosticMessage(containsString("[EmptyIf]")));
-    assertThat(matcher.matches(diagnosticHelper.getDiagnostics())).isTrue();
+    assertThat(diagnosticHelper.getDiagnostics())
+        .comparingElementsUsing(DIAGNOSTIC_CONTAINING)
+        .contains("[EmptyIf]");
 
     diagnosticHelper.clearDiagnostics();
     args.remove("-Xep:EmptyIf");
@@ -355,7 +400,6 @@ public class ErrorProneJavaCompilerTest {
   }
 
   @BugPattern(
-      name = "DeleteMethod",
       summary =
           "You appear to be using methods; prefer to implement all program logic inside the main"
               + " function by flipping bits in a single long[].",
@@ -372,21 +416,22 @@ public class ErrorProneJavaCompilerTest {
   }
 
   @Test
-  public void testFixGeneratedConstructor() {
+  public void fixGeneratedConstructor() {
     CompilationResult result =
         doCompile(
             Arrays.asList("testdata/DeleteGeneratedConstructorTestCase.java"),
             Collections.<String>emptyList(),
             ImmutableList.<Class<? extends BugChecker>>of(DeleteMethod.class));
     assertThat(result.succeeded).isFalse();
+    assertThat(result.output).isEmpty();
     assertThat(result.diagnosticHelper.getDiagnostics()).hasSize(1);
     assertThat(
             Iterables.getOnlyElement(result.diagnosticHelper.getDiagnostics()).getMessage(ENGLISH))
-        .contains("AssertionError: Cannot edit synthetic AST nodes");
+        .containsMatch("invalid source position|synthetic AST nodes");
   }
 
   @Test
-  public void testWithExcludedPaths() {
+  public void withExcludedPaths() {
     CompilationResult result =
         doCompile(
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
@@ -399,7 +444,7 @@ public class ErrorProneJavaCompilerTest {
             Arrays.asList("bugpatterns/testdata/SelfAssignmentPositiveCases1.java"),
             Arrays.asList("-XepExcludedPaths:.*/bugpatterns/.*"),
             Collections.<Class<? extends BugChecker>>emptyList());
-    assertThat(result.succeeded).isTrue();
+    assertSucceeded(result);
 
     // ensure regexp must match the full path
     result =
@@ -410,21 +455,197 @@ public class ErrorProneJavaCompilerTest {
     assertThat(result.succeeded).isFalse();
   }
 
-  private static class CompilationResult {
-    public final boolean succeeded;
-    public final String output;
-    public final DiagnosticTestHelper diagnosticHelper;
+  @BugPattern(summary = "Test bug pattern to test custom patch functionality", severity = ERROR)
+  public static final class AssignmentUpdater extends BugChecker implements VariableTreeMatcher {
+    private final String newValue;
 
-    public CompilationResult(
-        boolean succeeded, String output, DiagnosticTestHelper diagnosticHelper) {
-      this.succeeded = succeeded;
-      this.output = output;
-      this.diagnosticHelper = diagnosticHelper;
+    @Inject
+    AssignmentUpdater(ErrorProneFlags flags) {
+      newValue = flags.get("AssignmentUpdater:NewValue").orElse("flag-not-set");
+    }
+
+    @Override
+    public Description matchVariable(VariableTree tree, VisitorState state) {
+      return describeMatch(
+          tree, SuggestedFix.replace(tree.getInitializer(), Constants.format(newValue)));
+    }
+  }
+
+  @Test
+  public void patchAll() throws IOException {
+    JavaFileObject fileObject =
+        createOnDiskFileObject(
+            "StringConstantWrapper.java",
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+
+    CompilationResult result =
+        doCompile(
+            Collections.singleton(fileObject),
+            Arrays.asList("-XepPatchChecks:", "-XepPatchLocation:IN_PLACE"),
+            ImmutableList.of(AssignmentUpdater.class));
+    assertSucceeded(result);
+    assertThat(Files.readString(Path.of(fileObject.toUri())))
+        .isEqualTo(
+            """
+            class StringConstantWrapper {
+              String s = "flag-not-set";
+            }
+            """);
+  }
+
+  @Test
+  public void patchAllWithCheckDisabled() throws IOException {
+    JavaFileObject fileObject =
+        createOnDiskFileObject(
+            "StringConstantWrapper.java",
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+
+    CompilationResult result =
+        doCompile(
+            Collections.singleton(fileObject),
+            Arrays.asList(
+                "-XepPatchChecks:", "-XepPatchLocation:IN_PLACE", "-Xep:AssignmentUpdater:OFF"),
+            ImmutableList.of(AssignmentUpdater.class));
+    assertSucceeded(result);
+    assertThat(Files.readString(Path.of(fileObject.toUri())))
+        .isEqualTo(
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+  }
+
+  @Test
+  public void patchAllWithDisableAllChecks() throws IOException {
+    JavaFileObject fileObject =
+        createOnDiskFileObject(
+            "StringConstantWrapper.java",
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+
+    CompilationResult result =
+        doCompile(
+            Collections.singleton(fileObject),
+            ImmutableList.of(
+                "-XepPatchChecks:", "-XepPatchLocation:IN_PLACE", "-XepDisableAllChecks"),
+            ImmutableList.of(AssignmentUpdater.class));
+    assertSucceeded(result);
+    assertThat(Files.readString(Path.of(fileObject.toUri())))
+        .isEqualTo(
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+  }
+
+  @Test
+  public void patchSingleWithCheckDisabled() throws IOException {
+    JavaFileObject fileObject =
+        createOnDiskFileObject(
+            "StringConstantWrapper.java",
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+
+    CompilationResult result =
+        doCompile(
+            Collections.singleton(fileObject),
+            Arrays.asList(
+                "-XepPatchChecks:AssignmentUpdater",
+                "-XepPatchLocation:IN_PLACE",
+                "-Xep:AssignmentUpdater:OFF"),
+            ImmutableList.of(AssignmentUpdater.class));
+    assertSucceeded(result);
+    assertThat(Files.readString(Path.of(fileObject.toUri())))
+        .isEqualTo(
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+  }
+
+  @Test
+  public void patchSingleWithBugPatternCustomization() throws IOException {
+    JavaFileObject fileObject =
+        createOnDiskFileObject(
+            "StringConstantWrapper.java",
+            """
+            class StringConstantWrapper {
+              String s = "old-value";
+            }
+            """);
+
+    CompilationResult result =
+        doCompile(
+            Collections.singleton(fileObject),
+            Arrays.asList(
+                "-XepPatchChecks:AssignmentUpdater",
+                "-XepPatchLocation:IN_PLACE",
+                "-XepOpt:AssignmentUpdater:NewValue=new-value"),
+            ImmutableList.of(AssignmentUpdater.class));
+    assertSucceeded(result);
+    assertThat(Files.readString(Path.of(fileObject.toUri())))
+        .isEqualTo(
+            """
+            class StringConstantWrapper {
+              String s = "new-value";
+            }
+            """);
+  }
+
+  /**
+   * Creates a {@link JavaFileObject} with matching on-disk contents.
+   *
+   * <p>This method aids in testing patching functionality, as {@code IN_PLACE} patching requires
+   * that compiled code actually exists on disk.
+   */
+  private JavaFileObject createOnDiskFileObject(String fileName, String source) throws IOException {
+    Path location = tempDir.getRoot().toPath().resolve(fileName);
+    Files.writeString(location, source);
+    return new SimpleJavaFileObject(location.toUri(), SimpleJavaFileObject.Kind.SOURCE) {
+      @Override
+      public String getCharContent(boolean ignoreEncodingErrors) {
+        return source;
+      }
+    };
+  }
+
+  private static record CompilationResult(
+      boolean succeeded, String output, DiagnosticTestHelper diagnosticHelper, Context context) {
+    @Override
+    public String toString() {
+      return String.format(
+          "CompilationResult{succeeded=%s, output=%s, diagnostics=%s}",
+          succeeded, output, diagnosticHelper.getDiagnostics());
     }
   }
 
   private CompilationResult doCompile(
       List<String> fileNames,
+      List<String> extraArgs,
+      List<Class<? extends BugChecker>> customCheckers) {
+    return doCompile(
+        forResources(getClass(), fileNames.toArray(new String[0])), extraArgs, customCheckers);
+  }
+
+  private CompilationResult doCompile(
+      Iterable<? extends JavaFileObject> files,
       List<String> extraArgs,
       List<Class<? extends BugChecker>> customCheckers) {
     DiagnosticTestHelper diagnosticHelper = new DiagnosticTestHelper();
@@ -441,14 +662,16 @@ public class ErrorProneJavaCompilerTest {
             : new ErrorProneJavaCompiler(ScannerSupplier.fromBugCheckerClasses(customCheckers));
     JavaCompiler.CompilationTask task =
         errorProneJavaCompiler.getTask(
-            printWriter,
-            fileManager,
-            diagnosticHelper.collector,
-            args,
-            null,
-            forResources(getClass(), fileNames.toArray(new String[0])));
+            printWriter, fileManager, diagnosticHelper.collector, args, null, files);
+    Context context = ((BasicJavacTask) task).getContext();
 
     return new CompilationResult(
-        task.call(), new String(outputStream.toByteArray(), UTF_8), diagnosticHelper);
+        task.call(), new String(outputStream.toByteArray(), UTF_8), diagnosticHelper, context);
+  }
+
+  private static void assertSucceeded(CompilationResult result) {
+    assertWithMessage("Compilation should have succeeded, but had result %s", result)
+        .that(result.succeeded)
+        .isTrue();
   }
 }

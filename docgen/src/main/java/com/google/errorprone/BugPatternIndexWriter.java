@@ -23,7 +23,6 @@ import static java.util.Comparator.comparing;
 import com.github.mustachejava.DefaultMustacheFactory;
 import com.github.mustachejava.Mustache;
 import com.github.mustachejava.MustacheFactory;
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimaps;
@@ -42,17 +41,14 @@ import java.util.Set;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 public class BugPatternIndexWriter {
 
-  @AutoValue
-  abstract static class IndexEntry {
-    abstract boolean onByDefault();
-
-    abstract SeverityLevel severity();
-
+  private record IndexEntry(boolean onByDefault, SeverityLevel severity) {
     static IndexEntry create(boolean onByDefault, SeverityLevel severity) {
-      return new AutoValue_BugPatternIndexWriter_IndexEntry(onByDefault, severity);
+      return new IndexEntry(onByDefault, severity);
     }
 
     String asCategoryHeader() {
@@ -60,15 +56,9 @@ public class BugPatternIndexWriter {
     }
   }
 
-  @AutoValue
-  abstract static class MiniDescription {
-    abstract String name();
-
-    abstract String summary();
-
+  private record MiniDescription(String name, String summary) {
     static MiniDescription create(BugPatternInstance bugPattern) {
-      return new AutoValue_BugPatternIndexWriter_MiniDescription(
-          bugPattern.name, bugPattern.summary);
+      return new MiniDescription(bugPattern.name, bugPattern.summary);
     }
   }
 
@@ -90,20 +80,18 @@ public class BugPatternIndexWriter {
 
     ImmutableList<Map<String, Object>> bugpatternData =
         Multimaps.asMap(sorted).entrySet().stream()
-            .map(
-                e ->
-                    ImmutableMap.of(
-                        "category", e.getKey().asCategoryHeader(), "checks", e.getValue()))
+            .map(e ->
+                ImmutableMap.of("category", e.getKey().asCategoryHeader(), "checks", e.getValue()))
             .collect(toImmutableList());
 
     templateData.put("bugpatterns", bugpatternData);
 
     if (target == Target.EXTERNAL) {
-      Map<String, String> frontmatterData =
+      ImmutableMap<String, String> frontmatterData =
           ImmutableMap.<String, String>builder()
               .put("title", "Bug Patterns")
               .put("layout", "bugpatterns")
-              .build();
+              .buildOrThrow();
       DumperOptions options = new DumperOptions();
       options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
       Yaml yaml = new Yaml(options);

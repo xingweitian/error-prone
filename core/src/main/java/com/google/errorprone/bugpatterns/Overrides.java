@@ -38,7 +38,6 @@ import java.util.Set;
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 @BugPattern(
-    name = "Overrides",
     altNames = "overrides",
     summary = "Varargs doesn't agree for overridden method",
     severity = WARNING)
@@ -75,7 +74,7 @@ public class Overrides extends BugChecker implements MethodTreeMatcher {
     // of the current method.
 
     List<? extends VariableTree> parameterTree = methodTree.getParameters();
-    Tree paramType = parameterTree.get(parameterTree.size() - 1).getType();
+    Tree paramType = parameterTree.getLast().getType();
     CharSequence paramTypeSource = state.getSourceForNode(paramType);
     if (paramTypeSource == null) {
       // No fix if we don't have tree end positions.

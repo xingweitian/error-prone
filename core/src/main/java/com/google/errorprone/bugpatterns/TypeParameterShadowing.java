@@ -18,7 +18,9 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MoreCollectors;
 import com.google.common.collect.Streams;
 import com.google.errorprone.BugPattern;
@@ -39,13 +41,12 @@ import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.lang.model.element.Name;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 @BugPattern(
-    name = "TypeParameterShadowing",
     summary = "Type parameter declaration overrides another type parameter already declared",
     severity = WARNING,
     tags = StandardTags.STYLE)
@@ -83,12 +84,11 @@ public class TypeParameterShadowing extends BugChecker
 
     // See if the passed in list typeParameters exist in the enclosingTypeSymbols
     List<TypeVariableSymbol> conflictingTypeSymbols = new ArrayList<>();
-    typeParameters.forEach(
-        param ->
-            enclosingTypeSymbols.stream()
-                .filter(tvs -> tvs.name.contentEquals(param.getName()))
-                .findFirst()
-                .ifPresent(conflictingTypeSymbols::add));
+    typeParameters.forEach(param ->
+        enclosingTypeSymbols.stream()
+            .filter(tvs -> tvs.name.contentEquals(param.getName()))
+            .findFirst()
+            .ifPresent(conflictingTypeSymbols::add));
     if (conflictingTypeSymbols.isEmpty()) {
       return Description.NO_MATCH;
     }
@@ -104,19 +104,18 @@ public class TypeParameterShadowing extends BugChecker
     descriptionBuilder.setMessage(message);
 
     // Map conflictingTypeSymbol to its new name
-    Set<String> typeVarsInScope =
+    ImmutableSet<String> typeVarsInScope =
         Streams.concat(enclosingTypeSymbols.stream(), symbol.getTypeParameters().stream())
             .map(v -> v.name.toString())
             .collect(toImmutableSet());
     SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
     conflictingTypeSymbols.stream()
-        .map(
-            v ->
-                SuggestedFixes.renameTypeParameter(
-                    typeParameterInList(typeParameters, v),
-                    tree,
-                    replacementTypeVarName(v.name, typeVarsInScope),
-                    state))
+        .map(v ->
+            SuggestedFixes.renameTypeParameter(
+                typeParameterInList(typeParameters, v),
+                tree,
+                replacementTypeVarName(v.name, typeVarsInScope),
+                state))
         .forEach(fixBuilder::merge);
 
     descriptionBuilder.addFix(fixBuilder.build());
@@ -159,16 +158,14 @@ public class TypeParameterShadowing extends BugChecker
   private static List<TypeVariableSymbol> typeVariablesEnclosing(Symbol sym) {
     List<TypeVariableSymbol> typeVarScopes = new ArrayList<>();
     outer:
-    while (!sym.isStatic()) {
+    while (!isStatic(sym)) {
       sym = sym.owner;
       switch (sym.getKind()) {
-        case PACKAGE:
+        case PACKAGE -> {
           break outer;
-        case METHOD:
-        case CLASS:
-          typeVarScopes.addAll(sym.getTypeParameters());
-          break;
-        default: // fall out
+        }
+        case METHOD, CLASS -> typeVarScopes.addAll(sym.getTypeParameters());
+        default -> {}
       }
     }
     return typeVarScopes;

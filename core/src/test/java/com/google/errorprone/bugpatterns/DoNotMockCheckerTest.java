@@ -110,62 +110,6 @@ public final class DoNotMockCheckerTest {
   }
 
   @Test
-  public void matchesEasymockDotMock_doNotMock() {
-
-    String expected =
-        String.format(
-            "Do not mock '%s'; %s is annotated as @DoNotMock: %s",
-            "lib.DoNotMockObjects.DoNotMockObject",
-            "lib.DoNotMockObjects.DoNotMockObject",
-            DO_NOT_MOCK_REASON);
-
-    testHelper
-        .addSourceLines(
-            "lib/Lib.java",
-            "package lib;",
-            "import org.easymock.EasyMock;",
-            "import org.easymock.ConstructorArgs;",
-            "import lib.DoNotMockObjects.*;",
-            "class Lib {",
-            "",
-            "  private static final ConstructorArgs CONSTRUCTOR_ARGS = new ConstructorArgs(",
-            "      (java.lang.reflect.Constructor) null, \"foo\");",
-            "  public static void f() { ",
-            "    EasyMock.createMock(MockableObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMock(DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMock(DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMock(\"my_name\", DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMock(\"my_name\", DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createNiceMock(DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createNiceMock(DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createNiceMock(\"my_name\", DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createNiceMock(\"my_name\", DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMock(DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createStrictMock(DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createStrictMock(DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createStrictMock(\"my_name\", DoNotMockObject.class);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createStrictMock(\"my_name\", DoNotMockObject.class, CONSTRUCTOR_ARGS);",
-            "    // BUG: Diagnostic contains: " + expected,
-            "    EasyMock.createMockBuilder(DoNotMockObject.class);",
-            "  }",
-            "}")
-        .doTest();
-  }
-
-  @Test
   public void matchesMockitoMockAnnotation_doNotMock() {
     testHelper
         .addSourceLines(
@@ -274,18 +218,22 @@ public final class DoNotMockCheckerTest {
     testHelper
         .addSourceLines(
             "lib/Lib.java",
-            "package lib;",
-            "import org.mockito.Mock;",
-            "import lib.DoNotMockObjects.*;",
-            "class Lib {",
-            "",
-            "  // BUG: Diagnostic contains:",
-            "  @Mock MetaDoNotMockObject metaAnnotatedDoNotMockObject;",
-            "  // BUG: Diagnostic contains:",
-            "  @Mock MetaDoNotMockInterface metaDoNotMockInterface;",
-            "  @Mock MockableObject mockableObject;",
-            "  @Mock DoubleMetaAnnotatedDoNotMock doubleMetaAnnotatedDoNotMock; // mockable",
-            "}")
+            """
+            package lib;
+
+            import lib.DoNotMockObjects.*;
+            import org.mockito.Mock;
+
+            class Lib {
+
+              // BUG: Diagnostic contains:
+              @Mock MetaDoNotMockObject metaAnnotatedDoNotMockObject;
+              // BUG: Diagnostic contains:
+              @Mock MetaDoNotMockInterface metaDoNotMockInterface;
+              @Mock MockableObject mockableObject;
+              @Mock DoubleMetaAnnotatedDoNotMock doubleMetaAnnotatedDoNotMock; // mockable
+            }
+            """)
         .doTest();
   }
 
@@ -294,22 +242,26 @@ public final class DoNotMockCheckerTest {
     testHelper
         .addSourceLines(
             "lib/Lib.java",
-            "package lib;",
-            "import org.mockito.Mockito;",
-            "import lib.AutoValueObjects.*;",
-            "public class Lib {",
-            "",
-            "  class MockableObject {}",
-            "",
-            "  public static void f() { ",
-            "    Mockito.mock(MockableObject.class);",
-            "    // BUG: Diagnostic contains:",
-            "    Mockito.mock(DoNotMockMyAutoValue.class);",
-            "    Mockito.mock(MyAutoValue.class);",
-            "    MyAutoValue myAutoValue = MyAutoValue.create(1);",
-            "    DoNotMockMyAutoValue doNotMockMyAutoValue = DoNotMockMyAutoValue.create(1);",
-            "  }",
-            "}")
+            """
+            package lib;
+
+            import lib.AutoValueObjects.*;
+            import org.mockito.Mockito;
+
+            public class Lib {
+
+              class MockableObject {}
+
+              public static void f() {
+                Mockito.mock(MockableObject.class);
+                // BUG: Diagnostic contains:
+                Mockito.mock(DoNotMockMyAutoValue.class);
+                Mockito.mock(MyAutoValue.class);
+                MyAutoValue myAutoValue = MyAutoValue.create(1);
+                DoNotMockMyAutoValue doNotMockMyAutoValue = DoNotMockMyAutoValue.create(1);
+              }
+            }
+            """)
         .addSourceLines(
             "lib/MyAutoValue.java",
             "package lib;",
@@ -339,15 +291,19 @@ public final class DoNotMockCheckerTest {
     CompilationTestHelper.newInstance(DoNotMockChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import org.mockito.Mockito;",
-            "import org.mockito.Mock;",
-            "class Test<E> {",
-            "  @Mock E e;",
-            "  <T> T f(T x) {",
-            "    T m = Mockito.spy(x);",
-            "    return m;",
-            "  }",
-            "}")
+            """
+            import org.mockito.Mock;
+            import org.mockito.Mockito;
+
+            class Test<E> {
+              @Mock E e;
+
+              <T> T f(T x) {
+                T m = Mockito.spy(x);
+                return m;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -356,12 +312,15 @@ public final class DoNotMockCheckerTest {
     CompilationTestHelper.newInstance(DoNotMockChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import org.mockito.Mockito;",
-            "class Test {",
-            "  <T> T evil(Class<T> clazz) {",
-            "    return (T) Mockito.mock((Class) clazz);",
-            "  }",
-            "}")
+            """
+            import org.mockito.Mockito;
+
+            class Test {
+              <T> T evil(Class<T> clazz) {
+                return (T) Mockito.mock((Class) clazz);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -370,11 +329,14 @@ public final class DoNotMockCheckerTest {
     CompilationTestHelper.newInstance(DoNotMockChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.lang.annotation.Annotation;",
-            "import org.mockito.Mock;",
-            "class Test {",
-            "  @Mock Annotation[] annotations;",
-            "}")
+            """
+            import java.lang.annotation.Annotation;
+            import org.mockito.Mock;
+
+            class Test {
+              @Mock Annotation[] annotations;
+            }
+            """)
         .doTest();
   }
 

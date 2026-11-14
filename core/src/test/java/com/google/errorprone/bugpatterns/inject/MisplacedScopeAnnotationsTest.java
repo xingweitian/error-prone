@@ -31,157 +31,191 @@ public class MisplacedScopeAnnotationsTest {
       BugCheckerRefactoringTestHelper.newInstance(MisplacedScopeAnnotations.class, getClass());
 
   @Test
-  public void testPositiveCase_methodInjection() {
+  public void positiveCase_methodInjection() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  // BUG: Diagnostic contains: @Inject void someMethod( String foo) {}",
-            "  @Inject void someMethod(@Singleton String foo) {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              // BUG: Diagnostic contains: void someMethod( String foo) {}
+              void someMethod(@Singleton String foo) {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_providerMethod() {
+  public void positiveCase_providerMethod() {
     refactoringHelper
         .addInputLines(
             "in/Foo.java",
-            "import com.google.inject.Provides;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Provides String provideString(@Singleton @Named(\"foo\") String foo) {",
-            "    return foo;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Provides
+              String provideString(@Singleton @Named("foo") String foo) {
+                return foo;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Foo.java",
-            "import com.google.inject.Provides;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Provides String provideString( @Named(\"foo\") String foo) {",
-            "    return foo;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Provides
+              String provideString(@Named("foo") String foo) {
+                return foo;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_injectConstructor() {
+  public void positiveCase_injectConstructor() {
     refactoringHelper
         .addInputLines(
             "in/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject Foo(@Singleton @Named(\"bar\") String bar) {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              Foo(@Singleton @Named("bar") String bar) {}
+            }
+            """)
         .addOutputLines(
             "out/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject Foo( @Named(\"bar\") String bar) {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              Foo(@Named("bar") String bar) {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_injectConstructorMultipleAnnotations() {
+  public void positiveCase_injectConstructorMultipleAnnotations() {
     refactoringHelper
         .addInputLines(
             "in/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject Foo(@Singleton String bar, Integer i, @Singleton Long c) {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              Foo(@Singleton String bar, Integer i, @Singleton Long c) {}
+            }
+            """)
         .addOutputLines(
             "out/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject Foo( String bar, Integer i,  Long c) {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              Foo(String bar, Integer i, Long c) {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_fieldInjection() {
+  public void positiveCase_fieldInjection() {
     refactoringHelper
         .addInputLines(
             "in/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject @Singleton String foo;",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject @Singleton String foo;
+            }
+            """)
         .addOutputLines(
             "out/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject  String foo;",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject String foo;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase_noScopeAnnotationOnInjectedParameters() {
+  public void negativeCase_noScopeAnnotationOnInjectedParameters() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import dagger.Provides;",
-            "import dagger.Module;",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "@Module",
-            "class Foo {",
-            "  @Provides @Singleton @Named(\"bar\")",
-            "  int something(@Named(\"bar\") Integer bar) {",
-            "    return 42;",
-            "  }",
-            "}")
+            """
+            import dagger.Module;
+            import dagger.Provides;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            @Module
+            class Foo {
+              @Provides
+              @Singleton
+              @Named("bar")
+              int something(@Named("bar") Integer bar) {
+                return 42;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase_scopeAnnotationIsAlsoQualifier() {
+  public void negativeCase_scopeAnnotationIsAlsoQualifier() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import dagger.Provides;",
-            "import dagger.Module;",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Qualifier;",
-            "import javax.inject.Scope;",
-            "import java.lang.annotation.Retention;",
-            "import java.lang.annotation.RetentionPolicy;",
-            "@Module",
-            "class Foo {",
-            "  @Qualifier",
-            "  @Scope",
-            "  @Retention(RetentionPolicy.RUNTIME)",
-            "  @interface RequestScoped {}",
-            "                             ",
-            "  @Provides",
-            "  int something(@RequestScoped Integer bar) {",
-            "    return 42;",
-            "  }",
-            "}")
+            """
+            import dagger.Module;
+            import dagger.Provides;
+            import java.lang.annotation.Retention;
+            import java.lang.annotation.RetentionPolicy;
+            import javax.inject.Qualifier;
+            import javax.inject.Scope;
+
+            @Module
+            class Foo {
+              @Qualifier
+              @Scope
+              @Retention(RetentionPolicy.RUNTIME)
+              @interface RequestScoped {}
+
+              @Provides
+              int something(@RequestScoped Integer bar) {
+                return 42;
+              }
+            }
+            """)
         .doTest();
   }
 }

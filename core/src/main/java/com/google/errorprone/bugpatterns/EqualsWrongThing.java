@@ -26,9 +26,10 @@ import static com.google.errorprone.matchers.Matchers.staticEqualsInvocation;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
@@ -44,7 +45,6 @@ import com.sun.source.tree.Tree.Kind;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -56,7 +56,6 @@ import javax.lang.model.element.ElementKind;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "EqualsWrongThing",
     summary =
         "Comparing different pairs of fields/getters in an equals implementation is probably "
             + "a mistake.",
@@ -66,8 +65,8 @@ public final class EqualsWrongThing extends BugChecker implements MethodTreeMatc
   private static final Matcher<MethodInvocationTree> COMPARISON_METHOD =
       anyOf(staticMethod().onClass("java.util.Arrays").named("equals"), staticEqualsInvocation());
 
-  private static final EnumSet<ElementKind> FIELD_TYPES =
-      EnumSet.of(ElementKind.FIELD, ElementKind.METHOD);
+  private static final ImmutableSet<ElementKind> FIELD_TYPES =
+      Sets.immutableEnumSet(ElementKind.FIELD, ElementKind.METHOD);
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
@@ -91,18 +90,20 @@ public final class EqualsWrongThing extends BugChecker implements MethodTreeMatc
 
       @Override
       public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+        var args = node.getArguments();
         if (COMPARISON_METHOD.matches(node, state)) {
-          getDubiousComparison(
-                  classSymbol, node, node.getArguments().get(0), node.getArguments().get(1))
+          // args.size() / 2 handles the six-arg overload of Arrays.equals (the 0th and 3rd args are
+          // the arrays).
+          getDubiousComparison(classSymbol, node, args.getFirst(), args.get(args.size() / 2))
               .ifPresent(suspiciousComparisons::add);
         }
         if (instanceEqualsInvocation().matches(node, state)) {
           ExpressionTree receiver = getReceiver(node);
           if (receiver != null) {
             // Special-case super, for odd cases like `super.equals(this)`.
-            if (!(receiver instanceof IdentifierTree
-                && ((IdentifierTree) receiver).getName().contentEquals("super"))) {
-              getDubiousComparison(classSymbol, node, receiver, node.getArguments().get(0))
+            if (!(receiver instanceof IdentifierTree identifierTree
+                && identifierTree.getName().contentEquals("super"))) {
+              getDubiousComparison(classSymbol, node, receiver, args.getFirst())
                   .ifPresent(suspiciousComparisons::add);
             }
           }
@@ -122,14 +123,13 @@ public final class EqualsWrongThing extends BugChecker implements MethodTreeMatc
         suspiciousComparisons.stream().map(ComparisonSite::pair).collect(toImmutableSet());
     suspiciousComparisons.stream()
         .filter(p -> !suspiciousPairs.contains(p.pair().reversed()))
-        .map(
-            c ->
-                buildDescription(c.tree())
-                    .setMessage(
-                        String.format(
-                            "Suspicious comparison between `%s` and `%s`",
-                            c.pair().lhs(), c.pair().rhs()))
-                    .build())
+        .map(c ->
+            buildDescription(c.tree())
+                .setMessage(
+                    String.format(
+                        "Suspicious comparison between `%s` and `%s`",
+                        c.pair().lhs(), c.pair().rhs()))
+                .build())
         .forEach(state::reportMatch);
     return NO_MATCH;
   }
@@ -141,7 +141,7 @@ public final class EqualsWrongThing extends BugChecker implements MethodTreeMatc
     if (lhsSymbol == null || rhsSymbol == null || lhsSymbol.equals(rhsSymbol)) {
       return Optional.empty();
     }
-    if (lhsSymbol.isStatic() || rhsSymbol.isStatic()) {
+    if (isStatic(lhsSymbol) || isStatic(rhsSymbol)) {
       return Optional.empty();
     }
     if (!encl.equals(lhsSymbol.enclClass()) || !encl.equals(rhsSymbol.enclClass())) {
@@ -162,29 +162,19 @@ public final class EqualsWrongThing extends BugChecker implements MethodTreeMatc
     return kind == Kind.IDENTIFIER ? Kind.MEMBER_SELECT : kind;
   }
 
-  @AutoValue
-  abstract static class ComparisonSite {
-    abstract Tree tree();
-
-    abstract ComparisonPair pair();
-
+  private record ComparisonSite(Tree tree, ComparisonPair pair) {
     private static ComparisonSite of(Tree tree, Symbol lhs, Symbol rhs) {
-      return new AutoValue_EqualsWrongThing_ComparisonSite(tree, ComparisonPair.of(lhs, rhs));
+      return new ComparisonSite(tree, ComparisonPair.of(lhs, rhs));
     }
   }
 
-  @AutoValue
-  abstract static class ComparisonPair {
-    abstract Symbol lhs();
-
-    abstract Symbol rhs();
-
+  private record ComparisonPair(Symbol lhs, Symbol rhs) {
     final ComparisonPair reversed() {
       return of(rhs(), lhs());
     }
 
     private static ComparisonPair of(Symbol lhs, Symbol rhs) {
-      return new AutoValue_EqualsWrongThing_ComparisonPair(lhs, rhs);
+      return new ComparisonPair(lhs, rhs);
     }
   }
 }

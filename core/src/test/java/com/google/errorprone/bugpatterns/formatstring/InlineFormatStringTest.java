@@ -37,19 +37,25 @@ public class InlineFormatStringTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f() {",
-            "    System.err.printf(FORMAT, 42);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static final String FORMAT = "hello %s";
+
+              void f() {
+                System.err.printf(FORMAT, 42);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    System.err.printf(\"hello %s\", 42);",
-            "  }",
-            "}")
+            """
+            class Test {
+
+              void f() {
+                System.err.printf("hello %s", 42);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -58,13 +64,16 @@ public class InlineFormatStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f() {",
-            "    System.err.printf(FORMAT, 42);",
-            "    System.err.printf(FORMAT, 43);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static final String FORMAT = "hello %s";
+
+              void f() {
+                System.err.printf(FORMAT, 42);
+                System.err.printf(FORMAT, 43);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -73,13 +82,16 @@ public class InlineFormatStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f() {",
-            "    System.err.printf(FORMAT, 42);",
-            "    System.err.println(FORMAT);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static final String FORMAT = "hello %s";
+
+              void f() {
+                System.err.printf(FORMAT, 42);
+                System.err.println(FORMAT);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -88,21 +100,29 @@ public class InlineFormatStringTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import com.google.common.base.Preconditions;",
-            "class Test {",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f(boolean b) {",
-            "    Preconditions.checkArgument(b, FORMAT, 42);",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Preconditions;
+
+            class Test {
+              private static final String FORMAT = "hello %s";
+
+              void f(boolean b) {
+                Preconditions.checkArgument(b, FORMAT, 42);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import com.google.common.base.Preconditions;",
-            "class Test {",
-            "  void f(boolean b) {",
-            "    Preconditions.checkArgument(b, \"hello %s\", 42);",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Preconditions;
+
+            class Test {
+
+              void f(boolean b) {
+                Preconditions.checkArgument(b, "hello %s", 42);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -111,30 +131,45 @@ public class InlineFormatStringTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "abstract class Test {",
-            "  @FormatMethod abstract String f(String f, Object... args);",
-            "  @FormatMethod abstract String g(boolean b, @FormatString String f, Object... args);",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  private static final String FORMAT2 = \"hello %s\";",
-            "  void h(boolean b) {",
-            "    f(FORMAT, 42);",
-            "    g(b, FORMAT2, 42);",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            abstract class Test {
+              @FormatMethod
+              abstract String f(String f, Object... args);
+
+              @FormatMethod
+              abstract String g(boolean b, @FormatString String f, Object... args);
+
+              private static final String FORMAT = "hello %s";
+              private static final String FORMAT2 = "hello %s";
+
+              void h(boolean b) {
+                f(FORMAT, 42);
+                g(b, FORMAT2, 42);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "abstract class Test {",
-            "  @FormatMethod abstract String f(String f, Object... args);",
-            "  @FormatMethod abstract String g(boolean b, @FormatString String f, Object... args);",
-            "  void h(boolean b) {",
-            "    f(\"hello %s\", 42);",
-            "    g(b, \"hello %s\", 42);",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            abstract class Test {
+              @FormatMethod
+              abstract String f(String f, Object... args);
+
+              @FormatMethod
+              abstract String g(boolean b, @FormatString String f, Object... args);
+
+              void h(boolean b) {
+                f("hello %s", 42);
+                g(b, "hello %s", 42);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -143,13 +178,16 @@ public class InlineFormatStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  @SuppressWarnings(\"InlineFormatString\")",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f() {",
-            "    System.err.printf(FORMAT, 42);",
-            "  }",
-            "}")
+            """
+            class Test {
+              @SuppressWarnings("InlineFormatString")
+              private static final String FORMAT = "hello %s";
+
+              void f() {
+                System.err.printf(FORMAT, 42);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -158,13 +196,96 @@ public class InlineFormatStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "@SuppressWarnings(\"InlineFormatString\")",
-            "class Test {",
-            "  private static final String FORMAT = \"hello %s\";",
-            "  void f() {",
-            "    System.err.printf(FORMAT, 42);",
-            "  }",
-            "}")
+            """
+            @SuppressWarnings("InlineFormatString")
+            class Test {
+              private static final String FORMAT = "hello %s";
+
+              void f() {
+                System.err.printf(FORMAT, 42);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeLocal() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void f(String a) {
+                String format = a;
+                System.err.printf(format, 42);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void refactoringLocal() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                String format = "hello %s";
+                System.err.printf(format, 42);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+
+                System.err.printf("hello %s", 42);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void multipleUses() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                String format = "hello %s";
+                // BUG: Diagnostic contains
+                System.err.printf(format, 42);
+                // BUG: Diagnostic contains
+                System.err.printf(format, 42);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonFormatMethod() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.base.Preconditions;
+
+            class Test {
+              void f(Object obj) {
+                String format = "hello %s";
+                Preconditions.checkNotNull(format);
+                Preconditions.checkNotNull(obj, format);
+              }
+            }
+            """)
         .doTest();
   }
 }

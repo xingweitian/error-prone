@@ -16,12 +16,8 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-import static org.junit.Assume.assumeTrue;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -32,384 +28,535 @@ public class UnnecessaryDefaultInEnumSwitchTest {
 
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass());
+  private final BugCheckerRefactoringTestHelper refactoringTestHelper =
+      BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass());
 
   @Test
   public void switchCannotComplete() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        // This is a comment",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                    // This is a comment
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      ",
-            "    }",
-            "// This is a comment",
-            "throw new AssertionError(c);",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                }
+                // This is a comment
+                throw new AssertionError(c);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void switchCannotCompleteUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        // This is a comment",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                    // This is a comment
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "        break;",
-            "    }",
-            "// This is a comment",
-            "throw new AssertionError(c);",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  case UNRECOGNIZED:
+                    break;
+                }
+                // This is a comment
+                throw new AssertionError(c);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void emptyDefault() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void emptyDefaultUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "        // continue below",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  case UNRECOGNIZED:
+                    // continue below
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void defaultBreak() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        break;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                    break;
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void defaultBreakUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        break;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default:
+                    break;
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "        // continue below",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  case UNRECOGNIZED:
+                    // continue below
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void completes_noUnassignedVars_priorCaseExits() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    break;
+                  case THREE:
+                    return true;
+                  default:
+                    throw new AssertionError(c);
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    break;
+                  case THREE:
+                    return true;
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void completes_noUnassignedVars_priorCaseExitsUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        return true;",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    break;
+                  case THREE:
+                    return true;
+                  default:
+                    throw new AssertionError(c);
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    break;
+                  case THREE:
+                    return true;
+                  case UNRECOGNIZED:
+                    throw new AssertionError(c);
+                }
+                return false;
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void completes_noUnassignedVars_priorCaseDoesntExit() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case THREE:",
-            "      default:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case THREE:
+                  default:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case THREE:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case THREE:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void completes_noUnassignedVars_priorCaseDoesntExitUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case THREE:",
-            "      default:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case THREE:
+                  default:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case THREE:",
-            "      case UNRECOGNIZED:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case THREE:
+                  case UNRECOGNIZED:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -418,24 +565,31 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    int x;",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        x = 1;",
-            "        break;",
-            "      case THREE:",
-            "        x = 2;",
-            "        break;",
-            "      default:",
-            "        x = 3;",
-            "    }",
-            "    return x == 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                int x;
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    x = 1;
+                    break;
+                  case THREE:
+                    x = 2;
+                    break;
+                  default:
+                    x = 3;
+                }
+                return x == 1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -444,24 +598,32 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    int x;",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        x = 1;",
-            "        break;",
-            "      case THREE:",
-            "        x = 2;",
-            "        break;",
-            "      default:",
-            "        x = 3;",
-            "    }",
-            "    return x == 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                int x;
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    x = 1;
+                    break;
+                  case THREE:
+                    x = 2;
+                    break;
+                  default:
+                    x = 3;
+                }
+                return x == 1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -470,201 +632,414 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  default:
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void notExhaustiveUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  default:
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "        break;",
-            "    }",
-            "    throw new AssertionError(c);",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case UNRECOGNIZED:
+                    break;
+                }
+                throw new AssertionError(c);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void notExhaustive2() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(boolean f, Case c) {",
-            "    if (f) {",
-            "      switch (c) {",
-            "        case ONE:",
-            "        case TWO:",
-            "        case THREE:",
-            "          return true;",
-            "        default:",
-            "          return false;",
-            "      }",
-            "    } else {",
-            "      return false;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(boolean f, Case c) {
+                if (f) {
+                  switch (c) {
+                    case ONE:
+                    case TWO:
+                    case THREE:
+                      return true;
+                    default:
+                      return false;
+                  }
+                } else {
+                  return false;
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  boolean m(boolean f, Case c) {",
-            "    if (f) {",
-            "      switch (c) {",
-            "        case ONE:",
-            "        case TWO:",
-            "        case THREE:",
-            "          return true;",
-            "      }",
-            "      return false;",
-            "    } else {",
-            "      return false;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(boolean f, Case c) {
+                if (f) {
+                  switch (c) {
+                    case ONE:
+                    case TWO:
+                    case THREE:
+                      return true;
+                  }
+                  return false;
+                } else {
+                  return false;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void notExhaustive2Unrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(boolean f, Case c) {",
-            "    if (f) {",
-            "      switch (c) {",
-            "        case ONE:",
-            "        case TWO:",
-            "        case THREE:",
-            "          return true;",
-            "        default:",
-            "          return false;",
-            "      }",
-            "    } else {",
-            "      return false;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(boolean f, Case c) {
+                if (f) {
+                  switch (c) {
+                    case ONE:
+                    case TWO:
+                    case THREE:
+                      return true;
+                    default:
+                      return false;
+                  }
+                } else {
+                  return false;
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(boolean f, Case c) {",
-            "    if (f) {",
-            "      switch (c) {",
-            "        case ONE:",
-            "        case TWO:",
-            "        case THREE:",
-            "          return true;",
-            "        case UNRECOGNIZED:",
-            "          break;",
-            "      }",
-            "      return false;",
-            "    } else {",
-            "      return false;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(boolean f, Case c) {
+                if (f) {
+                  switch (c) {
+                    case ONE:
+                    case TWO:
+                    case THREE:
+                      return true;
+                    case UNRECOGNIZED:
+                      break;
+                  }
+                  return false;
+                } else {
+                  return false;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultForSkew_switchStatement() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                  default: // in case of library skew
+                    return false;
+                }
+              }
+
+              boolean o(Case c) {
+                switch (c) {
+                  // in case of library skew
+                  default:
+                    return false;
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    return true;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultForSkew_switchStatement_body() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE, TWO, THREE -> {
+                    return true;
+                  }
+                  // in case of library skew
+                  default -> {
+                    return false;
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultForSkew_switchStatement_noFollowingStatement() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    break;
+                  default: // skew
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultForSkew_switchExpression() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                boolean unused;
+                unused =
+                    switch (c) {
+                      case ONE, TWO -> true;
+                      case THREE -> false;
+                      // present for skew
+                      default -> false;
+                    };
+                unused =
+                    switch (c) {
+                      case ONE, TWO -> true;
+                      case THREE -> false;
+                      default -> // present for skew
+                          false;
+                    };
+                unused =
+                    switch (c) {
+                      // present for skew
+                      default -> false;
+                      case ONE, TWO -> true;
+                      case THREE -> false;
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void unrecognizedIgnore() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "        return true;",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                    return true;
+                  default:
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .expectUnchanged()
-        .doTest(TEXT_MATCH);
+        .doTest();
   }
 
   @Test
   public void defaultAboveCaseUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      default:",
-            "      case THREE:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  default:
+                  case THREE:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        return true;",
-            "      case UNRECOGNIZED:",
-            "      case THREE:",
-            "        // This is a comment",
-            "        System.out.println(\"Test\");",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    return true;
+                  case UNRECOGNIZED:
+                  // continue below
+                  case THREE:
+                    // This is a comment
+                    System.out.println("Test");
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -673,18 +1048,23 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE }",
-            "  boolean m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "        return true;",
-            "      // BUG: Diagnostic contains: after the switch statement",
-            "      default:",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE
+              }
+
+              boolean m(Case c) {
+                switch (c) {
+                  case ONE:
+                    return true;
+                  // BUG: Diagnostic contains: after the switch statement
+                  default:
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -693,63 +1073,84 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE }",
-            "  void m(Case c) {",
-            "    int i = 0;",
-            "    switch (c) {",
-            "      case ONE:",
-            "        i = 1;",
-            "        break;",
-            "      // BUG: Diagnostic contains: case can be omitted",
-            "      default:",
-            "        throw new AssertionError();",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE
+              }
+
+              void m(Case c) {
+                int i = 0;
+                switch (c) {
+                  case ONE:
+                    i = 1;
+                    break;
+                  // BUG: Diagnostic contains: case can be omitted
+                  default:
+                    throw new AssertionError();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void switchCompletesUnrecognized() {
-    BugCheckerRefactoringTestHelper.newInstance(UnnecessaryDefaultInEnumSwitch.class, getClass())
+    refactoringTestHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "        break;",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        break;",
-            "      default:",
-            "        // This is a comment",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE:
+                    break;
+                  case TWO:
+                    break;
+                  case THREE:
+                    break;
+                  default:
+                    // This is a comment
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, UNRECOGNIZED }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "        break;",
-            "      case TWO:",
-            "        break;",
-            "      case THREE:",
-            "        break;",
-            "      case UNRECOGNIZED:",
-            "        // This is a comment",
-            "        throw new AssertionError(c);",
-            "    }",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                UNRECOGNIZED
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE:
+                    break;
+                  case TWO:
+                    break;
+                  case THREE:
+                    break;
+                  case UNRECOGNIZED:
+                    // This is a comment
+                    throw new AssertionError(c);
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -757,68 +1158,315 @@ public class UnnecessaryDefaultInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum NormalEnum { A, B }",
-            "  enum ProtoEnum { ONE, TWO, UNRECOGNIZED }",
-            "  void normal(NormalEnum e) {",
-            "    switch (e) {",
-            "      case A:",
-            "      case B:",
-            "      // BUG: Diagnostic contains: default case can be omitted",
-            "      default:",
-            "        break;",
-            "    }",
-            "  }",
-            "  void proto(ProtoEnum e) {",
-            "    switch (e) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      // BUG: Diagnostic contains: UNRECOGNIZED",
-            "      default:",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum NormalEnum {
+                A,
+                B
+              }
+
+              enum ProtoEnum {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              void normal(NormalEnum e) {
+                switch (e) {
+                  case A:
+                  case B:
+                  // BUG: Diagnostic contains: default case can be omitted
+                  default:
+                    break;
+                }
+              }
+
+              void proto(ProtoEnum e) {
+                switch (e) {
+                  case ONE:
+                  case TWO:
+                  // BUG: Diagnostic contains: UNRECOGNIZED
+                  default:
+                    break;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void defaultCaseKindRule() {
-    assumeTrue(RuntimeVersion.isAtLeast14());
+    refactoringTestHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> {}
+                  case TWO -> {}
+                  default -> {}
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> {}
+                  case TWO -> {}
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultCaseKindRule_initialisation() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE -> {}",
-            "      case TWO -> {}",
-            "      // BUG: Diagnostic contains: UnnecessaryDefaultInEnumSwitch",
-            "      default -> {}",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case c) {
+                int x;
+                switch (c) {
+                  case ONE -> x = 1;
+                  case TWO -> x = 2;
+                  // Removing this would not compile.
+                  default -> throw new AssertionError();
+                }
+                System.out.println(x);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void unrecognizedCaseKindRule() {
-    assumeTrue(RuntimeVersion.isAtLeast14());
+    // NOTE(ghm): This test is unhappy on 17 for test frameworky reasons.
+    refactoringTestHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> {}
+                  case TWO -> {}
+                  default -> {}
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> {}
+                  case TWO -> {}
+                  case UNRECOGNIZED -> {}
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unrecognizedCaseKindRule_initialization() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, UNRECOGNIZED }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE -> {}",
-            "      case TWO -> {}",
-            "      // BUG: Diagnostic contains: UnnecessaryDefaultInEnumSwitch",
-            "      default -> {}",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              void m(Case c) {
+                int x;
+                switch (c) {
+                  case ONE -> x = 1;
+                  case TWO -> x = 2;
+                  // Removing this would not compile.
+                  default -> throw new AssertionError();
+                }
+                System.out.println(x);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void multipleLabels() {
+    refactoringTestHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Type {
+                FOO,
+                BAR,
+                BAZ,
+              }
+
+              public static void main(String[] args) {
+                var type = Type.valueOf(args[0]);
+                switch (type) {
+                  case FOO -> {
+                    System.out.println("Hi foo");
+                  }
+                  case BAR, BAZ -> {}
+                  default -> throw new AssertionError(type);
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              enum Type {
+                FOO,
+                BAR,
+                BAZ,
+              }
+
+              public static void main(String[] args) {
+                var type = Type.valueOf(args[0]);
+                switch (type) {
+                  case FOO -> {
+                    System.out.println("Hi foo");
+                  }
+                  case BAR, BAZ -> {}
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void expressionSwitch() {
+    refactoringTestHelper
+        .addInputLines(
+            "in/Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+              }
+
+              boolean m(Case c) {
+                return switch (c) {
+                  case ONE -> true;
+                  case TWO -> false;
+                  default -> throw new AssertionError();
+                };
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+              }
+
+              boolean m(Case c) {
+                return switch (c) {
+                  case ONE -> true;
+                  case TWO -> false;
+                };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void expressionSwitchUnrecognized() {
+    refactoringTestHelper
+        .addInputLines(
+            "in/Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                return switch (c) {
+                  case ONE -> true;
+                  case TWO -> false;
+                  default -> throw new AssertionError();
+                };
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                UNRECOGNIZED
+              }
+
+              boolean m(Case c) {
+                return switch (c) {
+                  case ONE -> true;
+                  case TWO -> false;
+                  case UNRECOGNIZED -> throw new AssertionError();
+                };
+              }
+            }
+            """)
         .doTest();
   }
 }

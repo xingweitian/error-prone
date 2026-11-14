@@ -20,11 +20,13 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -45,7 +47,6 @@ import com.sun.tools.javac.tree.TreeScanner;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -56,7 +57,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "ClassNewInstance",
     summary =
         "Class.newInstance() bypasses exception checking; prefer"
             + " getDeclaredConstructor().newInstance()",
@@ -66,6 +66,16 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
 
   private static final Matcher<ExpressionTree> NEW_INSTANCE =
       instanceMethod().onExactClass(Class.class.getName()).named("newInstance");
+
+  private static final ClassName REFLECTIVE_OPERATION_EXCEPTION =
+      ClassName.of(ReflectiveOperationException.class.getName());
+
+  private static final ImmutableList<ClassName> CONSTRUCTOR_EXCEPTIONS =
+      ImmutableList.of(
+          ClassName.of(InstantiationException.class.getName()),
+          ClassName.of(IllegalAccessException.class.getName()),
+          ClassName.of(InvocationTargetException.class.getName()),
+          ClassName.of(NoSuchMethodException.class.getName()));
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
@@ -84,11 +94,10 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
     return describeMatch(tree, fix.build());
   }
 
-  // if the match occurrs inside the body of a try statement with existing catch clauses
+  // if the match occurs inside the body of a try statement with existing catch clauses
   // update or add a catch block to handle the new exceptions
-  private static boolean fixExceptions(final VisitorState state, SuggestedFix.Builder fix) {
+  private static boolean fixExceptions(VisitorState state, SuggestedFix.Builder fix) {
     TryTree tryTree = null;
-    OUTER:
     for (TreePath path = state.getPath(); path != null; path = path.getParentPath()) {
       if (path.getLeaf() instanceof CatchTree) {
         // don't add more catch blocks if newInstance() was called in a catch block
@@ -106,7 +115,7 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
     for (CatchTree c : tryTree.getCatches()) {
       catches.put(ASTHelpers.getType(c.getParameter().getType()), c);
     }
-    UnhandledResult<CatchTree> result = unhandled(catches.build(), state);
+    UnhandledResult<CatchTree> result = unhandled(catches.buildOrThrow(), state);
     if (result.unhandled.isEmpty()) {
       // no fix needed
       return true;
@@ -117,12 +126,12 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
       // earlier catch blocks are left unchanged.
       CatchTree last = Iterables.getLast(tryTree.getCatches());
       Tree lastType = last.getParameter().getType();
-      if (lastType.getKind() == Tree.Kind.UNION_TYPE) {
-        Type roe = state.getTypeFromString(ReflectiveOperationException.class.getName());
+      if (lastType instanceof UnionTypeTree unionTypeTree) {
         Set<String> exceptions = new LinkedHashSet<>();
         boolean foundReflective = false;
-        for (Tree alternate : ((UnionTypeTree) lastType).getTypeAlternatives()) {
-          if (ASTHelpers.isSubtype(ASTHelpers.getType(alternate), roe, state)) {
+        for (Tree alternate : unionTypeTree.getTypeAlternatives()) {
+          if (ASTHelpers.isSubtype(
+              ASTHelpers.getType(alternate), REFLECTIVE_OPERATION_EXCEPTION, state)) {
             foundReflective = true;
             exceptions.add("ReflectiveOperationException");
           } else {
@@ -157,7 +166,7 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
     }
     // if the catch blocks contain calls to newInstance, don't delete any of them to avoid
     // overlapping fixes
-    final AtomicBoolean newInstanceInCatch = new AtomicBoolean(false);
+    AtomicBoolean newInstanceInCatch = new AtomicBoolean(false);
     ((JCTree) result.handles.values().iterator().next())
         .accept(
             new TreeScanner() {
@@ -199,7 +208,7 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
     for (ExpressionTree e : methodTree.getThrows()) {
       thrown.put(ASTHelpers.getType(e), e);
     }
-    UnhandledResult<ExpressionTree> result = unhandled(thrown.build(), state);
+    UnhandledResult<ExpressionTree> result = unhandled(thrown.buildOrThrow(), state);
     if (result.unhandled.isEmpty()) {
       return;
     }
@@ -214,18 +223,11 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
     fix.addImport("java.lang.reflect.InvocationTargetException");
   }
 
-  static class UnhandledResult<T> {
-    /** Exceptions thrown by {@link Constructor#newInstance} that were unhandled. */
-    final ImmutableSet<Type> unhandled;
-
-    /** Handlers for reflective exceptions (e.g. a throws declaration or catch clause). */
-    final ImmutableMap<Type, T> handles;
-
-    UnhandledResult(ImmutableSet<Type> unhandled, ImmutableMap<Type, T> handles) {
-      this.unhandled = unhandled;
-      this.handles = handles;
-    }
-  }
+  /**
+   * @param unhandled Exceptions thrown by {@link Constructor#newInstance} that were unhandled.
+   * @param handles Handlers for reflective exceptions (e.g. a throws declaration or catch clause).
+   */
+  record UnhandledResult<T>(ImmutableSet<Type> unhandled, ImmutableMap<Type, T> handles) {}
 
   /**
    * Given a map of handled exception types and the trees of those handlers (i.e. catch clauses or
@@ -235,22 +237,16 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
   private static <T> UnhandledResult<T> unhandled(
       ImmutableMap<Type, T> handles, VisitorState state) {
     LinkedHashSet<Type> toHandle = new LinkedHashSet<>();
-    for (Class<?> e :
-        Arrays.asList(
-            InstantiationException.class,
-            IllegalAccessException.class,
-            InvocationTargetException.class,
-            NoSuchMethodException.class)) {
-      Type type = state.getTypeFromString(e.getName());
+    for (ClassName e : CONSTRUCTOR_EXCEPTIONS) {
+      Type type = e.type(state);
       if (type != null) {
         toHandle.add(type);
       }
     }
-    Type roe = state.getTypeFromString(ReflectiveOperationException.class.getName());
     ImmutableMap.Builder<Type, T> newHandles = ImmutableMap.builder();
     for (Map.Entry<Type, T> entry : handles.entrySet()) {
       Type type = entry.getKey();
-      if (ASTHelpers.isSubtype(type, roe, state)) {
+      if (ASTHelpers.isSubtype(type, REFLECTIVE_OPERATION_EXCEPTION, state)) {
         newHandles.put(type, entry.getValue());
       }
       for (Type precise :
@@ -260,6 +256,6 @@ public class ClassNewInstance extends BugChecker implements MethodInvocationTree
         toHandle.removeIf((Type elem) -> ASTHelpers.isSubtype(elem, precise, state));
       }
     }
-    return new UnhandledResult<>(ImmutableSet.copyOf(toHandle), newHandles.build());
+    return new UnhandledResult<>(ImmutableSet.copyOf(toHandle), newHandles.buildOrThrow());
   }
 }

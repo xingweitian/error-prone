@@ -16,15 +16,16 @@
 
 package com.google.errorprone.refaster;
 
-import com.google.common.base.Optional;
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.errorprone.SubContext;
 import com.google.errorprone.refaster.UTypeVar.TypeWithExpression;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
+import com.sun.tools.javac.code.Symbol.PackageSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symtab;
@@ -37,6 +38,7 @@ import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Enter;
 import com.sun.tools.javac.comp.Infer;
 import com.sun.tools.javac.main.JavaCompiler;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.Context;
@@ -45,6 +47,7 @@ import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Name;
 import com.sun.tools.javac.util.Names;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -60,13 +63,16 @@ public final class Inliner {
   public final Bindings bindings;
 
   private final Map<String, TypeVar> typeVarCache;
+  private ImportPolicy importPolicy = ImportPolicy.IMPORT_TOP_LEVEL;
+  private final JCCompilationUnit compilationUnit;
 
-  public Inliner(Context context, Bindings bindings) {
-    this.context = new SubContext(context);
-    this.bindings = new Bindings(bindings).unmodifiable();
+  Inliner(Context context, Bindings bindings, JCCompilationUnit compilationUnit) {
+    this.context = checkNotNull(context);
+    this.bindings = Bindings.create(bindings);
     this.importsToAdd = Sets.newHashSet();
     this.staticImportsToAdd = Sets.newHashSet();
     this.typeVarCache = Maps.newHashMap();
+    this.compilationUnit = checkNotNull(compilationUnit);
   }
 
   public void addImport(String qualifiedImport) {
@@ -84,10 +90,10 @@ public final class Inliner {
     try {
       Symbol symbol =
           JavaCompiler.instance(context).resolveBinaryNameOrIdent(qualifiedClass.toString());
-      if (symbol.equals(symtab().errSymbol) || !(symbol instanceof ClassSymbol)) {
+      if (symbol.equals(symtab().errSymbol) || !(symbol instanceof ClassSymbol classSymbol)) {
         throw new CouldNotResolveImportException(qualifiedClass);
       } else {
-        return (ClassSymbol) symbol;
+        return classSymbol;
       }
     } catch (NullPointerException e) {
       throw new CouldNotResolveImportException(qualifiedClass);
@@ -96,6 +102,14 @@ public final class Inliner {
 
   public Context getContext() {
     return context;
+  }
+
+  public JCCompilationUnit compilationUnit() {
+    return compilationUnit;
+  }
+
+  public PackageSymbol packageSymbol() {
+    return checkNotNull(compilationUnit.packge);
   }
 
   public Types types() {
@@ -123,7 +137,11 @@ public final class Inliner {
   }
 
   public ImportPolicy importPolicy() {
-    return ImportPolicy.instance(context);
+    return importPolicy;
+  }
+
+  public void setImportPolicy(ImportPolicy importPolicy) {
+    this.importPolicy = checkNotNull(importPolicy);
   }
 
   public Name asName(CharSequence str) {
@@ -180,16 +198,15 @@ public final class Inliner {
   }
 
   public <V> Optional<V> getOptionalBinding(Bindings.Key<V> key) {
-    return Optional.fromNullable(bindings.getBinding(key));
+    return Optional.ofNullable(bindings.getBinding(key));
   }
 
   public <R> com.sun.tools.javac.util.List<R> inlineList(
       Iterable<? extends Inlineable<? extends R>> elements) throws CouldNotResolveImportException {
     ListBuffer<R> result = new ListBuffer<>();
     for (Inlineable<? extends R> e : elements) {
-      if (e instanceof URepeated) {
+      if (e instanceof URepeated repeated) {
         // URepeated is bound to a list of expressions.
-        URepeated repeated = (URepeated) e;
         for (JCExpression expr : getBinding(repeated.key())) {
           @SuppressWarnings("unchecked")
           // URepeated is an Inlineable<JCExpression>, so if e is also an Inlineable<? extends R>,
@@ -204,11 +221,11 @@ public final class Inliner {
     return result.toList();
   }
 
-  public Set<String> getImportsToAdd() {
+  public ImmutableSet<String> getImportsToAdd() {
     return ImmutableSet.copyOf(importsToAdd);
   }
 
-  public Set<String> getStaticImportsToAdd() {
+  public ImmutableSet<String> getStaticImportsToAdd() {
     return ImmutableSet.copyOf(staticImportsToAdd);
   }
 
@@ -227,24 +244,9 @@ public final class Inliner {
     sym.type = typeVar;
     typeVarCache.put(var.getName(), typeVar);
     // Any recursive uses of var will point to the same TypeVar object generated above.
-    setUpperBound(typeVar, var.getUpperBound().inline(this));
+    typeVar.setUpperBound(var.getUpperBound().inline(this));
     typeVar.lower = var.getLowerBound().inline(this);
     return typeVar;
-  }
-
-  private static void setUpperBound(TypeVar typeVar, Type bound) {
-    // https://bugs.openjdk.java.net/browse/JDK-8193367
-    try {
-      TypeVar.class.getMethod("setUpperBound", Type.class).invoke(typeVar, bound);
-      return;
-    } catch (ReflectiveOperationException e) {
-      // continue below
-    }
-    try {
-      TypeVar.class.getField("bound").set(typeVar, bound);
-    } catch (ReflectiveOperationException e) {
-      throw new LinkageError(e.getMessage(), e);
-    }
   }
 
   Type inlineTypeVar(UTypeVar var) throws CouldNotResolveImportException {

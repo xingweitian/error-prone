@@ -33,18 +33,20 @@ public class OrphanedFormatStringTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains:",
-            "    System.err.println(\"%s\");",
-            "    // BUG: Diagnostic contains:",
-            "    new Exception(\"%s\");",
-            "    // BUG: Diagnostic contains:",
-            "    new StringBuilder(\"%s\");",
-            "    // BUG: Diagnostic contains:",
-            "    new StringBuilder().append(\"%s\", 0, 0);",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains:
+                System.err.println("%s");
+                // BUG: Diagnostic contains:
+                new Exception("%s");
+                // BUG: Diagnostic contains:
+                new StringBuilder("%s");
+                // BUG: Diagnostic contains:
+                new StringBuilder().append("%s", 0, 0);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -53,21 +55,25 @@ public class OrphanedFormatStringTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  static class FormatException extends Exception {",
-            "    FormatException(String f, Object... xs) {",
-            "      super(String.format(f, xs));",
-            "    }",
-            "  }",
-            "  void f() {",
-            "    String s = \"%s\";",
-            "    new FormatException(\"%s\");",
-            "    System.err.printf(\"%s\");",
-            "  }",
-            "  void appendToStringBuilder(StringBuilder b) {",
-            "    b.append(\"%s\");",
-            "  }",
-            "}")
+            """
+            class Test {
+              static class FormatException extends Exception {
+                FormatException(String f, Object... xs) {
+                  super(String.format(f, xs));
+                }
+              }
+
+              void f() {
+                String s = "%s";
+                new FormatException("%s");
+                System.err.printf("%s");
+              }
+
+              void appendToStringBuilder(StringBuilder b) {
+                b.append("%s");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -81,6 +87,7 @@ public class OrphanedFormatStringTest {
             "class Test {",
             "  static class MyPrintWriter extends java.io.PrintWriter {",
             "    MyPrintWriter() throws java.io.FileNotFoundException {super((String) null);}",
+            "    public void println(String message) {}",
             "    @FormatMethod",
             "    public void println(String first, Object...args) {}",
             "    @FormatMethod",
@@ -88,6 +95,8 @@ public class OrphanedFormatStringTest {
                 + " @FormatString String second, Object...args) {}",
             "  }",
             "  void f(MyPrintWriter pw) {",
+            "    // BUG: Diagnostic contains:",
+            "    pw.println(\"%s\");",
             "    pw.println(\"%s %s\", \"\", \"\");",
             "    pw.print(\"\", \"%s\");",
             // Here, %s in the first position is a non-format String arg
@@ -101,17 +110,78 @@ public class OrphanedFormatStringTest {
         .doTest();
   }
 
+  // "$ f" is a valid format string, because ' ' is a flag
+  // TODO(b/165671890): consider adding a heuristic to skip these
   @Test
-  public void percent() {
+  public void spaceAfterPercent() {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    StringBuilder messageBuilder = ",
-            "        new StringBuilder(\"hakuna % matata\").append(\"y\").append(\"n\");",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains:
+                StringBuilder messageBuilder = new StringBuilder("more than 50% finished");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void assertWithMessage() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static com.google.common.truth.Truth.assertWithMessage;
+
+            class Test {
+              void test() {
+                // BUG: Diagnostic contains:
+                assertWithMessage("%s").that("").isNull();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void flogger() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.flogger.FluentLogger;
+
+            class Test {
+              private static final FluentLogger logger = FluentLogger.forEnclosingClass();
+
+              public void f() {
+                // BUG: Diagnostic contains:
+                logger.atInfo().log("hello %d");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeFlogger() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.flogger.FluentLogger;
+
+            class Test {
+              private static final FluentLogger logger = FluentLogger.forEnclosingClass();
+
+              public void f(String arg) {
+                logger.atInfo().log("hello %d", arg);
+              }
+            }
+            """)
         .doTest();
   }
 }

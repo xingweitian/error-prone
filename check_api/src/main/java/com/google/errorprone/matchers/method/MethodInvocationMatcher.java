@@ -16,7 +16,6 @@
 
 package com.google.errorprone.matchers.method;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.HashMultimap;
@@ -28,10 +27,8 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Table;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
-import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Type;
@@ -43,89 +40,21 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiPredicate;
-import javax.annotation.Nullable;
-import javax.lang.model.element.ElementKind;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The machinery and type definitions necessary to model and compile a single efficient matcher out
  * of a list of {@link com.google.errorprone.matchers.method.MethodMatchers.MethodMatcher}s.
  */
-public class MethodInvocationMatcher {
+public final class MethodInvocationMatcher {
 
-  /**
-   * Compose several matchers together, such that the composite matches an AST node if any of the
-   * given matchers do.
-   *
-   * <p>This is semantically equivalent to {@link Matchers#anyOf(Iterable)}, but if the list of
-   * matchers contains more than one {@link MethodMatchers.MethodMatcher}, then anyMethod will do
-   * some work up front to try and optimize out the repeated work that those matchers would
-   * otherwise do. Consider profiling your matcher before using this method: the up-front work can
-   * be substantial, and if the list of matchers is small or the result of this method is not used
-   * often, the extra work may not pay for itself.
-   */
-  public static <T extends Tree> Matcher<T> compiledAnyOf(
-      final Iterable<Matcher<? super T>> inputs) {
-    // We want to combine all MethodMatchers in the input, since running N of them at once
-    // is as fast as running just one. But we don't want to move it to the front of the list or
-    // the end of the list unconditionally, because that could change performance characteristics
-    // in a surprising way. Instead, we split the list into 3 segments: those matchers that were
-    // before any MethodMatcher, then all MethodMatchers, then those matchers that were after the
-    // first MethodMatcher. This way we run the remaining N MethodMatchers "for free".
-    ImmutableList<? extends Matcher<? super T>> matchers = ImmutableList.copyOf(inputs);
-    ImmutableList.Builder<Matcher<? super T>> before = ImmutableList.builder();
-    ImmutableSet.Builder<Rule> methodMatchers = ImmutableSet.builder();
-    ImmutableList.Builder<Matcher<? super T>> after = ImmutableList.builder();
-    int methodMatchersSeen = 0;
-    for (Matcher<? super T> matcher : matchers) {
-      if (matcher instanceof MethodMatchers.MethodMatcher) {
-        Optional<Rule> rule = ((MethodMatchers.MethodMatcher) matcher).asRule();
-        if (rule.isPresent()) { // Can't use rules.map, because we need to continue the loop.
-          methodMatchers.add(rule.get());
-          methodMatchersSeen++;
-          continue;
-        }
-      }
-      (methodMatchersSeen > 0 ? after : before).add(matcher);
-    }
-
-    ImmutableList<? extends Matcher<? super T>> effective;
-    if (methodMatchersSeen > 1) {
-      ImmutableList.Builder<Matcher<? super T>> all = ImmutableList.builder();
-      all.addAll(before.build());
-      ImmutableSet<Rule> rules = methodMatchers.build();
-      all.add(Matchers.toType(ExpressionTree.class, compile(rules)));
-      all.addAll(after.build());
-      effective = all.build();
-    } else {
-      // We only expect a speedup if we can combine 2 or more MethodMatchers.
-      effective = matchers;
-    }
-
-    return (t, state) -> {
-      for (Matcher<? super T> matcher : effective) {
-        if (matcher.matches(t, state)) {
-          return true;
-        }
-      }
-      return false;
-    };
-  }
-
-  static final class Context {
-    final MethodSymbol sym;
-    final ExpressionTree tree;
-
-    Context(MethodSymbol sym, ExpressionTree tree) {
-      this.sym = sym;
-      this.tree = tree;
-    }
-
-    public static Optional<Context> create(ExpressionTree tree) {
+  record Context(MethodSymbol sym, ExpressionTree tree) {
+    static Optional<Context> create(ExpressionTree tree) {
       Symbol sym = ASTHelpers.getSymbol(tree);
-      if (!(sym instanceof MethodSymbol)) {
+      if (!(sym instanceof MethodSymbol methodSymbol)) {
         return Optional.empty();
       }
-      return Optional.of(new Context((MethodSymbol) sym, tree));
+      return Optional.of(new Context(methodSymbol, tree));
     }
   }
 
@@ -158,7 +87,7 @@ public class MethodInvocationMatcher {
     KIND {
       @Override
       MethodKind extract(Context ctx, VisitorState s) {
-        return ctx.sym.getKind() == ElementKind.CONSTRUCTOR
+        return ctx.sym.isConstructor()
             ? MethodKind.CONSTRUCTOR
             : ctx.sym.isStatic() ? MethodKind.STATIC : MethodKind.INSTANCE;
       }
@@ -218,12 +147,9 @@ public class MethodInvocationMatcher {
     Object comparisonKey();
 
     /** A token limiting the {@link Kind} of invocation to match. */
-    @AutoValue
-    abstract class Kind implements Token {
-      public abstract MethodKind kind();
-
+    public record Kind(MethodKind kind) implements Token {
       public static Kind create(MethodKind kind) {
-        return new AutoValue_MethodInvocationMatcher_Token_Kind(kind);
+        return new Kind(kind);
       }
 
       @Override
@@ -238,10 +164,7 @@ public class MethodInvocationMatcher {
     }
 
     /** A token limiting the name of the method being invoked. */
-    @AutoValue
-    abstract class MethodName implements Token {
-      public abstract String methodName();
-
+    public record MethodName(String methodName) implements Token {
       @Override
       public Object comparisonKey() {
         return methodName();
@@ -253,15 +176,12 @@ public class MethodInvocationMatcher {
       }
 
       public static MethodName create(String methodName) {
-        return new AutoValue_MethodInvocationMatcher_Token_MethodName(methodName);
+        return new MethodName(methodName);
       }
     }
 
     /** A token limiting the types of the formal parameters of the method being invoked. */
-    @AutoValue
-    abstract class ParameterTypes implements Token {
-      public abstract ImmutableList<String> parameterTypes();
-
+    public record ParameterTypes(ImmutableList<String> parameterTypes) implements Token {
       @Override
       public TokenType type() {
         return TokenType.PARAMETER_TYPES;
@@ -273,17 +193,14 @@ public class MethodInvocationMatcher {
       }
 
       public static ParameterTypes create(ImmutableList<String> types) {
-        return new AutoValue_MethodInvocationMatcher_Token_ParameterTypes(types);
+        return new ParameterTypes(types);
       }
     }
 
     /** A token specifying the class or interface in which the invoked method was defined. */
-    @AutoValue
-    abstract class DefinedIn implements Token {
-      public abstract String owner();
-
+    public record DefinedIn(String owner) implements Token {
       public static DefinedIn create(String owner) {
-        return new AutoValue_MethodInvocationMatcher_Token_DefinedIn(owner);
+        return new DefinedIn(owner);
       }
 
       @Override
@@ -301,12 +218,9 @@ public class MethodInvocationMatcher {
      * A token specifying the exact type of the object on which the method is being invoked (or the
      * class in which it is defined, for static methods).
      */
-    @AutoValue
-    abstract class ReceiverType implements Token {
-      public abstract String receiverType();
-
+    public record ReceiverType(String receiverType) implements Token {
       public static ReceiverType create(String receiverType) {
-        return new AutoValue_MethodInvocationMatcher_Token_ReceiverType(receiverType);
+        return new ReceiverType(receiverType);
       }
 
       @Override
@@ -324,17 +238,14 @@ public class MethodInvocationMatcher {
      * A token specifying that the class of the object on which the method is being invoked must be
      * a subtype of another type.
      */
-    @AutoValue
-    abstract class ReceiverSupertype implements Token {
-      public abstract String receiverSupertype();
-
+    public record ReceiverSupertype(String receiverSupertype) implements Token {
       @Override
       public TokenType type() {
         return TokenType.RECEIVER_SUPERTYPE;
       }
 
       public static ReceiverSupertype create(String receiverSupertype) {
-        return new AutoValue_MethodInvocationMatcher_Token_ReceiverSupertype(receiverSupertype);
+        return new ReceiverSupertype(receiverSupertype);
       }
 
       @Override
@@ -354,16 +265,13 @@ public class MethodInvocationMatcher {
    * Consider using the fluent API from MethodMatcher, and the associated helpers in Matchers, when
    * possible.</strong>
    */
-  @AutoValue
-  public abstract static class Rule {
-
+  public record Rule(ImmutableMap<TokenType, ? extends Set<Token>> required) {
     /** Builds a Rule object from a map. */
     public static Rule create(ImmutableMap<TokenType, ? extends Set<Token>> required) {
-      return new AutoValue_MethodInvocationMatcher_Rule(required);
+      return new Rule(required);
     }
 
     // An absent token means to allow any value for this token type
-    public abstract ImmutableMap<TokenType, ? extends Set<Token>> required();
   }
 
   /** A Node is just a type synonym for Object - it's just a unique pointer. */
@@ -372,18 +280,8 @@ public class MethodInvocationMatcher {
   /**
    * A map describing where to look next based on the current token, and a default if none match.
    */
-  private static class NodeWithDefault {
-
-    private final Set<Node> states;
-    @Nullable final Set<Node> def;
-    final SetMultimap<Token, Node> mapping;
-
-    NodeWithDefault(Set<Node> states, Set<Node> def, SetMultimap<Token, Node> mapping) {
-      this.states = states;
-      this.def = def;
-      this.mapping = mapping;
-    }
-  }
+  private record NodeWithDefault(
+      Set<Node> states, @Nullable Set<Node> def, SetMultimap<Token, Node> mapping) {}
 
   /** Shared by all compiled graphs, because it has no varying properties. */
   private static final Node ACCEPT = new Node();
@@ -440,30 +338,31 @@ public class MethodInvocationMatcher {
             entry.getKey().comparisonKey(), traverse(mappings, mappings.get(entry.getValue())));
       }
 
-      switch (type) {
-        case RECEIVER_SUPERTYPE:
-          return (ctx, state) -> {
-            Type receiverType = (Type) TokenType.RECEIVER_SUPERTYPE.extract(ctx, state);
-            // Have to iterate here because subclassing can't be checked by lookup.
-            for (Map.Entry<Object, BiPredicate<Context, VisitorState>> child : lookup.entrySet()) {
-              if (ASTHelpers.isSubtype(
-                  receiverType, state.getTypeFromString((String) child.getKey()), state)) {
-                return child.getValue().test(ctx, state);
+      return switch (type) {
+        case RECEIVER_SUPERTYPE ->
+            (ctx, state) -> {
+              Type receiverType = (Type) TokenType.RECEIVER_SUPERTYPE.extract(ctx, state);
+              // Have to iterate here because subclassing can't be checked by lookup.
+              for (Map.Entry<Object, BiPredicate<Context, VisitorState>> child :
+                  lookup.entrySet()) {
+                if (ASTHelpers.isSubtype(
+                    receiverType, state.getTypeFromString((String) child.getKey()), state)) {
+                  return child.getValue().test(ctx, state);
+                }
               }
-            }
-            return defaultBehavior.test(ctx, state);
-          };
-        default:
-          return (ctx, state) -> {
-            // All other token types can be checked via a map lookup.
-            Object lookupKey = type.extract(ctx, state);
-            BiPredicate<Context, VisitorState> child = lookup.get(lookupKey);
-            if (child != null) {
-              return child.test(ctx, state);
-            }
-            return defaultBehavior.test(ctx, state);
-          };
-      }
+              return defaultBehavior.test(ctx, state);
+            };
+        default ->
+            (ctx, state) -> {
+              // All other token types can be checked via a map lookup.
+              Object lookupKey = type.extract(ctx, state);
+              BiPredicate<Context, VisitorState> child = lookup.get(lookupKey);
+              if (child != null) {
+                return child.test(ctx, state);
+              }
+              return defaultBehavior.test(ctx, state);
+            };
+      };
     }
   }
 
@@ -473,7 +372,7 @@ public class MethodInvocationMatcher {
    * see the factories in {@link com.google.errorprone.matchers.Matchers} returning subtypes of
    * {@link com.google.errorprone.matchers.method.MethodMatchers.MethodMatcher}.
    */
-  public static Matcher<ExpressionTree> compile(final Iterable<Rule> rules) {
+  public static Matcher<ExpressionTree> compile(Iterable<Rule> rules) {
 
     // A set of Rule objects represents a predicate stated in disjunctive normal form, where the
     // atoms are equality tests on parts of a MethodSymbol allowed by TokenType and Token classes.
@@ -543,7 +442,7 @@ public class MethodInvocationMatcher {
       // First collect all the nodes that accept any token at all
       for (Node node : curr) {
         for (Map.Entry<Optional<Token>, Node> entry : nfa.row(node).entrySet()) {
-          if (!entry.getKey().isPresent()) {
+          if (entry.getKey().isEmpty()) {
             acceptsAny.add(entry.getValue());
           }
         }
@@ -555,11 +454,10 @@ public class MethodInvocationMatcher {
         for (Map.Entry<Optional<Token>, Node> entry : nfa.row(node).entrySet()) {
           entry
               .getKey()
-              .ifPresent(
-                  label -> {
-                    destinations.put(label, entry.getValue());
-                    destinations.putAll(label, acceptsAny);
-                  });
+              .ifPresent(label -> {
+                destinations.put(label, entry.getValue());
+                destinations.putAll(label, acceptsAny);
+              });
         }
       }
 

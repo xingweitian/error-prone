@@ -20,7 +20,6 @@ import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.argument;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -39,7 +38,6 @@ import com.sun.tools.javac.tree.JCTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "IsInstanceOfClass",
     summary = "The argument to Class#isInstance(Object) should not be a Class",
     severity = ERROR)
 public class IsInstanceOfClass extends BugChecker implements MethodInvocationTreeMatcher {
@@ -109,43 +107,31 @@ public class IsInstanceOfClass extends BugChecker implements MethodInvocationTre
     EXPR
   }
 
-  @AutoValue
-  abstract static class Operand {
-    abstract Kind kind();
-
-    abstract CharSequence value();
-
-    abstract CharSequence source();
-
+  private record Operand(Kind kind, CharSequence value, CharSequence source) {
     static Operand create(Kind kind, CharSequence value, CharSequence source) {
-      return new AutoValue_IsInstanceOfClass_Operand(kind, value, source);
+      return new Operand(kind, value, source);
     }
   }
 
   static Operand classify(JCTree tree, VisitorState state) {
     CharSequence source = state.getSourceForNode(tree);
-    if (tree instanceof MethodInvocationTree) {
+    if (tree instanceof MethodInvocationTree receiverInvocation) {
       // expr.getClass() -> "expr"
-      MethodInvocationTree receiverInvocation = (MethodInvocationTree) tree;
       MethodSymbol sym = ASTHelpers.getSymbol(receiverInvocation);
-      if (sym != null) {
-        if (sym.getSimpleName().contentEquals("getClass") && sym.params().isEmpty()) {
-          if (receiverInvocation.getMethodSelect() instanceof IdentifierTree) {
-            // unqualified `getClass()`
-            return Operand.create(Kind.EXPR, state.getSourceForNode(tree), source);
-          }
-          return Operand.create(
-              Kind.GET_CLASS,
-              state.getSourceForNode((JCTree) ASTHelpers.getReceiver(receiverInvocation)),
-              source);
+      if (sym.getSimpleName().contentEquals("getClass") && sym.params().isEmpty()) {
+        if (receiverInvocation.getMethodSelect() instanceof IdentifierTree) {
+          // unqualified `getClass()`
+          return Operand.create(Kind.EXPR, state.getSourceForNode(tree), source);
         }
-      }
-    } else if (tree instanceof MemberSelectTree) {
-      // Foo.class -> "Foo"
-      MemberSelectTree select = (MemberSelectTree) tree;
-      if (select.getIdentifier().contentEquals("class")) {
         return Operand.create(
-            Kind.LITERAL, state.getSourceForNode((JCTree) select.getExpression()), source);
+            Kind.GET_CLASS,
+            state.getSourceForNode(ASTHelpers.getReceiver(receiverInvocation)),
+            source);
+      }
+    } else if (tree instanceof MemberSelectTree select) {
+      // Foo.class -> "Foo"
+      if (select.getIdentifier().contentEquals("class")) {
+        return Operand.create(Kind.LITERAL, state.getSourceForNode(select.getExpression()), source);
       }
     }
     return Operand.create(Kind.EXPR, source, source);

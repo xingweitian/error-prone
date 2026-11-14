@@ -17,13 +17,10 @@
 package com.google.errorprone;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth8.assertThat;
 import static org.junit.Assert.assertThrows;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import java.util.Map;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -54,10 +51,12 @@ public final class ErrorProneFlagsTest {
             .parseFlag("-XepOpt:Arg1=tRuE")
             .parseFlag("-XepOpt:Arg2=FaLsE")
             .parseFlag("-XepOpt:Arg3=yes")
+            .parseFlag("-XepOpt:Arg4")
             .build();
     assertThat(flags.getBoolean("Arg1")).hasValue(true);
     assertThat(flags.getBoolean("Arg2")).hasValue(false);
     assertThrows(IllegalArgumentException.class, () -> flags.getBoolean("Arg3"));
+    assertThat(flags.getBoolean("Arg4")).hasValue(true);
     assertThat(flags.getBoolean("absent")).isEmpty();
   }
 
@@ -91,12 +90,12 @@ public final class ErrorProneFlagsTest {
             .parseFlag("-XepOpt:ArgD=7")
             .parseFlag("-XepOpt:ArgE=")
             .build();
-    assertThat(flags.getList("ArgA")).hasValue(ImmutableList.of("1", "2", "3"));
-    assertThat(flags.getList("ArgB")).hasValue(ImmutableList.of("4", ""));
-    assertThat(flags.getList("ArgC")).hasValue(ImmutableList.of("5", "", "", "6"));
-    assertThat(flags.getList("ArgD")).hasValue(ImmutableList.of("7"));
-    assertThat(flags.getList("ArgE")).hasValue(ImmutableList.of(""));
-    assertThat(flags.getList("absent")).isEmpty();
+    assertThat(flags.getListOrEmpty("ArgA")).containsExactly("1", "2", "3").inOrder();
+    assertThat(flags.getListOrEmpty("ArgB")).containsExactly("4", "").inOrder();
+    assertThat(flags.getListOrEmpty("ArgC")).containsExactly("5", "", "", "6").inOrder();
+    assertThat(flags.getListOrEmpty("ArgD")).containsExactly("7");
+    assertThat(flags.getListOrEmpty("ArgE")).containsExactly("");
+    assertThat(flags.getListOrEmpty("absent")).isEmpty();
   }
 
   @Test
@@ -111,9 +110,9 @@ public final class ErrorProneFlagsTest {
             .put("a", "FIRST_A")
             .put("b", "b2")
             .put("c", "c2")
-            .build();
+            .buildOrThrow();
 
-    Map<String, String> actualCombinedMap = flags1.plus(flags2).getFlagsMap();
+    ImmutableMap<String, String> actualCombinedMap = flags1.plus(flags2).getFlagsMap();
 
     assertThat(actualCombinedMap).containsExactlyEntriesIn(expectedCombinedMap);
   }
@@ -142,10 +141,13 @@ public final class ErrorProneFlagsTest {
         ErrorProneFlags.builder()
             .parseFlag("-XepOpt:Colour=RED")
             .parseFlag("-XepOpt:Colours=YELLOW,GREEN")
+            .parseFlag("-XepOpt:CaseInsensitiveColours=yellow,green")
             .parseFlag("-XepOpt:EmptyColours=")
             .build();
     assertThat(flags.getEnum("Colour", Colour.class)).hasValue(Colour.RED);
     assertThat(flags.getEnumSet("Colours", Colour.class))
+        .hasValue(ImmutableSet.of(Colour.YELLOW, Colour.GREEN));
+    assertThat(flags.getEnumSet("CaseInsensitiveColours", Colour.class))
         .hasValue(ImmutableSet.of(Colour.YELLOW, Colour.GREEN));
     assertThat(flags.getEnumSet("EmptyColours", Colour.class)).hasValue(ImmutableSet.of());
     assertThat(flags.getEnumSet("NoSuchColours", Colour.class)).isEmpty();

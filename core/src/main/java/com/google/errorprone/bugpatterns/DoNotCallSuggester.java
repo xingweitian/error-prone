@@ -18,30 +18,32 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
-import static com.google.errorprone.bugpatterns.DoNotCallChecker.DO_NOT_CALL;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.matchers.InjectMatchers.DAGGER_PRODUCES_ANNOTATION;
+import static com.google.errorprone.matchers.InjectMatchers.DAGGER_PROVIDES_ANNOTATION;
 import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.findClass;
+import static com.google.errorprone.util.ASTHelpers.findSuperMethods;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 import static com.google.errorprone.util.ASTHelpers.methodCanBeOverridden;
+import static com.google.errorprone.util.AnnotationNames.DO_NOT_CALL_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.OVERRIDE_ANNOTATION;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.ThrowTree;
-import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Types;
 import javax.lang.model.element.Modifier;
 
 /**
@@ -49,7 +51,6 @@ import javax.lang.model.element.Modifier;
  * calls at compile-time instead failing at runtime.
  */
 @BugPattern(
-    name = "DoNotCallSuggester",
     summary =
         "Consider annotating methods that always throw with @DoNotCall. "
             + "Read more at https://errorprone.info/bugpattern/DoNotCall",
@@ -67,37 +68,34 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
           // common substrings in the names of exception factory methods
           "throw", "fail", "exception", "propagate");
 
-  private static final ImmutableSet<String> ANNOTATIONS_TO_IGNORE =
+  private static final ImmutableSet<ClassName> ANNOTATIONS_TO_IGNORE =
       ImmutableSet.of(
           // ignore methods that are already annotated w/ @DoNotCall
-          DO_NOT_CALL,
+          DO_NOT_CALL_ANNOTATION,
           // We exclude methods that are overrides; at call sites, rarely is the variable reference
           // statically typed as the subclass (often it's typed as the interface type), so adding
           // @DoNotCall won't actually help any callers.
-          "java.lang.Override",
+          OVERRIDE_ANNOTATION,
           // dagger provider / producers
-          "dagger.Provides",
-          "dagger.producers.Produces",
+          DAGGER_PROVIDES_ANNOTATION,
+          DAGGER_PRODUCES_ANNOTATION,
           // starlark API boundary
-          "net.starlark.java.annot.StarlarkMethod");
+          ClassName.of("net.starlark.java.annot.StarlarkMethod"));
 
-  private static final ImmutableSet<String> PARENT_CLASS_TO_IGNORE =
+  private static final ImmutableSet<ClassName> PARENT_CLASS_TO_IGNORE =
       ImmutableSet.of(
           // a Guice module w/ bindings
-          "com.google.inject.AbstractModule");
+          ClassName.of("com.google.inject.AbstractModule"));
 
-  private static final ImmutableSet<String> RETURNED_SUPER_TYPES_TO_IGNORE =
+  private static final ImmutableSet<ClassName> RETURNED_SUPER_TYPES_TO_IGNORE =
       ImmutableSet.of(
           // a throwable
-          "java.lang.Throwable");
+          ClassName.of("java.lang.Throwable"));
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
     // if we can't find the method symbol, exit
     MethodSymbol symbol = getSymbol(tree);
-    if (symbol == null) {
-      return NO_MATCH;
-    }
 
     // if the method is abstract, exit
     if (tree.getBody() == null) {
@@ -115,17 +113,15 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
     }
 
     // if the single statement is not a ThrowTree, exit
-    StatementTree statement = getOnlyElement(tree.getBody().getStatements());
-    if (!(statement instanceof ThrowTree)) {
+    if (!(getOnlyElement(tree.getBody().getStatements()) instanceof ThrowTree throwTree)) {
       return NO_MATCH;
     }
 
     // if the enclosing class extends from a known frameworks class, exit
     ClassSymbol enclosingClass = enclosingClass(symbol);
     Type enclosingType = getType(findClass(enclosingClass, state));
-    for (String parentClass : PARENT_CLASS_TO_IGNORE) {
-      Type parentClassType = state.getTypeFromString(parentClass);
-      if (isSubtype(enclosingType, parentClassType, state)) {
+    for (ClassName parentClass : PARENT_CLASS_TO_IGNORE) {
+      if (isSubtype(enclosingType, parentClass, state)) {
         return NO_MATCH;
       }
     }
@@ -143,7 +139,7 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
       }
     }
 
-    // if a method name contais a banned substring, exit
+    // if a method name contains a banned substring, exit
     for (String methodSubstring : METHOD_SUBSTRINGS_TO_IGNORE) {
       if (methodName.contains(methodSubstring)) {
         return NO_MATCH;
@@ -151,7 +147,7 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
     }
 
     // if the method is annotated with a banned annotation, exit
-    for (String annotationToIgnore : ANNOTATIONS_TO_IGNORE) {
+    for (ClassName annotationToIgnore : ANNOTATIONS_TO_IGNORE) {
       if (hasAnnotation(tree, annotationToIgnore, state)) {
         return NO_MATCH;
       }
@@ -159,24 +155,23 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
 
     // if the method returns a banned type, exit
     Type returnType = getType(tree.getReturnType());
-    for (String returnedSuperType : RETURNED_SUPER_TYPES_TO_IGNORE) {
-      Type throwableType = state.getTypeFromString(returnedSuperType);
-      if (isSubtype(returnType, throwableType, state)) {
+    for (ClassName returnedSuperType : RETURNED_SUPER_TYPES_TO_IGNORE) {
+      if (isSubtype(returnType, returnedSuperType, state)) {
         return NO_MATCH;
       }
     }
 
     // if the method is an "effective override" (they forgot to add @Override), exit
-    if (isEffectivelyOverride(symbol, state.getTypes())) {
+    if (!findSuperMethods(symbol, state.getTypes()).isEmpty()) {
       return NO_MATCH;
     }
 
     // otherwise, suggest annotating the method with @DoNotCall
-    Type thrownType = getType(((ThrowTree) statement).getExpression());
+    Type thrownType = getType(throwTree.getExpression());
     // TODO(kak): Consider possibly stripping "java.lang" (users should be familiar with those!)
     SuggestedFix fix =
         SuggestedFix.builder()
-            .addImport(DO_NOT_CALL)
+            .addImport(DO_NOT_CALL_ANNOTATION)
             .prefixWith(tree, "@DoNotCall(\"Always throws " + thrownType + "\") ")
             .build();
     return buildDescription(tree)
@@ -186,32 +181,5 @@ public class DoNotCallSuggester extends BugChecker implements MethodTreeMatcher 
                 + " break any existing callers of this API).")
         .addFix(fix)
         .build();
-  }
-
-  // this code is stolen from MissingOverride.java
-  private static boolean isEffectivelyOverride(Symbol sym, Types types) {
-    // static methods can't be overrides
-    if (sym.isStatic()) {
-      return false;
-    }
-    ClassSymbol owner = sym.enclClass();
-    for (Type s : types.closure(owner.type)) {
-      if (s.asElement().equals(owner)) {
-        continue;
-      }
-      for (Symbol m : s.tsym.members().getSymbolsByName(sym.name)) {
-        if (!(m instanceof MethodSymbol)) {
-          continue;
-        }
-        MethodSymbol msym = (MethodSymbol) m;
-        if (msym.isStatic()) {
-          continue;
-        }
-        if (sym.overrides(msym, owner, types, /* checkResult= */ false)) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 }

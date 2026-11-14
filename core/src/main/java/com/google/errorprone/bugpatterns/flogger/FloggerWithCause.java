@@ -37,9 +37,8 @@ import com.google.errorprone.predicates.TypePredicates;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
-import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCNewClass;
 import java.util.Arrays;
 import java.util.Collections;
@@ -48,7 +47,6 @@ import java.util.Optional;
 
 /** Flogger's withCause(Throwable) method checks */
 @BugPattern(
-    name = "FloggerWithCause",
     summary =
         "Calling withCause(Throwable) with an inline allocated Throwable is discouraged."
             + " Consider using withStackTrace(StackSize) instead, and specifying a reduced"
@@ -95,7 +93,7 @@ public class FloggerWithCause extends BugChecker implements MethodInvocationTree
 
     ExpressionTree cause = Iterables.getOnlyElement(tree.getArguments());
 
-    if (cause.getKind() == Kind.NEW_CLASS) {
+    if (cause instanceof NewClassTree) {
       Optional<ExpressionTree> throwableArgument = getThrowableArgument(cause, state);
       if (throwableArgument.isPresent() || FIXABLE_THROWABLE_MATCHER.matches(cause, state)) {
         List<Fix> fixes = getFixes(tree, state, throwableArgument.orElse(null));
@@ -164,10 +162,10 @@ public class FloggerWithCause extends BugChecker implements MethodInvocationTree
   }
 
   private static int getMethodStart(MethodInvocationTree tree, VisitorState state) {
-    return state.getEndPosition((JCTree) ASTHelpers.getReceiver(tree));
+    return state.getEndPosition(ASTHelpers.getReceiver(tree));
   }
 
   private static int getMethodEnd(MethodInvocationTree tree, VisitorState state) {
-    return state.getEndPosition((JCTree) tree);
+    return state.getEndPosition(tree);
   }
 }

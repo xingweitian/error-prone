@@ -16,8 +16,9 @@
 
 package com.google.errorprone.bugpatterns.javadoc;
 
+import static org.junit.Assert.assertEquals;
+
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,18 +37,26 @@ public final class InvalidInlineTagTest {
   public void typo() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** @return anything {@lnk #foo} */",
-            "  void foo();",
-            "}")
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @return anything {@lnk #foo}
+               */
+              void foo();
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** @return anything {@link #foo} */",
-            "  void foo();",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @return anything {@link #foo}
+               */
+              void foo();
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -55,11 +64,13 @@ public final class InvalidInlineTagTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  /** {@SoFarOutsideEditLimit} */",
-            "  void test() {}",
-            "}")
+            """
+            class Test {
+              // BUG: Diagnostic contains:
+              /** {@SoFarOutsideEditLimit} */
+              void test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -68,17 +79,21 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "SomeType.java",
-            "interface SomeType {",
-            "  /** {@SomeType} {@com.google.common.labs.ClearlyAType} */",
-            "  void foo();",
-            "}")
+            """
+            interface SomeType {
+              /** {@SomeType} {@com.google.common.labs.ClearlyAType} */
+              void foo();
+            }
+            """)
         .addOutputLines(
             "SomeType.java",
-            "interface SomeType {",
-            "  /** {@link SomeType} {@link com.google.common.labs.ClearlyAType} */",
-            "  void foo();",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface SomeType {
+              /** {@link SomeType} {@link com.google.common.labs.ClearlyAType} */
+              void foo();
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -86,19 +101,25 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "SomeType.java",
-            "interface SomeType {",
-            "  /** {@SomeType.A} */",
-            "  void foo();",
-            "  interface A {}",
-            "}")
+            """
+            interface SomeType {
+              /** {@SomeType.A} */
+              void foo();
+
+              interface A {}
+            }
+            """)
         .addOutputLines(
             "SomeType.java",
-            "interface SomeType {",
-            "  /** {@link SomeType.A} */",
-            "  void foo();",
-            "  interface A {}",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface SomeType {
+              /** {@link SomeType.A} */
+              void foo();
+
+              interface A {}
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -106,21 +127,21 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * Provide an {@a}",
-            "   */",
-            "  void foo(int a);",
-            "}")
+            """
+            interface Test {
+              /** Provide an {@a} */
+              void foo(int a);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * Provide an {@code a}",
-            "   */",
-            "  void foo(int a);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** Provide an {@code a} */
+              void foo(int a);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -128,19 +149,21 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Blah",
-            "    * {@param a}, {@param b}  */",
-            "  void foo(int a);",
-            "}")
+            """
+            interface Test {
+              /** Blah {@param a}, {@param b} */
+              void foo(int a);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Blah",
-            "   * {@code a}, {@param b} */",
-            "  void foo(int a);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** Blah {@code a}, {@param b} */
+              void foo(int a);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -148,11 +171,13 @@ public final class InvalidInlineTagTest {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  // BUG: Diagnostic contains:",
-            "  /** Frobnicates a @param foo. */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              // BUG: Diagnostic contains:
+              /** Frobnicates a @param foo. */
+              void frobnicate(String foo);
+            }
+            """)
         .doTest();
   }
 
@@ -161,17 +186,21 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a @code{foo}. */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              /** Frobnicates a @code{foo}. */
+              void frobnicate(String foo);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a {@code foo}. */",
-            "  void frobnicate(String foo);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** Frobnicates a {@code foo}. */
+              void frobnicate(String foo);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -179,11 +208,13 @@ public final class InvalidInlineTagTest {
     helper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  // BUG: Diagnostic contains: tags: {@code",
-            "  /** Frobnicates a (@code foo). */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              // BUG: Diagnostic contains: tags: {@code
+              /** Frobnicates a (@code foo). */
+              void frobnicate(String foo);
+            }
+            """)
         .doTest();
   }
 
@@ -192,17 +223,21 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a (@code foo). */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              /** Frobnicates a (@code foo). */
+              void frobnicate(String foo);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a {@code foo}. */",
-            "  void frobnicate(String foo);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** Frobnicates a {@code foo}. */
+              void frobnicate(String foo);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -210,16 +245,89 @@ public final class InvalidInlineTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a (@link #foo()). */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              /** Frobnicates a (@link #foo()). */
+              void frobnicate(String foo);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /** Frobnicates a {@link #foo()}. */",
-            "  void frobnicate(String foo);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** Frobnicates a {@link #foo()}. */
+              void frobnicate(String foo);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void erroneousTag_doesNotMungeEntireJavadoc() {
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * Frobnicates a {@code foo).
+               * @param foo {@link #foo}
+               */
+              void frobnicate(String foo);
+            }
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void invalidTagMessage() {
+    assertEquals(
+        "@type is not a valid tag, but is a parameter name. Use {@code type} to refer to parameter"
+            + " names inline.",
+        InvalidInlineTag.getMessageForInvalidTag("type"));
+  }
+
+  @Test
+  public void customTag() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * {@customTag1} {@customTag2 this is a custom tag}
+             *
+             * @arbitraryBlockTag
+             */
+            class Test {}
+            """)
+        .setArgs("-XepOpt:Javadoc:customInlineTags=customTag1,customTag2")
+        .doTest();
+  }
+
+  @Test
+  public void blockTagUsedInline() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            interface Test {
+              // BUG: Diagnostic contains: Tag name `see` is not a valid inline tag, but it is a valid block
+              // tag.
+              /** Provide an {@see #foo} */
+              void foo(int a);
+
+              // BUG: Diagnostic contains: Tag name `author` is not a valid inline tag, but it is a valid block
+              // tag.
+              /** {@author ghm} */
+              int bar();
+
+              // BUG: Diagnostic contains: Tag name `since` is not a valid inline tag, but it is a valid block
+              // tag.
+              /** {@since 1.0} */
+              void baz();
+            }
+            """)
+        .doTest();
   }
 }

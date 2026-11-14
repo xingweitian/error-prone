@@ -23,6 +23,7 @@ import static java.util.Arrays.stream;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
+import com.google.errorprone.annotations.MustBeClosed;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -47,8 +48,8 @@ public final class FileObjects {
         URI.create(
             "file:///" + clazz.getPackage().getName().replace('.', '/') + "/" + resourceName);
     String content;
-    try {
-      content = new String(ByteStreams.toByteArray(findResource(clazz, resourceName)), UTF_8);
+    try (InputStream inputStream = findResource(clazz, resourceName)) {
+      content = new String(ByteStreams.toByteArray(inputStream), UTF_8);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
@@ -60,17 +61,13 @@ public final class FileObjects {
     };
   }
 
-  // TODO(b/176096448): the testdata/ fallback is a hack, fix affected tests and remove it
+  @MustBeClosed
   private static InputStream findResource(Class<?> clazz, String name) {
     InputStream is = clazz.getResourceAsStream(name);
-    if (is != null) {
-      return is;
+    if (is == null) {
+      throw new AssertionError("could not find resource: " + name + " for: " + clazz);
     }
-    is = clazz.getResourceAsStream("testdata/" + name);
-    if (is != null) {
-      return is;
-    }
-    throw new AssertionError("could not find resource: " + name + " for: " + clazz);
+    return is;
   }
 
   /** Creates a {@link JavaFileObject} with the given name and content. */
@@ -78,7 +75,7 @@ public final class FileObjects {
     return new SimpleJavaFileObject(URI.create("file:///" + path), Kind.SOURCE) {
       @Override
       public CharSequence getCharContent(boolean ignoreEncodingErrors) {
-        return Joiner.on('\n').join(lines) + "\n";
+        return Joiner.on('\n').join(lines);
       }
     };
   }

@@ -36,7 +36,6 @@ import com.sun.tools.javac.code.Types;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "InexactVarargsConditional",
     summary = "Conditional expression in varargs call contains array and non-array arguments",
     severity = ERROR)
 public class InexactVarargsConditional extends BugChecker implements MethodInvocationTreeMatcher {
@@ -52,14 +51,13 @@ public class InexactVarargsConditional extends BugChecker implements MethodInvoc
       return NO_MATCH;
     }
     Tree arg = getLast(tree.getArguments());
-    if (!(arg instanceof ConditionalExpressionTree)) {
+    if (!(arg instanceof ConditionalExpressionTree cond)) {
       return NO_MATCH;
     }
     Types types = state.getTypes();
     if (types.isArray(getType(arg))) {
       return NO_MATCH;
     }
-    ConditionalExpressionTree cond = (ConditionalExpressionTree) arg;
     boolean trueIsArray = types.isArray(getType(cond.getTrueExpression()));
     if (!(trueIsArray ^ types.isArray(getType(cond.getFalseExpression())))) {
       return NO_MATCH;

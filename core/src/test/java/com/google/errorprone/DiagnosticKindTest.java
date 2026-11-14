@@ -59,7 +59,6 @@ public class DiagnosticKindTest {
   }
 
   @BugPattern(
-      name = "ErrorChecker",
       summary = "This is an error!",
       explanation = "Don't do this!",
       severity = SeverityLevel.ERROR)
@@ -71,7 +70,7 @@ public class DiagnosticKindTest {
   }
 
   @Test
-  public void testError() {
+  public void error() {
     compilerBuilder.report(ScannerSupplier.fromBugCheckerClasses(ErrorChecker.class));
     ErrorProneTestCompiler compiler = compilerBuilder.build();
     Result result = compiler.compile(Arrays.asList(forSourceLines("Test.java", TEST_CODE)));
@@ -83,7 +82,6 @@ public class DiagnosticKindTest {
   }
 
   @BugPattern(
-      name = "WarningChecker",
       summary = "This is a warning!",
       explanation = "Please don't do this!",
       severity = SeverityLevel.WARNING)
@@ -95,7 +93,7 @@ public class DiagnosticKindTest {
   }
 
   @Test
-  public void testWarning() {
+  public void warning() {
     compilerBuilder.report(ScannerSupplier.fromBugCheckerClasses(WarningChecker.class));
     ErrorProneTestCompiler compiler = compilerBuilder.build();
     Result result = compiler.compile(Arrays.asList(forSourceLines("Test.java", TEST_CODE)));
@@ -108,7 +106,6 @@ public class DiagnosticKindTest {
   }
 
   @BugPattern(
-      name = "SuggestionChecker",
       summary = "This is a suggestion!",
       explanation = "Don't do this. Or do it. I'm a suggestion, not a cop.",
       severity = SeverityLevel.SUGGESTION)
@@ -120,7 +117,7 @@ public class DiagnosticKindTest {
   }
 
   @Test
-  public void testSuggestion() {
+  public void suggestion() {
     compilerBuilder.report(ScannerSupplier.fromBugCheckerClasses(SuggestionChecker.class));
     ErrorProneTestCompiler compiler = compilerBuilder.build();
     Result result = compiler.compile(Arrays.asList(forSourceLines("Test.java", TEST_CODE)));

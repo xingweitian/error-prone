@@ -17,12 +17,15 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static com.google.common.collect.Streams.stream;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -30,7 +33,7 @@ import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.predicates.TypePredicate;
 import com.google.errorprone.predicates.TypePredicates;
-import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.FindIdentifiers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.ExpressionTree;
@@ -39,6 +42,7 @@ import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import java.util.Optional;
+import javax.inject.Inject;
 
 /**
  * Flags {@code com.sun.source.tree.Tree#toString} usage in {@link BugChecker}s.
@@ -46,7 +50,6 @@ import java.util.Optional;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "TreeToString",
     summary =
         "Tree#toString shouldn't be used for Trees deriving from the code being compiled, as it"
             + " discards whitespace and comments.",
@@ -65,17 +68,23 @@ public class TreeToString extends AbstractToString {
           .named("Literal")
           .withParameters("java.lang.Object");
 
-  private static boolean treeToStringInBugChecker(Type type, VisitorState state) {
-    ClassTree enclosingClass = ASTHelpers.findEnclosingNode(state.getPath(), ClassTree.class);
-    if (enclosingClass == null || !IS_BUGCHECKER.matches(enclosingClass, state)) {
-      return false;
-    }
-    return IS_TREE.apply(type, state);
+  @Inject
+  TreeToString(ErrorProneFlags flags) {
+    super(flags);
   }
 
   @Override
   protected TypePredicate typePredicate() {
-    return TreeToString::treeToStringInBugChecker;
+    return this::treeToStringInBugChecker;
+  }
+
+  private boolean treeToStringInBugChecker(Type type, VisitorState state) {
+    return enclosingBugChecker(state) && IS_TREE.apply(type, state);
+  }
+
+  private boolean enclosingBugChecker(VisitorState state) {
+    return stream(state.getPath())
+        .anyMatch(t -> t instanceof ClassTree classTree && IS_BUGCHECKER.matches(classTree, state));
   }
 
   @Override
@@ -84,37 +93,35 @@ public class TreeToString extends AbstractToString {
   }
 
   @Override
-  protected Optional<Fix> implicitToStringFix(ExpressionTree tree, VisitorState state) {
-    return fix(tree, tree, state);
+  protected Optional<Fix> implicitToStringFix(ExpressionTree stringifiedExpr, VisitorState state) {
+    return fix(stringifiedExpr, stringifiedExpr, state);
   }
 
   @Override
-  protected Optional<Fix> toStringFix(Tree parent, ExpressionTree tree, VisitorState state) {
-    if (!(parent instanceof MethodInvocationTree)) {
+  protected Optional<Fix> toStringFix(
+      Tree toStringCall, ExpressionTree stringifiedExpr, VisitorState state) {
+    if (!(toStringCall instanceof MethodInvocationTree methodInvocationTree)) {
       return Optional.empty();
     }
-    ExpressionTree receiver = getReceiver((ExpressionTree) parent);
+    ExpressionTree receiver = getReceiver(methodInvocationTree);
     if (receiver == null) {
       return Optional.empty();
     }
-    return fix(receiver, parent, state);
+    return fix(receiver, toStringCall, state);
   }
 
-  private static Optional<Fix> fix(Tree target, Tree replace, VisitorState state) {
+  private static Optional<Fix> fix(Tree stringifiedExpr, Tree toStringCall, VisitorState state) {
     return FindIdentifiers.findAllIdents(state).stream()
-        .filter(
-            s ->
-                isSubtype(
-                    s.type, state.getTypeFromString("com.google.errorprone.VisitorState"), state))
+        .filter(s -> isSubtype(s.type, COM_GOOGLE_ERRORPRONE_VISITORSTATE.get(state), state))
         .findFirst()
-        .map(s -> SuggestedFix.replace(replace, createStringReplacement(state, s, target)));
+        .map(s ->
+            SuggestedFix.replace(toStringCall, createStringReplacement(state, s, stringifiedExpr)));
   }
 
   private static String createStringReplacement(
-      VisitorState state, VarSymbol visitorStateSymbol, Tree target) {
+      VisitorState state, VarSymbol visitorStateSymbol, Tree stringifiedExpr) {
     String visitorStateVariable = visitorStateSymbol.getSimpleName().toString();
-    if (target instanceof MethodInvocationTree) {
-      MethodInvocationTree targetMethodInvocationTree = (MethodInvocationTree) target;
+    if (stringifiedExpr instanceof MethodInvocationTree targetMethodInvocationTree) {
       if (TREEMAKER_LITERAL_CREATOR.matches(targetMethodInvocationTree, state)) {
         return String.format(
             "%s.getConstantExpression(%s)",
@@ -123,6 +130,9 @@ public class TreeToString extends AbstractToString {
       }
     }
     return String.format(
-        "%s.getSourceForNode(%s)", visitorStateVariable, state.getSourceForNode(target));
+        "%s.getSourceForNode(%s)", visitorStateVariable, state.getSourceForNode(stringifiedExpr));
   }
+
+  private static final Supplier<Type> COM_GOOGLE_ERRORPRONE_VISITORSTATE =
+      typeFromString("com.google.errorprone.VisitorState");
 }

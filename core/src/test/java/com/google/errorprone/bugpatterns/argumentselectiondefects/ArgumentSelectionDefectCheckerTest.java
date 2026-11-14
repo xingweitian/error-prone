@@ -38,12 +38,15 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class ArgumentSelectionDefectCheckerTest {
 
+  private final CompilationTestHelper testHelper =
+      CompilationTestHelper.newInstance(
+          ArgumentSelectionDefectWithStringEquality.class, getClass());
+
   /**
    * A {@link BugChecker} which runs the ArgumentSelectionDefectChecker checker using string
    * equality for edit distance
    */
   @BugPattern(
-      name = "ArgumentSelectionDefectWithStringEquality",
       severity = SeverityLevel.ERROR,
       summary =
           "Run the ArgumentSelectionDefectChecker checker using string equality for edit distance")
@@ -57,80 +60,96 @@ public class ArgumentSelectionDefectCheckerTest {
 
   @Test
   public void argumentSelectionDefectChecker_findsSwap_withSwappedMatchingPair() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second) {",
-            "     // BUG: Diagnostic contains: target(first, second)",
-            "     // target(/* first= */second, /* second= */first)",
-            "     target(second, first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object first, Object second) {
+                // BUG: Diagnostic contains: target(first, second)
+                // target(/* first= */second, /* second= */first)
+                target(second, first);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void argumentSelectionDefectChecker_findsSwap_withSwappedMatchingPairWithMethod() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  abstract Object getSecond();",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: target(first, getSecond())",
-            "     // target(/* first= */getSecond(), /* second= */first)",
-            "     target(getSecond(), first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              abstract Object getSecond();
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: target(first, getSecond())
+                // target(/* first= */getSecond(), /* second= */first)
+                target(getSecond(), first);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void argumentSelectionDefectChecker_findsSwap_withOneNullArgument() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object second) {",
-            "     // BUG: Diagnostic contains: target(null, second)",
-            "     // target(/* first= */second, /* second= */null)",
-            "     target(second, null);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object second) {
+                // BUG: Diagnostic contains: target(null, second)
+                // target(/* first= */second, /* second= */null)
+                target(second, null);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void argumentSelectionDefectChecker_rejectsSwap_withNoAssignableAlternatives() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(String first, Integer second);",
-            "  void test(Integer first, String second) {",
-            "     target(second, first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(String first, Integer second);
+
+              void test(Integer first, String second) {
+                target(second, first);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void argumentSelectionDefectChecker_commentsOnlyOnSwappedPair_withThreeArguments() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second, Object third);",
-            "  void test(Object first, Object second, Object third) {",
-            "     // BUG: Diagnostic contains: target(first, second, third)",
-            "     // target(/* first= */second, /* second= */first, third)",
-            "     target(second, first, third);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second, Object third);
+
+              void test(Object first, Object second, Object third) {
+                // BUG: Diagnostic contains: target(first, second, third)
+                // target(/* first= */second, /* second= */first, third)
+                target(second, first, third);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -139,7 +158,6 @@ public class ArgumentSelectionDefectCheckerTest {
    * equality for edit distance and ignores formal parameters called 'ignore'.
    */
   @BugPattern(
-      name = "ArgumentSelectionDefectWithIgnoredFormalsHeuristic",
       severity = SeverityLevel.ERROR,
       summary =
           "Run the ArgumentSelectionDefectChecker checker with a heuristic that ignores formal "
@@ -162,12 +180,15 @@ public class ArgumentSelectionDefectCheckerTest {
             ArgumentSelectionDefectWithIgnoredFormalsHeuristic.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object ignore, Object second);",
-            "  void test(Object ignore, Object second) {",
-            "     target(second, ignore);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object ignore, Object second);
+
+              void test(Object ignore, Object second) {
+                target(second, ignore);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -176,12 +197,15 @@ public class ArgumentSelectionDefectCheckerTest {
     CompilationTestHelper.newInstance(ArgumentSelectionDefectChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object second) {",
-            "     target(second, null);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object second) {
+                target(second, null);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -190,12 +214,15 @@ public class ArgumentSelectionDefectCheckerTest {
     CompilationTestHelper.newInstance(ArgumentSelectionDefectChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object second) {",
-            "     target(second, 1);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object second) {
+                target(second, 1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -204,7 +231,6 @@ public class ArgumentSelectionDefectCheckerTest {
    * equality for edit distance and a penaltyThreshold of 0.9
    */
   @BugPattern(
-      name = "ArgumentSelectionDefectWithPenaltyThreshold",
       severity = SeverityLevel.ERROR,
       summary =
           "Run the ArgumentSelectionDefectChecker checker with the penalty threshold heuristic")
@@ -225,14 +251,17 @@ public class ArgumentSelectionDefectCheckerTest {
     CompilationTestHelper.newInstance(ArgumentSelectionDefectWithPenaltyThreshold.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second) {",
-            "     // BUG: Diagnostic contains: target(first, second)",
-            "     // target(/* first= */second, /* second= */first)",
-            "     target(second, first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object first, Object second) {
+                // BUG: Diagnostic contains: target(first, second)
+                // target(/* first= */second, /* second= */first)
+                target(second, first);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -241,12 +270,15 @@ public class ArgumentSelectionDefectCheckerTest {
     CompilationTestHelper.newInstance(ArgumentSelectionDefectWithPenaltyThreshold.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second, Object third, Object fourth);",
-            "  void test(Object first, Object second, Object third, Object different) {",
-            "     target(different, third, second, first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second, Object third, Object fourth);
+
+              void test(Object first, Object second, Object third, Object different) {
+                target(different, third, second, first);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -255,7 +287,6 @@ public class ArgumentSelectionDefectCheckerTest {
    * equality for edit distance and name in comments heuristic
    */
   @BugPattern(
-      name = "ArgumentSelectionDefectWithNameInCommentsHeuristic",
       severity = SeverityLevel.ERROR,
       summary =
           "Run the ArgumentSelectionDefectChecker checker using string equality for edit distance")
@@ -277,27 +308,26 @@ public class ArgumentSelectionDefectCheckerTest {
             ArgumentSelectionDefectWithNameInCommentsHeuristic.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second) {",
-            "     target(/* first= */second, /* second= */first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object first, Object second) {
+                target(/* first= */ second, /* second= */ first);
+              }
+            }
+            """)
         .doTest();
   }
 
   private static Function<ParameterPair, Double> buildEqualityFunction() {
-    return new Function<ParameterPair, Double>() {
-      @Override
-      public Double apply(ParameterPair parameterPair) {
-        return parameterPair.formal().name().equals(parameterPair.actual().name()) ? 0.0 : 1.0;
-      }
+    return (ParameterPair parameterPair) -> {
+      return parameterPair.formal().name().equals(parameterPair.actual().name()) ? 0.0 : 1.0;
     };
   }
 
   /** A {@link BugChecker} which returns true if parameter names are available */
   @BugPattern(
-      name = "ParameterNamesAvailableChecker",
       severity = SeverityLevel.ERROR,
       summary = "Returns true if parameter names are available on a method call")
   public static class ParameterNamesAvailableChecker extends BugChecker
@@ -331,19 +361,142 @@ public class ArgumentSelectionDefectCheckerTest {
 
   @Test
   public void description() {
-    CompilationTestHelper.newInstance(ArgumentSelectionDefectWithStringEquality.class, getClass())
+    testHelper
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second) {",
-            "     // BUG: Diagnostic contains: The following arguments may have been swapped:"
-                + " 'second' for formal parameter 'first', 'first' for formal parameter 'second'."
-                + " Either add clarifying `/* paramName= */` comments, or swap the arguments if"
-                + " that is what was intended",
-            "     target(second, first);",
-            "  }",
-            "}")
+"""
+abstract class Test {
+  abstract void target(Object first, Object second);
+
+  void test(Object first, Object second) {
+    // BUG: Diagnostic contains: The following arguments may have been swapped: 'second' for formal
+    // parameter 'first', 'first' for formal parameter 'second'. Either add clarifying `/*
+    // paramName= */` comments, or swap the arguments if that is what was intended
+    target(second, first);
+  }
+}
+""")
+        .doTest();
+  }
+
+  @Test
+  public void records() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+"""
+class Test {
+  Foo test(String first, String second) {
+    // BUG: Diagnostic contains: may have been swapped
+    return new Foo(second, first);
+  }
+}
+
+record Foo(String first, String second) {}
+""")
+        .doTest();
+  }
+
+  @Test
+  public void recordDeconstruction() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+"""
+class Test {
+  void test(Foo foo) {
+    switch (foo) {
+      // BUG: Diagnostic contains: may have been swapped
+      case Foo(String second, String first, _) -> {}
+      default -> {}
+    }
+  }
+
+  void test2(Foo foo) {
+    switch (foo) {
+      // BUG: Diagnostic contains: may have been swapped
+      case Foo(_, _, Foo(String second, String first, _)) -> {}
+      default -> {}
+    }
+  }
+}
+
+record Foo(String first, String second, Foo foo) {}
+""")
+        .setArgs("--enable-preview", "--release", Integer.toString(Runtime.version().feature()))
+        .doTest();
+  }
+
+  public record Foo(String first, String second) {}
+
+  @Test
+  public void recordPattern() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import %s;
+            class Test {
+              String test(Object o) {
+                return switch (o) {
+                  case Foo(String first, String second) -> first;
+                  default -> "";
+                };
+              }
+            }
+
+            """
+                .formatted(Foo.class.getCanonicalName()))
+        .setArgs("--enable-preview", "--release", Integer.toString(Runtime.version().feature()))
+        .doTest();
+  }
+
+  @Test
+  public void recordPattern_comments() {
+    CompilationTestHelper.newInstance(
+            ArgumentSelectionDefectWithNameInCommentsHeuristic.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            import %s;
+
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              String test(Object o) {
+                return switch (o) {
+                  // BUG: Diagnostic contains:
+                  case Foo(/* second= */ String second, /* first= */ String first) -> first;
+                  default -> "";
+                };
+              }
+            }
+            """
+                .formatted(Foo.class.getCanonicalName()))
+        .doTest();
+  }
+
+  @Test
+  public void recordPattern_comments_negative() {
+    CompilationTestHelper.newInstance(
+            ArgumentSelectionDefectWithNameInCommentsHeuristic.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            import %s;
+
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              String test(Object o) {
+                return switch (o) {
+                  case Foo(/* first= */ String second, /* second= */ String first) -> first;
+                  default -> "";
+                };
+              }
+            }
+            """
+                .formatted(Foo.class.getCanonicalName()))
         .doTest();
   }
 }

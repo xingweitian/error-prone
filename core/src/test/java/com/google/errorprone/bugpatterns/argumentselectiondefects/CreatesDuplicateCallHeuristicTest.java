@@ -44,9 +44,8 @@ public class CreatesDuplicateCallHeuristicTest {
 
   /** A {@link BugChecker} which runs the CreatesDuplicateCallHeuristic and prints the result */
   @BugPattern(
-      name = "CreatesDuplicateCallHeuristicChecker",
       severity = SeverityLevel.ERROR,
-      summary = "Runs CreateDuplicateCallHeursitic and prints the result")
+      summary = "Runs CreateDuplicateCallHeuristic and prints the result")
   public static class CreatesDuplicateCallHeuristicChecker extends BugChecker
       implements MethodInvocationTreeMatcher {
 
@@ -76,15 +75,18 @@ public class CreatesDuplicateCallHeuristicTest {
     CompilationTestHelper.newInstance(CreatesDuplicateCallHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second, Object normal) {",
-            "     // BUG: Diagnostic contains: true",
-            "     target(first, second);",
-            "     // BUG: Diagnostic contains: true",
-            "     target(first, second);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object first, Object second, Object normal) {
+                // BUG: Diagnostic contains: true
+                target(first, second);
+                // BUG: Diagnostic contains: true
+                target(first, second);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -93,15 +95,20 @@ public class CreatesDuplicateCallHeuristicTest {
     CompilationTestHelper.newInstance(CreatesDuplicateCallHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  // BUG: Diagnostic contains: true",
-            "  Object o1 = target(getFirst(), getSecond());",
-            "  // BUG: Diagnostic contains: true",
-            "  Object o2 = target(getFirst(), getSecond());",
-            "  abstract Object getFirst();",
-            "  abstract Object getSecond();",
-            "  abstract Object target(Object first, Object second);",
-            "}")
+            """
+            abstract class Test {
+              // BUG: Diagnostic contains: true
+              Object o1 = target(getFirst(), getSecond());
+              // BUG: Diagnostic contains: true
+              Object o2 = target(getFirst(), getSecond());
+
+              abstract Object getFirst();
+
+              abstract Object getSecond();
+
+              abstract Object target(Object first, Object second);
+            }
+            """)
         .doTest();
   }
 
@@ -110,12 +117,14 @@ public class CreatesDuplicateCallHeuristicTest {
     CompilationTestHelper.newInstance(CreatesDuplicateCallHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  void test(Object param1, Object param2) {",
-            "     // BUG: Diagnostic contains: true",
-            "     test(param1, param2);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              void test(Object param1, Object param2) {
+                // BUG: Diagnostic contains: true
+                test(param1, param2);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -124,13 +133,16 @@ public class CreatesDuplicateCallHeuristicTest {
     CompilationTestHelper.newInstance(CreatesDuplicateCallHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object param1, Object param2);",
-            "  void test(Object param1, Object param2) {",
-            "     // BUG: Diagnostic contains: false",
-            "     target(param1, param2);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object param1, Object param2);
+
+              void test(Object param1, Object param2) {
+                // BUG: Diagnostic contains: false
+                target(param1, param2);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -139,15 +151,18 @@ public class CreatesDuplicateCallHeuristicTest {
     CompilationTestHelper.newInstance(CreatesDuplicateCallHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object param1);",
-            "  void test() {",
-            "     // BUG: Diagnostic contains: false",
-            "     target(1);",
-            "     // BUG: Diagnostic contains: false",
-            "     target(2);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object param1);
+
+              void test() {
+                // BUG: Diagnostic contains: false
+                target(1);
+                // BUG: Diagnostic contains: false
+                target(2);
+              }
+            }
+            """)
         .doTest();
   }
 }

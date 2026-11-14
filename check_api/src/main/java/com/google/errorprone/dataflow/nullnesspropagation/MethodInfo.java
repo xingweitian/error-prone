@@ -16,7 +16,7 @@
 
 package com.google.errorprone.dataflow.nullnesspropagation;
 
-import java.util.List;
+import java.util.Optional;
 
 /** Represents a Java method. Used for custom predicates to match non-null-returning methods. */
 public interface MethodInfo {
@@ -24,7 +24,7 @@ public interface MethodInfo {
 
   String method();
 
-  List<String> annotations();
+  Optional<Nullness> nullnessFromDirectAnnotations();
 
   boolean isStatic();
 

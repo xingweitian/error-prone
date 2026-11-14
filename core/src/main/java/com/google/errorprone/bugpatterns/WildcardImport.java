@@ -20,7 +20,6 @@ import static com.google.errorprone.BugPattern.LinkType.CUSTOM;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -32,6 +31,7 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.CaseTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ConstantCaseLabelTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MemberSelectTree;
@@ -52,34 +52,28 @@ import javax.lang.model.element.ElementKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "WildcardImport",
     summary = "Wildcard imports, static or otherwise, should not be used",
     severity = SUGGESTION,
     linkType = CUSTOM,
     documentSuppression = false,
     tags = StandardTags.STYLE,
-    link = "https://google.github.io/styleguide/javaguide.html#s3.3.1-wildcard-imports"
-    )
+    link = "https://google.github.io/styleguide/javaguide.html?cl=head#s3.3.1-wildcard-imports")
 public class WildcardImport extends BugChecker implements CompilationUnitTreeMatcher {
 
   /** Maximum number of members to import before switching to qualified names. */
   public static final int MAX_MEMBER_IMPORTS = 20;
 
-  /** A type or member that needs to be imported. */
-  @AutoValue
-  abstract static class TypeToImport {
-
-    /** Returns the simple name of the import. */
-    abstract String name();
-
-    /** Returns the owner of the imported type or member. */
-    abstract Symbol owner();
-
-    /** Returns true if the import needs to be static (i.e. the import is for a field or method). */
-    abstract boolean isStatic();
-
+  /**
+   * A type or member that needs to be imported.
+   *
+   * @param name Returns the simple name of the import.
+   * @param owner Returns the owner of the imported type or member.
+   * @param isStatic Returns true if the import needs to be static (i.e. the import is for a field
+   *     or method).
+   */
+  private record TypeToImport(String name, Symbol owner, boolean isStatic) {
     static TypeToImport create(String name, Symbol owner, boolean stat) {
-      return new AutoValue_WildcardImport_TypeToImport(name, owner, stat);
+      return new TypeToImport(name, owner, stat);
     }
 
     private void addFix(SuggestedFix.Builder fix) {
@@ -106,7 +100,7 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
     if (fix.isEmpty()) {
       return NO_MATCH;
     }
-    return describeMatch(wildcardImports.get(0), fix);
+    return describeMatch(wildcardImports.getFirst(), fix);
   }
 
   /** Collect all on demand imports. */
@@ -115,10 +109,9 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
     for (ImportTree tree : imports) {
       // javac represents on-demand imports as a member select where the selected name is '*'.
       Tree ident = tree.getQualifiedIdentifier();
-      if (!(ident instanceof MemberSelectTree)) {
+      if (!(ident instanceof MemberSelectTree select)) {
         continue;
       }
-      MemberSelectTree select = (MemberSelectTree) ident;
       if (select.getIdentifier().contentEquals("*")) {
         result.add(tree);
       }
@@ -169,17 +162,16 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
           return;
         }
         switch (sym.kind) {
-          case TYP:
-            seen.add(
-                TypeToImport.create(sym.getSimpleName().toString(), sym.owner, /* stat= */ false));
-            break;
-          case VAR:
-          case MTH:
-            seen.add(
-                TypeToImport.create(sym.getSimpleName().toString(), sym.owner, /* stat= */ true));
-            break;
-          default:
+          case TYP ->
+              seen.add(
+                  TypeToImport.create(
+                      sym.getSimpleName().toString(), sym.owner, /* stat= */ false));
+          case VAR, MTH ->
+              seen.add(
+                  TypeToImport.create(sym.getSimpleName().toString(), sym.owner, /* stat= */ true));
+          default -> {
             return;
+          }
         }
       }
     }
@@ -192,7 +184,7 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
       VisitorState state) {
     Map<Symbol, List<TypeToImport>> toFix =
         typesToImport.stream().collect(Collectors.groupingBy(TypeToImport::owner));
-    final SuggestedFix.Builder fix = SuggestedFix.builder();
+    SuggestedFix.Builder fix = SuggestedFix.builder();
     for (ImportTree importToDelete : wildcardImports) {
       String importSpecification = state.getSourceForNode(importToDelete.getQualifiedIdentifier());
       if (importToDelete.isStatic()) {
@@ -202,7 +194,7 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
       }
     }
     for (Map.Entry<Symbol, List<TypeToImport>> entry : toFix.entrySet()) {
-      final Symbol owner = entry.getKey();
+      Symbol owner = entry.getKey();
       if (entry.getKey().getKind() != ElementKind.PACKAGE
           && entry.getValue().size() > MAX_MEMBER_IMPORTS) {
         qualifiedNameFix(fix, owner, state);
@@ -219,10 +211,9 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
    * Add an import for {@code owner}, and qualify all on demand imported references to members of
    * owner by owner's simple name.
    */
-  private static void qualifiedNameFix(
-      final SuggestedFix.Builder fix, final Symbol owner, VisitorState state) {
+  private static void qualifiedNameFix(SuggestedFix.Builder fix, Symbol owner, VisitorState state) {
     fix.addImport(owner.getQualifiedName().toString());
-    final JCCompilationUnit unit = (JCCompilationUnit) state.getPath().getCompilationUnit();
+    JCCompilationUnit unit = (JCCompilationUnit) state.getPath().getCompilationUnit();
     new TreePathScanner<Void, Void>() {
       @Override
       public Void visitIdentifier(IdentifierTree tree, Void unused) {
@@ -231,11 +222,15 @@ public class WildcardImport extends BugChecker implements CompilationUnitTreeMat
           return null;
         }
         Tree parent = getCurrentPath().getParentPath().getLeaf();
-        if (parent.getKind() == Tree.Kind.CASE
-            && ((CaseTree) parent).getExpression().equals(tree)
-            && sym.owner.getKind() == ElementKind.ENUM) {
-          // switch cases can refer to enum constants by simple name without importing them
-          return null;
+        if (sym.owner.getKind() == ElementKind.ENUM) {
+          if (parent instanceof CaseTree caseTree && caseTree.getExpression().equals(tree)) {
+            // switch cases can refer to enum constants by simple name without importing them
+            return null;
+          }
+          if (parent instanceof ConstantCaseLabelTree constantCaseLabel
+              && tree.equals(constantCaseLabel.getConstantExpression())) {
+            return null;
+          }
         }
         if (sym.owner.equals(owner) && unit.starImportScope.includes(sym)) {
           fix.prefixWith(tree, owner.getSimpleName() + ".");

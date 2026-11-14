@@ -37,7 +37,6 @@ import com.sun.source.tree.MethodInvocationTree;
  * @author kak@google.com (Kurt Alfred Kluever)
  */
 @BugPattern(
-    name = "JavaInstantGetSecondsGetNano",
     summary =
         "instant.getNano() only accesses the underlying nanosecond adjustment from the whole "
             + "second.",
@@ -60,7 +59,7 @@ public final class JavaInstantGetSecondsGetNano extends BugChecker
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (GET_NANO.matches(tree, state)) {
       if (!containsCallToSameReceiverNearby(
-          tree, GET_EPOCH_SECOND, state, /*checkProtoChains=*/ false)) {
+          tree, GET_EPOCH_SECOND, state, /* checkProtoChains= */ false)) {
         return describeMatch(tree);
       }
     }

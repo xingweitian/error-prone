@@ -34,9 +34,10 @@ import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import java.util.Objects;
 
-/** @author mariasam@google.com (Maria Sam) */
+/**
+ * @author mariasam@google.com (Maria Sam)
+ */
 @BugPattern(
-    name = "EqualsReference",
     summary =
         "== must be used in equals method to check equality to itself"
             + " or an infinite loop will occur.",
@@ -46,7 +47,7 @@ public class EqualsReference extends BugChecker implements MethodTreeMatcher {
   @Override
   public Description matchMethod(MethodTree methodTree, VisitorState visitorState) {
     if (Matchers.equalsMethodDeclaration().matches(methodTree, visitorState)) {
-      VariableTree variableTree = methodTree.getParameters().get(0);
+      VariableTree variableTree = methodTree.getParameters().getFirst();
       VarSymbol varSymbol = ASTHelpers.getSymbol(variableTree);
       TreeScannerEquals treeScannerEquals = new TreeScannerEquals(methodTree);
       treeScannerEquals.scan(methodTree.getBody(), varSymbol);
@@ -62,7 +63,7 @@ public class EqualsReference extends BugChecker implements MethodTreeMatcher {
     private boolean hasIllegalEquals = false;
     private final MethodTree methodTree;
 
-    public TreeScannerEquals(MethodTree currMethodTree) {
+    TreeScannerEquals(MethodTree currMethodTree) {
       methodTree = currMethodTree;
     }
 
@@ -74,22 +75,21 @@ public class EqualsReference extends BugChecker implements MethodTreeMatcher {
       boolean hasParameterAndSameSymbol =
           methodInvocationTree.getArguments().size() == 1
               && Objects.equals(
-                  ASTHelpers.getSymbol(methodInvocationTree.getArguments().get(0)), varSymbol);
-      if (methodSelectTree instanceof MemberSelectTree) {
-        memberSelectTree = (MemberSelectTree) methodSelectTree;
+                  ASTHelpers.getSymbol(methodInvocationTree.getArguments().getFirst()), varSymbol);
+      if (methodSelectTree instanceof MemberSelectTree m) {
+        memberSelectTree = m;
         ExpressionTree e = memberSelectTree.getExpression();
         // this.equals(o)
         // not using o.equals(this) because all instances of this were false positives
         // (people checked to see if o was an instance of this class)
-        if (e instanceof IdentifierTree
-            && ((IdentifierTree) e).getName().contentEquals("this")
+        if (e instanceof IdentifierTree identifierTree
+            && identifierTree.getName().contentEquals("this")
             && Objects.equals(
                 ASTHelpers.getSymbol(methodTree), ASTHelpers.getSymbol(memberSelectTree))
             && hasParameterAndSameSymbol) {
           hasIllegalEquals = true;
         }
-      } else if (methodInvocationTree.getMethodSelect() instanceof IdentifierTree) {
-        IdentifierTree methodSelect = (IdentifierTree) methodInvocationTree.getMethodSelect();
+      } else if (methodInvocationTree.getMethodSelect() instanceof IdentifierTree methodSelect) {
         if (Objects.equals(ASTHelpers.getSymbol(methodTree), ASTHelpers.getSymbol(methodSelect))
             && hasParameterAndSameSymbol) {
           hasIllegalEquals = true;

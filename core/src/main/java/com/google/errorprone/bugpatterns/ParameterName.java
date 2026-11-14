@@ -17,15 +17,11 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static com.google.common.collect.Iterables.getLast;
-import static com.google.common.collect.Streams.forEachPair;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Range;
 import com.google.errorprone.BugPattern;
@@ -34,10 +30,13 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.bugpatterns.argumentselectiondefects.NamedParameterComment;
+import com.google.errorprone.bugpatterns.argumentselectiondefects.NamedParameterComment.ParsedParameterComment;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.Comments;
+import com.google.errorprone.util.ErrorProneComment;
+import com.google.errorprone.util.ErrorProneComment.ErrorProneCommentStyle;
 import com.google.errorprone.util.ErrorProneToken;
 import com.google.errorprone.util.ErrorProneTokens;
 import com.sun.source.tree.ExpressionTree;
@@ -46,17 +45,18 @@ import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
-import com.sun.tools.javac.parser.Tokens.Comment;
 import com.sun.tools.javac.util.Position;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
-import java.util.regex.Matcher;
+import java.util.Optional;
+import java.util.function.Consumer;
+import javax.inject.Inject;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "ParameterName",
     summary =
         "Detects `/* name= */`-style comments on actual parameters where the name doesn't match the"
             + " formal parameter",
@@ -66,16 +66,10 @@ public class ParameterName extends BugChecker
 
   private final ImmutableList<String> exemptPackages;
 
-  public ParameterName() {
-    this(ErrorProneFlags.empty());
-  }
-
-  public ParameterName(ErrorProneFlags errorProneFlags) {
+  @Inject
+  ParameterName(ErrorProneFlags flags) {
     this.exemptPackages =
-        errorProneFlags
-            .getList("ParameterName:exemptPackagePrefixes")
-            .orElse(ImmutableList.of())
-            .stream()
+        flags.getListOrEmpty("ParameterName:exemptPackagePrefixes").stream()
             // add a trailing '.' so that e.g. com.foo matches as a prefix of com.foo.bar, but not
             // com.foobar
             .map(p -> p.endsWith(".") ? p : p + ".")
@@ -84,108 +78,165 @@ public class ParameterName extends BugChecker
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-    checkArguments(tree, tree.getArguments(), state);
+    checkArguments(
+        tree, tree.getArguments(), argListStartPosition(tree.getMethodSelect(), state), state);
     return NO_MATCH;
   }
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
-    checkArguments(tree, tree.getArguments(), state);
+    checkArguments(
+        tree, tree.getArguments(), argListStartPosition(tree.getIdentifier(), state), state);
     return NO_MATCH;
   }
 
+  int argListStartPosition(Tree tree, VisitorState state) {
+    int pos = state.getEndPosition(tree);
+    if (pos != Position.NOPOS) {
+      return pos;
+    }
+    return getStartPosition(tree);
+  }
+
   private void checkArguments(
-      Tree tree, List<? extends ExpressionTree> arguments, VisitorState state) {
+      Tree tree,
+      List<? extends ExpressionTree> arguments,
+      int argListStartPosition,
+      VisitorState state) {
     if (arguments.isEmpty()) {
+      return;
+    }
+    int start = argListStartPosition;
+    if (start == Position.NOPOS) {
+      // best effort work-around for https://github.com/google/error-prone/issues/780
+      return;
+    }
+    if (!mayContainComments(start, arguments.getLast(), state)) {
       return;
     }
     MethodSymbol sym = (MethodSymbol) ASTHelpers.getSymbol(tree);
     if (NamedParameterComment.containsSyntheticParameterName(sym)) {
       return;
     }
-    int start = getStartPosition(tree);
-    int end = state.getEndPosition(getLast(arguments));
-    if (start == Position.NOPOS || end == Position.NOPOS) {
-      // best effort work-around for https://github.com/google/error-prone/issues/780
-      return;
-    }
-    String source = state.getSourceCode().subSequence(start, end).toString();
-    if (!source.contains("/*")) {
-      // fast path if the arguments don't contain anything that looks like a comment
-      return;
-    }
     String enclosingClass = ASTHelpers.enclosingClass(sym).toString();
     if (exemptPackages.stream().anyMatch(enclosingClass::startsWith)) {
       return;
     }
-    Deque<ErrorProneToken> tokens =
-        new ArrayDeque<>(ErrorProneTokens.getTokens(source, start, state.context));
-    forEachPair(
-        sym.getParameters().stream(),
-        arguments.stream(),
-        (p, a) -> {
-          if (advanceTokens(tokens, a, state)) {
-            checkArgument(p, a, tokens.removeFirst(), state);
-          }
-        });
+    Iterator<? extends ExpressionTree> argumentIterator = arguments.iterator();
+    // For each parameter/argument pair, we tokenize the characters between the end of the
+    // previous argument (or the start of the argument list, in the case of the first argument)
+    // and the start of the current argument. The `start` variable is advanced each time, stepping
+    // over each argument when we finish processing it.
+    for (VarSymbol param : sym.getParameters()) {
+      if (!argumentIterator.hasNext()) {
+        return; // A vararg parameter has zero corresponding arguments passed
+      }
+      ExpressionTree argument = argumentIterator.next();
+      Optional<Range<Integer>> positions = positions(argument, state);
+      if (positions.isEmpty()) {
+        return;
+      }
+      start =
+          processArgument(
+              positions.get(), start, state, tok -> checkArgument(param, argument, tok, state));
+    }
 
     // handle any varargs arguments after the first
-    int numParams = sym.getParameters().size();
-    int numArgs = arguments.size();
-    if (numParams < numArgs) {
-      for (ExpressionTree arg : arguments.subList(numParams, numArgs)) {
-        if (advanceTokens(tokens, arg, state)) {
-          checkComment(arg, tokens.removeFirst(), state);
-        }
+    while (argumentIterator.hasNext()) {
+      ExpressionTree argument = argumentIterator.next();
+      Optional<Range<Integer>> positions = positions(argument, state);
+      if (positions.isEmpty()) {
+        return;
       }
+      start =
+          processArgument(positions.get(), start, state, tok -> checkComment(argument, tok, state));
     }
   }
 
-  private static boolean advanceTokens(
-      Deque<ErrorProneToken> tokens, ExpressionTree actual, VisitorState state) {
-    while (!tokens.isEmpty() && tokens.getFirst().pos() < getStartPosition(actual)) {
+  /**
+   * Returns false if there are definitely no comments between {@code start} and the end of {@code
+   * lastArgument}, which (as the positions of arguments are increasing) contains all the source
+   * that {@link #checkArguments} tokenizes.
+   *
+   * <p>This is a cheap pre-check to avoid looking up symbols and re-tokenizing the arguments of
+   * every call. It ignores comments that start with a unicode escape for {@code /}.
+   */
+  private static boolean mayContainComments(
+      int start, ExpressionTree lastArgument, VisitorState state) {
+    int end = state.getEndPosition(lastArgument);
+    if (end == Position.NOPOS) {
+      return true;
+    }
+    CharSequence source = state.getSourceCode();
+    for (int i = start; i < end; i++) {
+      if (source.charAt(i) == '/') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Returns the source span for a tree, or empty if the position information is not available. */
+  Optional<Range<Integer>> positions(Tree tree, VisitorState state) {
+    int endPosition = state.getEndPosition(tree);
+    if (endPosition == Position.NOPOS) {
+      return Optional.empty();
+    }
+    return Optional.of(Range.closedOpen(getStartPosition(tree), endPosition));
+  }
+
+  private static int processArgument(
+      Range<Integer> positions,
+      int offset,
+      VisitorState state,
+      Consumer<ErrorProneToken> consumer) {
+    String source = state.getSourceCode(offset, positions.upperEndpoint()).toString();
+    Deque<ErrorProneToken> tokens =
+        new ArrayDeque<>(ErrorProneTokens.getTokens(source, offset, state.context));
+    if (advanceTokens(tokens, positions)) {
+      consumer.accept(tokens.removeFirst());
+    }
+    return positions.upperEndpoint();
+  }
+
+  private static boolean advanceTokens(Deque<ErrorProneToken> tokens, Range<Integer> actual) {
+    while (!tokens.isEmpty() && tokens.getFirst().pos() < actual.lowerEndpoint()) {
       tokens.removeFirst();
     }
     if (tokens.isEmpty()) {
       return false;
     }
-    Range<Integer> argRange =
-        Range.closedOpen(getStartPosition(actual), state.getEndPosition(actual));
-    if (!argRange.contains(tokens.getFirst().pos())) {
+    if (!actual.contains(tokens.getFirst().pos())) {
       return false;
     }
     return true;
   }
 
-  @AutoValue
-  abstract static class FixInfo {
-    abstract boolean isFormatCorrect();
-
-    abstract boolean isNameCorrect();
-
-    abstract Comment comment();
-
-    abstract String name();
-
+  private record FixInfo(
+      boolean isFormatCorrect, boolean isNameCorrect, ErrorProneComment comment, String name) {
     static FixInfo create(
-        boolean isFormatCorrect, boolean isNameCorrect, Comment comment, String name) {
-      return new AutoValue_ParameterName_FixInfo(isFormatCorrect, isNameCorrect, comment, name);
+        boolean isFormatCorrect, boolean isNameCorrect, ErrorProneComment comment, String name) {
+      return new FixInfo(isFormatCorrect, isNameCorrect, comment, name);
     }
   }
 
   private void checkArgument(
       VarSymbol formal, ExpressionTree actual, ErrorProneToken token, VisitorState state) {
     List<FixInfo> matches = new ArrayList<>();
-    for (Comment comment : token.comments()) {
-      Matcher m =
-          NamedParameterComment.PARAMETER_COMMENT_PATTERN.matcher(
-              Comments.getTextFromComment(comment));
-      if (!m.matches()) {
+    for (ErrorProneComment comment : token.comments()) {
+      if (comment.getStyle().equals(ErrorProneCommentStyle.LINE)) {
+        // These are usually not intended as a parameter comment, and we don't want to flag if they
+        // happen to match the parameter comment format.
+        continue;
+      }
+      Optional<ParsedParameterComment> parsed =
+          NamedParameterComment.parseParameterComment(Comments.getTextFromComment(comment));
+      if (parsed.isEmpty()) {
         continue;
       }
 
-      boolean isFormatCorrect = isVarargs(formal) ^ Strings.isNullOrEmpty(m.group(2));
-      String name = m.group(1);
+      boolean isFormatCorrect = isVarargs(formal) == parsed.get().varargs();
+      String name = parsed.get().name();
       boolean isNameCorrect = formal.getSimpleName().contentEquals(name);
 
       // If there are multiple parameter name comments, bail if any one of them is an exact match.
@@ -244,7 +295,7 @@ public class ParameterName extends BugChecker
     }
   }
 
-  private static SuggestedFix rewriteComment(Comment comment, String format) {
+  private static SuggestedFix rewriteComment(ErrorProneComment comment, String format) {
     int replacementStartPos = comment.getSourcePos(0);
     int replacementEndPos = comment.getSourcePos(comment.getText().length() - 1) + 1;
     return SuggestedFix.replace(replacementStartPos, replacementEndPos, format);
@@ -252,13 +303,15 @@ public class ParameterName extends BugChecker
 
   // complains on parameter name comments on varargs past the first one
   private void checkComment(ExpressionTree arg, ErrorProneToken token, VisitorState state) {
-    for (Comment comment : token.comments()) {
-      Matcher m =
-          NamedParameterComment.PARAMETER_COMMENT_PATTERN.matcher(
-              Comments.getTextFromComment(comment));
-      if (m.matches()) {
+    for (ErrorProneComment comment : token.comments()) {
+      Optional<ParsedParameterComment> parsed =
+          NamedParameterComment.parseParameterComment(Comments.getTextFromComment(comment));
+      if (parsed.isPresent()) {
         SuggestedFix rewriteCommentFix =
-            rewriteComment(comment, String.format("/* %s%s */", m.group(1), m.group(2)));
+            rewriteComment(
+                comment,
+                String.format(
+                    "/* %s%s */", parsed.get().name(), parsed.get().varargs() ? "..." : ""));
         state.reportMatch(
             buildDescription(arg)
                 .addFix(rewriteCommentFix)

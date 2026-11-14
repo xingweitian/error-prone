@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static java.lang.Math.max;
 
 import com.google.common.base.Joiner;
@@ -35,12 +36,12 @@ import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "PackageLocation",
     summary = "Package names should match the directory they are declared in",
     severity = SUGGESTION,
     documentSuppression = false,
     suppressionAnnotations = SuppressPackageLocation.class,
-    tags = StandardTags.STYLE)
+    tags = StandardTags.STYLE,
+    altNames = "PackageName")
 public class PackageLocation extends BugChecker implements CompilationUnitTreeMatcher {
 
   private static final Splitter DOT_SPLITTER = Splitter.on('.');
@@ -54,7 +55,8 @@ public class PackageLocation extends BugChecker implements CompilationUnitTreeMa
 
     // package-info annotations are special
     // TODO(cushon): fix the core suppression logic to handle this
-    if (ASTHelpers.hasAnnotation(tree.getPackage(), SuppressPackageLocation.class, state)) {
+    if (hasAnnotation(
+        tree.getPackage(), "com.google.errorprone.annotations.SuppressPackageLocation", state)) {
       return Description.NO_MATCH;
     }
 

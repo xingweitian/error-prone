@@ -16,7 +16,9 @@
 
 package com.google.errorprone.bugpatterns.apidiff;
 
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
@@ -35,9 +37,9 @@ import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Types;
 import java.lang.annotation.Annotation;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** A base Error Prone check implementation to enforce compliance with a given API diff. */
 public abstract class ApiDiffChecker extends BugChecker
@@ -66,7 +68,7 @@ public abstract class ApiDiffChecker extends BugChecker
     return check(tree, state);
   }
 
-  private Description check(ExpressionTree tree, VisitorState state) {
+  protected Description check(ExpressionTree tree, VisitorState state) {
     if (state.findEnclosing(ImportTree.class) != null) {
       return Description.NO_MATCH;
     }
@@ -79,13 +81,10 @@ public abstract class ApiDiffChecker extends BugChecker
       // e.g. package symbols
       return Description.NO_MATCH;
     }
-    Types types = state.getTypes();
     // check for information associated with the class
-    if (apiDiff.isClassUnsupported(Signatures.classDescriptor(receiver.type, types))
+    if (apiDiff.isClassUnsupported(Signatures.classDescriptor(receiver.type, state))
         || classOrEnclosingClassIsForbiddenByAnnotation(receiver, state)) {
-      return buildDescription(tree)
-          .setMessage(String.format("%s is not available", receiver))
-          .build();
+      return buildDescription(tree).setMessage("%s is not available", receiver).build();
     }
     // check for fields and methods that are not present in the old API
     if (!(sym instanceof VarSymbol || sym instanceof MethodSymbol)) {
@@ -93,19 +92,19 @@ public abstract class ApiDiffChecker extends BugChecker
     }
     ClassMemberKey memberKey =
         ClassMemberKey.create(
-            sym.getSimpleName().toString(), Signatures.descriptor(sym.type, types));
-    ClassSymbol owner = sym.owner.enclClass();
-    if (apiDiff.isMemberUnsupported(Signatures.classDescriptor(owner.type, types), memberKey)
+            sym.getSimpleName().toString(), Signatures.descriptor(sym.type, state));
+    ClassSymbol owner = enclosingClass(sym);
+    if (apiDiff.isMemberUnsupported(Signatures.classDescriptor(owner.type, state), memberKey)
         || hasAnnotationForbiddingUse(sym, state)) {
       return buildDescription(tree)
-          .setMessage(String.format("%s#%s is not available in %s", owner, sym, receiver))
+          .setMessage("%s#%s is not available in %s", owner, sym, receiver)
           .build();
     }
     return Description.NO_MATCH;
   }
 
   private boolean classOrEnclosingClassIsForbiddenByAnnotation(Symbol clazz, VisitorState state) {
-    if (!alsoForbidApisAnnotated.isPresent()) {
+    if (alsoForbidApisAnnotated.isEmpty()) {
       return false;
     }
     for (; clazz instanceof ClassSymbol; clazz = clazz.owner) {
@@ -118,32 +117,31 @@ public abstract class ApiDiffChecker extends BugChecker
 
   private boolean hasAnnotationForbiddingUse(Symbol sym, VisitorState state) {
     return alsoForbidApisAnnotated.isPresent()
-        && ASTHelpers.hasAnnotation(sym, alsoForbidApisAnnotated.get(), state);
+        && hasAnnotation(sym, alsoForbidApisAnnotated.get().getName(), state);
   }
 
   /**
    * Finds the class of the expression's receiver: the declaring class of a static member access, or
    * the type that an instance member is accessed on.
    */
-  private static ClassSymbol getReceiver(ExpressionTree tree, Symbol sym) {
-    if (sym.isStatic() || sym instanceof ClassSymbol) {
+  private static @Nullable ClassSymbol getReceiver(ExpressionTree tree, Symbol sym) {
+    if (ASTHelpers.isStatic(sym) || sym instanceof ClassSymbol) {
       return sym.enclClass();
     }
-    switch (tree.getKind()) {
-      case MEMBER_SELECT:
-      case METHOD_INVOCATION:
+    return switch (tree.getKind()) {
+      case MEMBER_SELECT, METHOD_INVOCATION -> {
         Type receiver = ASTHelpers.getType(ASTHelpers.getReceiver(tree));
         if (receiver == null) {
-          return null;
+          yield null;
         }
-        return receiver.tsym.enclClass();
-      case IDENTIFIER:
-        // Simple names are implicitly qualified by an enclosing instance, so if we get here
-        // we're inside the compilation unit that declares the receiver, and the diff doesn't
-        // contain accurate information.
-        return null;
-      default:
-        return null;
-    }
+        yield receiver.tsym.enclClass();
+      }
+      case IDENTIFIER ->
+          // Simple names are implicitly qualified by an enclosing instance, so if we get here
+          // we're inside the compilation unit that declares the receiver, and the diff doesn't
+          // contain accurate information.
+          null;
+      default -> null;
+    };
   }
 }

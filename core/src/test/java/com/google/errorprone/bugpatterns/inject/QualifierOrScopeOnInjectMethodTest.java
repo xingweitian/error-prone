@@ -22,7 +22,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @RunWith(JUnit4.class)
 public class QualifierOrScopeOnInjectMethodTest {
 
@@ -32,53 +34,76 @@ public class QualifierOrScopeOnInjectMethodTest {
       BugCheckerRefactoringTestHelper.newInstance(QualifierOrScopeOnInjectMethod.class, getClass());
 
   @Test
-  public void testPositiveCase() {
+  public void positiveCase() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "class Foo {",
-            "  // BUG: Diagnostic contains: @Inject  void someMethod() {}",
-            "  @Inject @Named(\"bar\") void someMethod() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Named;
+
+            class Foo {
+              @Inject
+              // BUG: Diagnostic contains: remove
+              @Named("bar")
+              void someMethod() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_InjectConstructor() {
+  public void positiveCase_injectConstructor() {
     refactoringHelper
         .addInputLines(
             "in/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "class Foo {",
-            "  @Inject @Singleton @Named(\"bar\") Foo() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            class Foo {
+              @Inject
+              @Singleton
+              @Named("bar")
+              Foo() {}
+            }
+            """)
         .addOutputLines(
             "out/Foo.java",
-            "import javax.inject.Inject;",
-            "import javax.inject.Named;",
-            "import javax.inject.Singleton;",
-            "@Singleton class Foo {",
-            "  @Inject Foo() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+            import javax.inject.Named;
+            import javax.inject.Singleton;
+
+            @Singleton
+            class Foo {
+              @Inject
+              Foo() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeNotInject() {
+  public void negativeNotInject() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import dagger.Provides;",
-            "import dagger.Module;",
-            "import javax.inject.Named;",
-            "@Module",
-            "class Foo {",
-            "  @Provides @Named(\"bar\") int something() { return 42; }",
-            "}")
+            """
+            import dagger.Module;
+            import dagger.Provides;
+            import javax.inject.Named;
+
+            @Module
+            class Foo {
+              @Provides
+              @Named("bar")
+              int something() {
+                return 42;
+              }
+            }
+            """)
         .doTest();
   }
 }

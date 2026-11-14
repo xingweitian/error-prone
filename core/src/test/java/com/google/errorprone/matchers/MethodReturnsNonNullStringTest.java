@@ -26,7 +26,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author deminguyen@google.com (Demi Nguyen) */
+/**
+ * @author deminguyen@google.com (Demi Nguyen)
+ */
 @RunWith(JUnit4.class)
 public class MethodReturnsNonNullStringTest extends CompilerBasedAbstractTest {
 
@@ -34,12 +36,14 @@ public class MethodReturnsNonNullStringTest extends CompilerBasedAbstractTest {
   public void shouldMatchInstanceMethod() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void testInstanceMethods() {",
-        "    String testStr = \"test string\";",
-        "    testStr.charAt(0);",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void testInstanceMethods() {
+            String testStr = "test string";
+            testStr.charAt(0);
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ true, Matchers.methodReturnsNonNull()));
   }
@@ -48,11 +52,13 @@ public class MethodReturnsNonNullStringTest extends CompilerBasedAbstractTest {
   public void shouldMatchStaticMethod() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public void testStaticMethods() {",
-        "    String.valueOf(123);",
-        "  }",
-        "}");
+        """
+        public class A {
+          public void testStaticMethods() {
+            String.valueOf(123);
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ true, Matchers.methodReturnsNonNull()));
   }
@@ -61,12 +67,14 @@ public class MethodReturnsNonNullStringTest extends CompilerBasedAbstractTest {
   public void shouldNotMatchConstructorInvocation() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String getString() {",
-        "    String str = new String(\"hi\");",
-        "    return str;",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String getString() {
+            String str = new String("hi");
+            return str;
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ false, Matchers.methodReturnsNonNull()));
   }
@@ -75,20 +83,22 @@ public class MethodReturnsNonNullStringTest extends CompilerBasedAbstractTest {
   public void shouldNotMatchOtherClasses() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  public String getString() {",
-        "    return \"test string\";",
-        "  }",
-        "  public void testMethodInvocation() {",
-        "    getString();",
-        "  }",
-        "}");
+        """
+        public class A {
+          public String getString() {
+            return "test string";
+          }
+
+          public void testMethodInvocation() {
+            getString();
+          }
+        }
+        """);
     assertCompiles(
         methodInvocationMatches(/* shouldMatch= */ false, Matchers.methodReturnsNonNull()));
   }
 
-  private Scanner methodInvocationMatches(
-      final boolean shouldMatch, final Matcher<ExpressionTree> toMatch) {
+  private Scanner methodInvocationMatches(boolean shouldMatch, Matcher<ExpressionTree> toMatch) {
     return new Scanner() {
       @Override
       public Void visitMethodInvocation(MethodInvocationTree node, VisitorState visitorState) {

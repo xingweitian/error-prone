@@ -27,7 +27,6 @@ import static java.util.stream.Collectors.joining;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
-import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
@@ -56,37 +55,65 @@ import com.sun.tools.javac.tree.DCTree.DCText;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import javax.inject.Inject;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 /**
  * Matches invalid Javadoc tags, and tries to suggest fixes.
  *
  * @author ghm@google.com (Graeme Morgan)
  */
-@BugPattern(
-    name = "InvalidInlineTag",
-    summary = "This tag is invalid.",
-    severity = WARNING,
-    tags = StandardTags.STYLE,
-    documentSuppression = false)
+@BugPattern(summary = "This tag is invalid.", severity = WARNING, documentSuppression = false)
 public final class InvalidInlineTag extends BugChecker
     implements ClassTreeMatcher, MethodTreeMatcher, VariableTreeMatcher {
 
-  private static final String INVALID_TAG_IS_PARAMETER_NAME =
-      "@%1$s is not a valid tag, but is a parameter name. "
-          + "Use {@code %1%s} to refer to parameter names inline.";
-
   private static final Pattern PARAM_MATCHER = Pattern.compile("\\{?@param ([a-zA-Z0-9]+)}?");
 
+  private static final Pattern ANCHORED_PARAM_MATCHER =
+      Pattern.compile("^\\{?@param ([a-zA-Z0-9]+)}?");
+
   private static final Splitter DOT_SPLITTER = Splitter.on('.');
+
+  private final KnownTags knownTags;
+
+  @Inject
+  InvalidInlineTag(KnownTags knownTags) {
+    this.knownTags = knownTags;
+  }
+
+  private void scanTags(
+      VisitorState state, Context context, ImmutableSet<String> parameters, DocTreePath path) {
+    new InvalidTagChecker(state, context, parameters).scan(path, null);
+  }
+
+  private enum Context {
+    CLASS(JavadocTag.VALID_CLASS_TAGS),
+    METHOD(JavadocTag.VALID_METHOD_TAGS),
+    VARIABLE(JavadocTag.VALID_VARIABLE_TAGS);
+
+    final ImmutableSet<JavadocTag> validTags;
+    final Pattern misplacedCurly;
+    final Pattern parensRatherThanCurly;
+
+    Context(ImmutableSet<JavadocTag> validTags) {
+      this.validTags = validTags;
+      String validInlineTags =
+          validTags.stream()
+              .filter(tag -> tag.type() == TagType.INLINE)
+              .map(JavadocTag::name)
+              .collect(joining("|"));
+      this.misplacedCurly = Pattern.compile(String.format("@(%s)\\{", validInlineTags));
+      this.parensRatherThanCurly = Pattern.compile(String.format("\\(@(%s)", validInlineTags));
+    }
+  }
 
   @Override
   public Description matchClass(ClassTree classTree, VisitorState state) {
     DocTreePath path = Utils.getDocTreePath(state);
     if (path != null) {
       ImmutableSet<String> parameters = ImmutableSet.of();
-      new InvalidTagChecker(state, JavadocTag.VALID_CLASS_TAGS, parameters).scan(path, null);
+      scanTags(state, Context.CLASS, parameters, path);
     }
     return Description.NO_MATCH;
   }
@@ -99,7 +126,7 @@ public final class InvalidInlineTag extends BugChecker
           methodTree.getParameters().stream()
               .map(v -> v.getName().toString())
               .collect(toImmutableSet());
-      new InvalidTagChecker(state, JavadocTag.VALID_METHOD_TAGS, parameters).scan(path, null);
+      scanTags(state, Context.METHOD, parameters, path);
     }
     return Description.NO_MATCH;
   }
@@ -108,41 +135,36 @@ public final class InvalidInlineTag extends BugChecker
   public Description matchVariable(VariableTree variableTree, VisitorState state) {
     DocTreePath path = Utils.getDocTreePath(state);
     if (path != null) {
-      new InvalidTagChecker(
-              state, JavadocTag.VALID_VARIABLE_TAGS, /* parameters= */ ImmutableSet.of())
-          .scan(path, null);
+      scanTags(state, Context.VARIABLE, /* parameters= */ ImmutableSet.of(), path);
     }
     return Description.NO_MATCH;
   }
 
-  private final class InvalidTagChecker extends DocTreePathScanner<Void, Void> {
+  static String getMessageForInvalidTag(String paramName) {
+    return String.format(
+        "@%1$s is not a valid tag, but is a parameter name. "
+            + "Use {@code %1$s} to refer to parameter names inline.",
+        paramName);
+  }
+
+  final class InvalidTagChecker extends DocTreePathScanner<Void, Void> {
     private final VisitorState state;
 
-    private final ImmutableSet<JavadocTag> validTags;
     private final ImmutableSet<String> parameters;
-
-    private final Pattern misplacedCurly;
-    private final Pattern parensRatherThanCurly;
+    private final Context context;
 
     private final Set<DocTree> fixedTags = new HashSet<>();
 
     private InvalidTagChecker(
-        VisitorState state, ImmutableSet<JavadocTag> validTags, ImmutableSet<String> parameters) {
+        VisitorState state, Context context, ImmutableSet<String> parameters) {
       this.state = state;
-      this.validTags = validTags;
+      this.context = context;
       this.parameters = parameters;
-      String validInlineTags =
-          validTags.stream()
-              .filter(tag -> tag.type() == TagType.INLINE)
-              .map(JavadocTag::name)
-              .collect(joining("|"));
-      this.misplacedCurly = Pattern.compile(String.format("@(%s)\\{", validInlineTags));
-      this.parensRatherThanCurly = Pattern.compile(String.format("\\(@(%s)", validInlineTags));
     }
 
     @Override
     public Void visitErroneous(ErroneousTree erroneousTree, Void unused) {
-      Matcher matcher = PARAM_MATCHER.matcher(erroneousTree.getBody());
+      Matcher matcher = ANCHORED_PARAM_MATCHER.matcher(erroneousTree.getBody());
       if (matcher.find()) {
         String parameterName = matcher.group(1);
         if (parameters.contains(parameterName)) {
@@ -172,7 +194,7 @@ public final class InvalidInlineTag extends BugChecker
 
     private void handleMalformedTags(TextTree node) {
       String body = node.getBody();
-      Matcher matcher = misplacedCurly.matcher(body);
+      Matcher matcher = context.misplacedCurly.matcher(body);
       Comment comment = ((DCDocComment) getCurrentPath().getDocComment()).comment;
       while (matcher.find()) {
         int beforeAt = comment.getSourcePos(((DCText) node).pos + matcher.start());
@@ -190,18 +212,17 @@ public final class InvalidInlineTag extends BugChecker
 
     private void handleIncorrectParens(TextTree node) {
       String body = node.getBody();
-      Matcher matcher = parensRatherThanCurly.matcher(body);
+      Matcher matcher = context.parensRatherThanCurly.matcher(body);
       Comment comment = ((DCDocComment) getCurrentPath().getDocComment()).comment;
       while (matcher.find()) {
         int beforeAt = comment.getSourcePos(((DCText) node).pos + matcher.start());
         SuggestedFix.Builder fix = SuggestedFix.builder().replace(beforeAt, beforeAt + 1, "{");
 
         Optional<Integer> found = findClosingBrace(body, matcher.start(1));
-        found.ifPresent(
-            pos -> {
-              int closing = comment.getSourcePos(((DCText) node).pos + pos);
-              fix.replace(closing, closing + 1, "}");
-            });
+        found.ifPresent(pos -> {
+          int closing = comment.getSourcePos(((DCText) node).pos + pos);
+          fix.replace(closing, closing + 1, "}");
+        });
 
         state.reportMatch(
             buildDescription(
@@ -221,19 +242,20 @@ public final class InvalidInlineTag extends BugChecker
       for (int pos = startPos; pos < body.length(); ++pos) {
         char c = body.charAt(pos);
         switch (c) {
-          case '(':
+          case '(' -> {
             parenDepth++;
             continue;
-          case ')':
+          }
+          case ')' -> {
             if (parenDepth == 0) {
               return Optional.of(pos);
             }
             parenDepth--;
-            break;
-          case '}':
+          }
+          case '}' -> {
             return Optional.empty();
-          default:
-            // fall out
+          }
+          default -> {}
         }
       }
       return Optional.empty();
@@ -257,10 +279,13 @@ public final class InvalidInlineTag extends BugChecker
     @Override
     public Void visitUnknownInlineTag(UnknownInlineTagTree unknownInlineTagTree, Void unused) {
       String name = unknownInlineTagTree.getTagName();
+      if (knownTags.isKnownTag(inlineTag(name))) {
+        return null;
+      }
       if (name.equals("param")) {
         int startPos = Utils.getStartPosition(unknownInlineTagTree, state);
         int endPos = Utils.getEndPosition(unknownInlineTagTree, state);
-        CharSequence text = state.getSourceCode().subSequence(startPos, endPos);
+        CharSequence text = state.getSourceCode(startPos, endPos);
         Matcher matcher = PARAM_MATCHER.matcher(text);
         if (matcher.find()) {
           String parameterName = matcher.group(1);
@@ -285,7 +310,7 @@ public final class InvalidInlineTag extends BugChecker
         }
       }
       if (parameters.contains(name)) {
-        String message = String.format(INVALID_TAG_IS_PARAMETER_NAME, name);
+        String message = getMessageForInvalidTag(name);
         state.reportMatch(
             buildDescription(diagnosticPosition(getCurrentPath(), state))
                 .setMessage(message)
@@ -324,11 +349,22 @@ public final class InvalidInlineTag extends BugChecker
     }
 
     private void reportUnknownTag(DocTree docTree, JavadocTag tag) {
+      if (context.validTags.contains(JavadocTag.blockTag(tag.name()))) {
+        state.reportMatch(
+            buildDescription(diagnosticPosition(getCurrentPath(), state))
+                .setMessage(
+                    String.format(
+                        "Tag name `%s` is not a valid inline tag, but it is a valid block tag.",
+                        tag.name()))
+                .build());
+        fixedTags.add(docTree);
+        return;
+      }
       Optional<String> bestMatch =
           Utils.getBestMatch(
               tag.name(),
               /* maxEditDistance= */ 2,
-              validTags.stream()
+              context.validTags.stream()
                   .filter(t -> t.type().equals(tag.type()))
                   .map(JavadocTag::name)
                   .collect(toImmutableSet()));
@@ -336,12 +372,11 @@ public final class InvalidInlineTag extends BugChecker
       String message = String.format("Tag name `%s` is unknown.", tag.name());
       state.reportMatch(
           bestMatch
-              .map(
-                  bm ->
-                      buildDescription(diagnosticPosition(getCurrentPath(), state))
-                          .setMessage(message + String.format(" Did you mean tag `%s`?", bm))
-                          .addFix(SuggestedFix.replace(pos, pos + tag.name().length(), bm))
-                          .build())
+              .map(bm ->
+                  buildDescription(diagnosticPosition(getCurrentPath(), state))
+                      .setMessage(message + String.format(" Did you mean tag `%s`?", bm))
+                      .addFix(SuggestedFix.replace(pos, pos + tag.name().length(), bm))
+                      .build())
               .orElse(
                   buildDescription(diagnosticPosition(getCurrentPath(), state))
                       .setMessage(
@@ -359,11 +394,12 @@ public final class InvalidInlineTag extends BugChecker
       if (fixedTags.contains(docTree)) {
         return null;
       }
-      if (!(docTree instanceof DCInlineTag)) {
+      if (!(docTree instanceof DCInlineTag<?> dCInlineTag)) {
         return null;
       }
-      JavadocTag tag = inlineTag(((DCInlineTag) docTree).getTagName());
-      if (validTags.contains(tag) || JavadocTag.KNOWN_OTHER_TAGS.contains(tag)) {
+      String tagName = dCInlineTag.getTagName();
+      JavadocTag tag = inlineTag(tagName);
+      if (context.validTags.contains(tag) || knownTags.isKnownTag(tag)) {
         return null;
       }
       String message =

@@ -29,7 +29,7 @@ import static com.google.errorprone.matchers.Matchers.methodInvocation;
 import static com.google.errorprone.matchers.Matchers.methodReturns;
 import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.Matchers.receiverOfInvocation;
-import static com.google.errorprone.matchers.Matchers.symbolHasAnnotation;
+import static com.google.errorprone.suppliers.Suppliers.CLASS_TYPE;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -40,9 +40,7 @@ import com.google.errorprone.matchers.ChildMultiMatcher.MatchType;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.InjectMatchers;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
-import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
@@ -62,9 +60,10 @@ import java.time.Year;
 import java.time.YearMonth;
 import java.time.ZonedDateTime;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @BugPattern(
-    name = "BindingToUnqualifiedCommonType",
     summary =
         "This code declares a binding for a common value type without a Qualifier annotation.",
     severity = WARNING)
@@ -96,12 +95,7 @@ public class BindingToUnqualifiedCommonType extends BugChecker
   private static final Matcher<MethodTree> PROVIDES_UNQUALIFIED_CONSTANT =
       allOf(
           annotations(AT_LEAST_ONE, isType(GUICE_PROVIDES_ANNOTATION)),
-          not(
-              annotations(
-                  AT_LEAST_ONE,
-                  Matchers.<AnnotationTree>anyOf(
-                      symbolHasAnnotation(InjectMatchers.GUICE_BINDING_ANNOTATION),
-                      symbolHasAnnotation(InjectMatchers.JAVAX_QUALIFIER_ANNOTATION)))),
+          not(annotations(AT_LEAST_ONE, InjectMatchers.IS_QUALIFIER_ANNOTATION)),
           methodReturns(IS_SIMPLE_TYPE));
 
   private static final Matcher<MethodInvocationTree> BIND_TO_UNQUALIFIED_CONSTANT =
@@ -111,13 +105,11 @@ public class BindingToUnqualifiedCommonType extends BugChecker
               .namedAnyOf("to", "toInstance", "toProvider", "toConstructor"),
           receiverOfInvocation(
               methodInvocation(
-                  anyOf(
-                      instanceMethod()
-                          .onDescendantOf("com.google.inject.AbstractModule")
-                          .withSignature("<T>bind(java.lang.Class<T>)"),
-                      instanceMethod()
-                          .onDescendantOf("com.google.inject.Binder")
-                          .withSignature("<T>bind(java.lang.Class<T>)")),
+                  instanceMethod()
+                      .onDescendantOfAny(
+                          "com.google.inject.AbstractModule", "com.google.inject.Binder")
+                      .named("bind")
+                      .withParametersOfType(CLASS_TYPE),
                   MatchType.ALL,
                   classLiteral(IS_SIMPLE_TYPE))));
 

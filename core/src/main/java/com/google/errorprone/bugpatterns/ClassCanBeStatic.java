@@ -18,17 +18,22 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.AnnotationNames.BEFORE_TEMPLATE_ANNOTATION;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.SourceVersion;
 import com.sun.source.tree.ClassTree;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.NestingKind;
 
@@ -37,38 +42,47 @@ import javax.lang.model.element.NestingKind;
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 @BugPattern(
-    name = "ClassCanBeStatic",
     summary = "Inner class is non-static but does not reference enclosing class",
     severity = WARNING,
-    tags = {StandardTags.STYLE, StandardTags.PERFORMANCE})
+    tags = {StandardTags.STYLE, StandardTags.PERFORMANCE},
+    // https://www.jetbrains.com/help/inspectopedia/InnerClassMayBeStatic.html
+    altNames = {"InnerClassMayBeStatic"})
 public class ClassCanBeStatic extends BugChecker implements ClassTreeMatcher {
+  private final WellKnownKeep wellKnownKeep;
 
-  private static final String REFASTER_ANNOTATION =
-      "com.google.errorprone.refaster.annotation.BeforeTemplate";
+  @Inject
+  ClassCanBeStatic(WellKnownKeep wellKnownKeep) {
+    this.wellKnownKeep = wellKnownKeep;
+  }
 
   @Override
-  public Description matchClass(final ClassTree tree, final VisitorState state) {
-    final ClassSymbol currentClass = ASTHelpers.getSymbol(tree);
-    if (currentClass == null || !currentClass.hasOuterInstance()) {
+  public Description matchClass(ClassTree tree, VisitorState state) {
+    ClassSymbol currentClass = ASTHelpers.getSymbol(tree);
+    if (!currentClass.hasOuterInstance()) {
       return NO_MATCH;
     }
     if (currentClass.getNestingKind() != NestingKind.MEMBER) {
       // local or anonymous classes can't be static
       return NO_MATCH;
     }
-    switch (currentClass.owner.enclClass().getNestingKind()) {
-      case TOP_LEVEL:
-        break;
-      case MEMBER:
-        // class is nested inside an inner class, so it can't be static
-        if (currentClass.owner.enclClass().hasOuterInstance()) {
+    switch (enclosingClass(currentClass).getNestingKind()) {
+      case TOP_LEVEL -> {}
+      case MEMBER -> {
+        if (!SourceVersion.supportsStaticInnerClass(state.context)
+            && enclosingClass(currentClass).hasOuterInstance()) {
+          // class is nested inside an inner class, so it can't be static
           return NO_MATCH;
         }
-        break;
-      case LOCAL:
-      case ANONYMOUS:
+      }
+      case LOCAL -> {
+        if (!SourceVersion.supportsStaticInnerClass(state.context)) {
+          return NO_MATCH;
+        }
+      }
+      case ANONYMOUS -> {
         // members of local and anonymous classes can't be static
         return NO_MATCH;
+      }
     }
     if (tree.getExtendsClause() != null
         && ASTHelpers.getType(tree.getExtendsClause()).tsym.hasOuterInstance()) {
@@ -77,9 +91,15 @@ public class ClassCanBeStatic extends BugChecker implements ClassTreeMatcher {
     if (CanBeStaticAnalyzer.referencesOuter(tree, currentClass, state)) {
       return NO_MATCH;
     }
-    if (tree.getMembers().stream().anyMatch(m -> hasAnnotation(m, REFASTER_ANNOTATION, state))) {
+    if (wellKnownKeep.shouldKeep(tree)) {
       return NO_MATCH;
     }
-    return describeMatch(tree, SuggestedFixes.addModifiers(tree, state, Modifier.STATIC));
+    if (tree.getMembers().stream()
+        .anyMatch(m -> hasAnnotation(m, BEFORE_TEMPLATE_ANNOTATION, state))) {
+      return NO_MATCH;
+    }
+    return describeMatch(
+        tree,
+        SuggestedFixes.addModifiers(tree, state, Modifier.STATIC).orElse(SuggestedFix.emptyFix()));
   }
 }

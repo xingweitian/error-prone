@@ -36,7 +36,6 @@ import java.util.Set;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "DuplicateMapKeys",
     summary =
         "Map#ofEntries will throw an IllegalArgumentException if there are any duplicate keys",
     severity = ERROR)
@@ -49,20 +48,19 @@ public class DuplicateMapKeys extends BugChecker implements MethodInvocationTree
       MethodMatchers.staticMethod().onClass("java.util.Map").named("entry");
 
   @Override
-  public Description matchMethodInvocation(MethodInvocationTree tree, final VisitorState state) {
+  public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!METHOD_MATCHER.matches(tree, state)) {
       return Description.NO_MATCH;
     }
     Set<Object> keySet = new HashSet<>();
     for (ExpressionTree expr : tree.getArguments()) {
-      if (!(expr instanceof MethodInvocationTree)) {
+      if (!(expr instanceof MethodInvocationTree entryInvocation)) {
         continue;
       }
       if (!ENTRY_MATCHER.matches(expr, state)) {
         continue;
       }
-      MethodInvocationTree entryInvocation = (MethodInvocationTree) expr;
-      Object key = ASTHelpers.constValue(entryInvocation.getArguments().get(0));
+      Object key = ASTHelpers.constValue(entryInvocation.getArguments().getFirst());
       if (key == null) {
         continue;
       }

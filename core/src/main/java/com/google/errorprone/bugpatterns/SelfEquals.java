@@ -34,10 +34,13 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.Tree.Kind;
+import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.tree.JCTree;
@@ -46,11 +49,12 @@ import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
-/** @author bhagwani@google.com (Sumit Bhagwani) */
+/**
+ * @author bhagwani@google.com (Sumit Bhagwani)
+ */
 @BugPattern(
-    name = "SelfEquals",
     summary = "Testing an object for equality with itself will always be true.",
     severity = ERROR)
 public class SelfEquals extends BugChecker implements MethodInvocationTreeMatcher {
@@ -76,7 +80,7 @@ public class SelfEquals extends BugChecker implements MethodInvocationTreeMatche
     if (INSTANCE_MATCHER.matches(tree, state)) {
       toReplace = args.get(0);
     } else if (STATIC_MATCHER.matches(tree, state)) {
-      if (args.get(0).getKind() == Kind.IDENTIFIER && args.get(1).getKind() != Kind.IDENTIFIER) {
+      if (args.get(0) instanceof IdentifierTree && !(args.get(1) instanceof IdentifierTree)) {
         toReplace = args.get(0);
       } else {
         toReplace = args.get(1);
@@ -92,12 +96,11 @@ public class SelfEquals extends BugChecker implements MethodInvocationTreeMatche
     return description.build();
   }
 
-  @Nullable
-  protected static Fix fieldFix(Tree toReplace, VisitorState state) {
+  protected static @Nullable SuggestedFix fieldFix(Tree toReplace, VisitorState state) {
     TreePath path = state.getPath();
     while (path != null
         && path.getLeaf().getKind() != Kind.CLASS
-        && path.getLeaf().getKind() != Kind.BLOCK) {
+        && !(path.getLeaf() instanceof BlockTree)) {
       path = path.getParentPath();
     }
     if (path == null) {
@@ -111,13 +114,13 @@ public class SelfEquals extends BugChecker implements MethodInvocationTreeMatche
       members = ((JCBlock) path.getLeaf()).getStatements();
     }
     for (JCTree jcTree : members) {
-      if (jcTree.getKind() == Kind.VARIABLE) {
+      if (jcTree instanceof VariableTree) {
         JCVariableDecl declaration = (JCVariableDecl) jcTree;
         TypeSymbol variableTypeSymbol =
             state.getTypes().erasure(ASTHelpers.getType(declaration)).tsym;
 
         if (ASTHelpers.getSymbol(toReplace).isMemberOf(variableTypeSymbol, state.getTypes())) {
-          if (toReplace.getKind() == Kind.IDENTIFIER) {
+          if (toReplace instanceof IdentifierTree) {
             return SuggestedFix.prefixWith(toReplace, declaration.getName() + ".");
           } else {
             return SuggestedFix.replace(

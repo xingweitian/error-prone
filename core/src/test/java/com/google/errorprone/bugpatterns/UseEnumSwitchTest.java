@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -25,65 +24,120 @@ import org.junit.runners.JUnit4;
 /** {@link UseEnumSwitch}Test */
 @RunWith(JUnit4.class)
 public class UseEnumSwitchTest {
+  private final BugCheckerRefactoringTestHelper refactoringHelper =
+      BugCheckerRefactoringTestHelper.newInstance(UseEnumSwitch.class, getClass());
 
   @Test
   public void refactoring() {
-    BugCheckerRefactoringTestHelper.newInstance(UseEnumSwitch.class, getClass())
+    refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum E { ONE, TWO, THREE }",
-            "  int f(E e) {",
-            "    if (e.equals(E.ONE)) {",
-            "      return 1;",
-            "    } else if (e.equals(E.TWO)) {",
-            "      return 2;",
-            "    } else {",
-            "      return 3;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum E {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              int f(E e) {
+                if (e.equals(E.ONE)) {
+                  return 1;
+                } else if (e.equals(E.TWO)) {
+                  return 2;
+                } else {
+                  return 3;
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  enum E { ONE, TWO, THREE }",
-            "  int f(E e) {",
-            "    switch (e) {",
-            "      case ONE:",
-            "        return 1;",
-            "      case TWO:",
-            "        return 2;",
-            "      default:",
-            "        return 3;",
-            "    }",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            class Test {
+              enum E {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              int f(E e) {
+                switch (e) {
+                  case ONE -> {
+                    return 1;
+                  }
+                  case TWO -> {
+                    return 2;
+                  }
+                  default -> {
+                    return 3;
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void nonConstantEnum() {
-    BugCheckerRefactoringTestHelper.newInstance(UseEnumSwitch.class, getClass())
+    refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  enum E {",
-            "    ONE, TWO, THREE;",
-            "    E one() {",
-            "      return ONE;",
-            "    }",
-            "  }",
-            "  int f(E e) {",
-            "    if (e == e.one()) {",
-            "      return 1;",
-            "    } else if (e == E.TWO) {",
-            "      return 2;",
-            "    } else {",
-            "      return 3;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum E {
+                ONE,
+                TWO,
+                THREE;
+
+                E one() {
+                  return ONE;
+                }
+              }
+
+              int f(E e) {
+                if (e == e.one()) {
+                  return 1;
+                } else if (e == E.TWO) {
+                  return 2;
+                } else {
+                  return 3;
+                }
+              }
+            }
+            """)
         .expectUnchanged()
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
+  }
+
+  @Test
+  public void notActuallyEnum_noFinding() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              interface A {}
+
+              enum E implements A {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              int f(A e) {
+                if (e.equals(E.ONE)) {
+                  return 1;
+                } else if (e.equals(E.TWO)) {
+                  return 2;
+                } else {
+                  return 3;
+                }
+              }
+            }
+            """)
+        .expectUnchanged()
+        .doTest();
   }
 }

@@ -17,6 +17,8 @@
 package com.google.errorprone.bugpatterns.threadsafety;
 
 import static com.google.errorprone.bugpatterns.threadsafety.IllegalGuardedBy.checkGuardedBy;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.threadsafety.GuardedByExpression.Kind;
@@ -24,6 +26,7 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.ParenthesizedTree;
@@ -35,6 +38,7 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Names;
 import java.util.Optional;
 import javax.lang.model.element.Name;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A binder from {@code @GuardedBy} annotations to {@link GuardedByExpression}s.
@@ -42,23 +46,21 @@ import javax.lang.model.element.Name;
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 public final class GuardedByBinder {
-
   /**
    * Creates a {@link GuardedByExpression} from a bound AST node, or returns {@code
    * Optional.empty()} if the AST node doesn't correspond to a 'simple' lock expression.
    */
   public static Optional<GuardedByExpression> bindExpression(
-      JCTree.JCExpression exp, VisitorState visitorState, GuardedByFlags flags) {
+      JCTree.JCExpression exp, VisitorState visitorState) {
     try {
       return Optional.of(
           bind(
               exp,
-              BinderContext.of(
+              new BinderContext(
                   ALREADY_BOUND_RESOLVER,
                   ASTHelpers.getSymbol(visitorState.findEnclosing(ClassTree.class)),
                   visitorState.getTypes(),
-                  visitorState.getNames(),
-                  flags)));
+                  visitorState.getNames())));
     } catch (IllegalGuardedBy expected) {
       return Optional.empty();
     }
@@ -66,43 +68,23 @@ public final class GuardedByBinder {
 
   /** Creates a {@link GuardedByExpression} from a string, given the resolution context. */
   public static Optional<GuardedByExpression> bindString(
-      String string, GuardedBySymbolResolver resolver, GuardedByFlags flags) {
+      String string, GuardedBySymbolResolver resolver) {
     try {
       return Optional.of(
           bind(
               GuardedByUtils.parseString(string, resolver.context()),
-              BinderContext.of(
+              new BinderContext(
                   resolver,
                   resolver.enclosingClass(),
                   resolver.visitorState().getTypes(),
-                  resolver.visitorState().getNames(),
-                  flags)));
+                  resolver.visitorState().getNames())));
     } catch (IllegalGuardedBy expected) {
       return Optional.empty();
     }
   }
 
-  private static class BinderContext {
-    final Resolver resolver;
-    final ClassSymbol thisClass;
-    final Types types;
-    final Names names;
-    final GuardedByFlags flags;
-
-    public BinderContext(
-        Resolver resolver, ClassSymbol thisClass, Types types, Names names, GuardedByFlags flags) {
-      this.resolver = resolver;
-      this.thisClass = thisClass;
-      this.types = types;
-      this.names = names;
-      this.flags = flags;
-    }
-
-    public static BinderContext of(
-        Resolver resolver, ClassSymbol thisClass, Types types, Names names, GuardedByFlags flags) {
-      return new BinderContext(resolver, thisClass, types, names, flags);
-    }
-  }
+  private record BinderContext(
+      Resolver resolver, ClassSymbol thisClass, Types types, Names names) {}
 
   private static GuardedByExpression bind(JCTree.JCExpression exp, BinderContext context) {
     GuardedByExpression expr = BINDER.visit(exp, context);
@@ -128,6 +110,8 @@ public final class GuardedByBinder {
         MethodInvocationTree node, GuardedByExpression base, Name identifier);
 
     Symbol resolveSelect(GuardedByExpression base, MemberSelectTree node);
+
+    Symbol resolveMemberReference(GuardedByExpression base, MemberReferenceTree node);
 
     Symbol resolveTypeLiteral(ExpressionTree expression);
 
@@ -159,6 +143,11 @@ public final class GuardedByBinder {
         }
 
         @Override
+        public Symbol resolveMemberReference(GuardedByExpression base, MemberReferenceTree node) {
+          return ASTHelpers.getSymbol(node);
+        }
+
+        @Override
         public Symbol resolveTypeLiteral(ExpressionTree expression) {
           return ASTHelpers.getSymbol(expression);
         }
@@ -181,28 +170,23 @@ public final class GuardedByBinder {
               node.getArguments().isEmpty() && node.getTypeArguments().isEmpty(),
               "Only nullary methods are allowed.");
           ExpressionTree methodSelect = node.getMethodSelect();
-          switch (methodSelect.getKind()) {
-            case IDENTIFIER:
-              {
-                IdentifierTree identifier = (IdentifierTree) methodSelect;
-                Symbol.MethodSymbol method =
-                    context.resolver.resolveMethod(node, identifier.getName());
-                checkGuardedBy(method != null, identifier.toString());
-                return bindSelect(computeBase(context, method), method);
-              }
-            case MEMBER_SELECT:
-              {
-                MemberSelectTree select = (MemberSelectTree) methodSelect;
-                GuardedByExpression base = visit(select.getExpression(), context);
-                checkGuardedBy(base != null, select.getExpression().toString());
-                Symbol.MethodSymbol method =
-                    context.resolver.resolveMethod(node, base, select.getIdentifier());
-                checkGuardedBy(method != null, select.toString());
-                return bindSelect(normalizeBase(context, method, base), method);
-              }
-            default:
-              throw new IllegalGuardedBy(methodSelect.getKind().toString());
-          }
+          return switch (methodSelect) {
+            case IdentifierTree identifier -> {
+              Symbol.MethodSymbol method =
+                  context.resolver.resolveMethod(node, identifier.getName());
+              checkGuardedBy(method != null, identifier.toString());
+              yield bindSelect(computeBase(context, method), method);
+            }
+            case MemberSelectTree select -> {
+              GuardedByExpression base = visit(select.getExpression(), context);
+              checkGuardedBy(base != null, select.getExpression().toString());
+              Symbol.MethodSymbol method =
+                  context.resolver.resolveMethod(node, base, select.getIdentifier());
+              checkGuardedBy(method != null, select.toString());
+              yield bindSelect(normalizeBase(context, method, base), method);
+            }
+            default -> throw new IllegalGuardedBy(methodSelect.getKind().toString());
+          };
         }
 
         @Override
@@ -232,8 +216,18 @@ public final class GuardedByBinder {
           return bindSelect(normalizeBase(context, sym, base), sym);
         }
 
+        @Override
+        public GuardedByExpression visitMemberReference(
+            MemberReferenceTree node, BinderContext context) {
+          GuardedByExpression base = visit(node.getQualifierExpression(), context);
+          checkGuardedBy(base != null, node.getQualifierExpression().toString());
+          Symbol method = context.resolver.resolveMemberReference(base, node);
+          checkGuardedBy(method != null, node.toString());
+          return bindSelect(normalizeBase(context, method, base), method);
+        }
+
         private GuardedByExpression bindSelect(GuardedByExpression base, Symbol sym) {
-          if (base.kind().equals(Kind.TYPE_LITERAL) && !sym.isStatic()) {
+          if (base.kind().equals(Kind.TYPE_LITERAL) && !isStatic(sym)) {
             throw new IllegalGuardedBy("Instance access on static: " + base + ", " + sym);
           }
 
@@ -246,33 +240,23 @@ public final class GuardedByBinder {
         public GuardedByExpression visitIdentifier(IdentifierTree node, BinderContext context) {
           Symbol symbol = context.resolver.resolveIdentifier(node);
           checkGuardedBy(symbol != null, "Could not resolve %s", node);
-          if (symbol instanceof Symbol.VarSymbol) {
-            Symbol.VarSymbol varSymbol = (Symbol.VarSymbol) symbol;
-            switch (varSymbol.getKind()) {
-              case LOCAL_VARIABLE:
-              case PARAMETER:
-                return F.localVariable(varSymbol);
-              case FIELD:
-                {
-                  if (symbol.name.contentEquals("this")) {
-                    return F.thisliteral();
+          return switch (symbol) {
+            case Symbol.VarSymbol varSymbol ->
+                switch (varSymbol.getKind()) {
+                  case LOCAL_VARIABLE, PARAMETER, BINDING_VARIABLE -> F.localVariable(varSymbol);
+                  case FIELD -> {
+                    yield symbol.name.contentEquals("this")
+                        ? F.thisliteral()
+                        : F.select(computeBase(context, varSymbol), varSymbol);
                   }
-                  return F.select(computeBase(context, varSymbol), varSymbol);
-                }
-              default:
-                throw new IllegalGuardedBy(varSymbol.getKind().toString());
-            }
-          } else if (symbol instanceof Symbol.MethodSymbol) {
-            Symbol.MethodSymbol methodSymbol = (Symbol.MethodSymbol) symbol;
-            return F.select(computeBase(context, symbol), methodSymbol);
-          } else if (symbol instanceof Symbol.ClassSymbol) {
-            if (node.getName().contentEquals("this")) {
-              return F.thisliteral();
-            } else {
-              return F.typeLiteral(symbol);
-            }
-          }
-          throw new IllegalGuardedBy(symbol.getClass().toString());
+                  default -> throw new IllegalGuardedBy(varSymbol.getKind().toString());
+                };
+            case Symbol.MethodSymbol methodSymbol ->
+                F.select(computeBase(context, symbol), methodSymbol);
+            case ClassSymbol unused ->
+                node.getName().contentEquals("this") ? F.thisliteral() : F.typeLiteral(symbol);
+            default -> throw new IllegalGuardedBy(symbol.getClass().toString());
+          };
         }
 
         @Override
@@ -296,8 +280,8 @@ public final class GuardedByBinder {
          */
         private GuardedByExpression normalizeBase(
             BinderContext context, Symbol symbol, GuardedByExpression base) {
-          if (symbol.isStatic()) {
-            return F.typeLiteral(symbol.owner.enclClass());
+          if (isStatic(symbol)) {
+            return F.typeLiteral(enclosingClass(symbol));
           }
 
           if (base != null && base.kind() != GuardedByExpression.Kind.THIS) {
@@ -320,10 +304,11 @@ public final class GuardedByBinder {
          * Returns the owner if the given member is declared in a lexically enclosing scope, and
          * {@code null} otherwise.
          */
-        private ClassSymbol isEnclosedIn(ClassSymbol startingClass, Symbol member, Types types) {
-          for (ClassSymbol scope = startingClass.owner.enclClass();
+        private @Nullable ClassSymbol isEnclosedIn(
+            ClassSymbol startingClass, Symbol member, Types types) {
+          for (ClassSymbol scope = enclosingClass(startingClass);
               scope != null;
-              scope = scope.owner.enclClass()) {
+              scope = enclosingClass(scope)) {
             if (member.isMemberOf(scope.type.tsym, types)) {
               return scope;
             }

@@ -22,7 +22,7 @@ import java.lang.annotation.Target;
 
 // TODO(b/157082874): Allow restricting entire classes.
 /**
- * Restrict this method to callsites with a allowlist annotation.
+ * Restrict access to this API element to callers with an allowlist annotation or a specific path.
  *
  * <p>Callers that are not allowlisted will cause a configurable compiler diagnostic. Allowlisting
  * can either allow the call outright, or make the compiler emit a warning when the API is called.
@@ -38,17 +38,17 @@ import java.lang.annotation.Target;
  * example through code review, could be marked {@code @ReviewedFooBar}.
  *
  * <pre>{@code
- * public {@literal @}interface LegacyUnsafeFooBar{}
+ * public @interface LegacyUnsafeFooBar{}
  *
- * public {@literal @}interface ReviewedFooBar{
+ * public @interface ReviewedFooBar{
  *  public string reviewer();
  *  public string comments();
  * }
  *
  * public class Foo {
- *   {@literal @}RestrictedApi(
+ *   @RestrictedApi(
  *      explanation="You could shoot yourself in the foot with Foo.bar if you aren't careful",
- *      link="http://edsger.dijkstra/foo_bar_consider_harmful.html",
+ *      link="https://edsger.dijkstra/foo_bar_consider_harmful.html",
  *      allowedOnPath="testsuite/.*", // Unsafe behavior in tests is ok.
  *      allowlistAnnotations = {ReviewedFooBar.class},
  *      allowlistWithWarningAnnotations = {LegacyUnsafeFooBar.class})
@@ -61,7 +61,7 @@ import java.lang.annotation.Target;
  *   }
  *   boolean complicatedCondition = true;
  *
- *   {@literal @}ReviewedFooBar(
+ *   @ReviewedFooBar(
  *      reviewer="bangert",
  *      comments="Makes sure complicatedCondition isn't true, so bar is safe!"
  *   )
@@ -71,7 +71,7 @@ import java.lang.annotation.Target;
  *      }
  *   }
  *
- *   {@literal @}LegacyUnsafeFooBar
+ *   @LegacyUnsafeFooBar
  *   public void someOldCode() {
  *      // ...
  *      bar()
@@ -79,14 +79,39 @@ import java.lang.annotation.Target;
  *   }
  * }
  * }</pre>
+ *
+ * <p>The {@code @RestrictedApi} annotation can also be used on a record's component to restrict the
+ * visibility of the record's accessor methods. For example:
+ *
+ * <pre>{@code
+ * public record User(
+ *     String name,
+ *     @RestrictedApi(
+ *         explanation = "Only allow safe accessors to the password",
+ *         allowlistAnnotations = {ReviewedFooBar.class},
+ *         link = "")
+ *         String password) {}
+ * }</pre>
+ *
+ * <p>All users will be able to call the record's constructor, but only users annotated with
+ * {@code @ReviewedFooBar} will be able to call the {@code password()} accessor method.
  */
 @Target({ElementType.CONSTRUCTOR, ElementType.METHOD})
 public @interface RestrictedApi {
   /** Explanation why the API is restricted, to be inserted into the compiler output. */
   String explanation();
 
-  /** Link explaining why the API is restricted */
-  String link();
+  /** Optional link explaining why the API is restricted. */
+  String link() default "";
+
+  /**
+   * Allow the restricted API on paths matching any of the given patterns (evaluated against the
+   * canonical repository-relative path).
+   *
+   * <p>Supports exact source file paths (e.g. {@code "java/com/google/foo/Bar.java"}) and directory
+   * prefixes ending in {@code "/"} (e.g. {@code "java/com/google/foo/"}).
+   */
+  String[] allowedPaths() default {};
 
   /**
    * Allow the restricted API on paths matching this regular expression.

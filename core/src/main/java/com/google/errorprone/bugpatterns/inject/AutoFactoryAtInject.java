@@ -22,8 +22,8 @@ import static com.google.errorprone.matchers.Matchers.hasAnnotation;
 import static com.google.errorprone.matchers.Matchers.methodIsConstructor;
 import static com.google.errorprone.util.ASTHelpers.findEnclosingNode;
 import static com.google.errorprone.util.ASTHelpers.getConstructors;
+import static com.google.errorprone.util.AnnotationNames.AUTO_FACTORY_ANNOTATION;
 import static com.sun.source.tree.Tree.Kind.CLASS;
-import static com.sun.source.tree.Tree.Kind.METHOD;
 
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
@@ -38,15 +38,16 @@ import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 
-/** @author ronshapiro@google.com (Ron Shapiro) */
+/**
+ * @author ronshapiro@google.com (Ron Shapiro)
+ */
 @BugPattern(
-    name = "AutoFactoryAtInject",
     summary = "@AutoFactory and @Inject should not be used in the same type.",
     severity = ERROR)
 public class AutoFactoryAtInject extends BugChecker implements AnnotationTreeMatcher {
 
   private static final Matcher<Tree> HAS_AUTO_FACTORY_ANNOTATION =
-      hasAnnotation("com.google.auto.factory.AutoFactory");
+      hasAnnotation(AUTO_FACTORY_ANNOTATION);
 
   @Override
   public final Description matchAnnotation(AnnotationTree annotationTree, VisitorState state) {
@@ -55,8 +56,8 @@ public class AutoFactoryAtInject extends BugChecker implements AnnotationTreeMat
     }
 
     Tree annotatedTree = getCurrentlyAnnotatedNode(state);
-    if (!annotatedTree.getKind().equals(METHOD)
-        || !methodIsConstructor().matches((MethodTree) annotatedTree, state)) {
+    if (!(annotatedTree instanceof MethodTree methodTree)
+        || !methodIsConstructor().matches(methodTree, state)) {
       return Description.NO_MATCH;
     }
 

@@ -21,7 +21,7 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.argumentselectiondefects.NamedParameterComment.MatchType;
 import com.google.errorprone.util.Commented;
 import com.google.errorprone.util.Comments;
-import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.DeconstructionPatternTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
@@ -33,7 +33,7 @@ import com.sun.tools.javac.code.Symbol.MethodSymbol;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-class NameInCommentHeuristic implements Heuristic {
+final class NameInCommentHeuristic implements Heuristic {
 
   /**
    * Return true if there are no comments on the original actual parameter of a change which match
@@ -44,28 +44,27 @@ class NameInCommentHeuristic implements Heuristic {
       Changes changes, Tree node, MethodSymbol symbol, VisitorState state) {
     // Now check to see if there is a comment in the position of any actual parameter we want to
     // change which matches the formal parameter
-    ImmutableList<Commented<ExpressionTree>> comments = findCommentsForArguments(node, state);
+    ImmutableList<Commented> comments = findCommentsForArguments(node, state);
 
     return changes.changedPairs().stream()
-        .noneMatch(
-            p -> {
-              MatchType match =
-                  NamedParameterComment.match(comments.get(p.formal().index()), p.formal().name())
-                      .matchType();
-              return match == MatchType.EXACT_MATCH || match == MatchType.APPROXIMATE_MATCH;
-            });
+        .noneMatch(p -> {
+          MatchType match =
+              NamedParameterComment.match(comments.get(p.formal().index()), p.formal().name())
+                  .matchType();
+          return match == MatchType.EXACT_MATCH || match == MatchType.APPROXIMATE_MATCH;
+        });
   }
 
-  private static ImmutableList<Commented<ExpressionTree>> findCommentsForArguments(
-      Tree tree, VisitorState state) {
-    switch (tree.getKind()) {
-      case METHOD_INVOCATION:
-        return Comments.findCommentsForArguments((MethodInvocationTree) tree, state);
-      case NEW_CLASS:
-        return Comments.findCommentsForArguments((NewClassTree) tree, state);
-      default:
-        throw new IllegalArgumentException(
-            "Only MethodInvocationTree or NewClassTree is supported");
-    }
+  private static ImmutableList<Commented> findCommentsForArguments(Tree tree, VisitorState state) {
+    return switch (tree) {
+      case MethodInvocationTree methodInvocationTree ->
+          Comments.findCommentsForArguments(methodInvocationTree, state);
+      case NewClassTree newClassTree -> Comments.findCommentsForArguments(newClassTree, state);
+      case DeconstructionPatternTree deconstructionPatternTree ->
+          Comments.findCommentsForArguments(deconstructionPatternTree, state);
+      default ->
+          throw new IllegalArgumentException(
+              "Only MethodInvocationTree or NewClassTree is supported, saw " + tree.getClass());
+    };
   }
 }

@@ -43,20 +43,21 @@ import java.lang.reflect.Constructor;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "UnsafeReflectiveConstructionCast",
     summary =
         "Prefer `asSubclass` instead of casting the result of `newInstance`,"
             + " to detect classes of incorrect type before invoking their constructors."
-            + "This way, if the class is of the incorrect type,"
-            + "it will throw an exception before invoking its constructor.",
+            + " This way, if the class is of the incorrect type,"
+            + " it will throw an exception before invoking its constructor.",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
 public class UnsafeReflectiveConstructionCast extends BugChecker implements TypeCastTreeMatcher {
 
   private static final Matcher<ExpressionTree> CLASS_FOR_NAME =
       staticMethod().onClass(Class.class.getName()).named("forName");
-  private static final Matcher<ExpressionTree> CLASS_GET_DECLARED_CTOR =
-      instanceMethod().onExactClass(Class.class.getName()).named("getDeclaredConstructor");
+  private static final Matcher<ExpressionTree> CLASS_GET_CONSTRUCTOR =
+      instanceMethod()
+          .onExactClass(Class.class.getName())
+          .namedAnyOf("getDeclaredConstructor", "getConstructor");
   private static final Matcher<ExpressionTree> CTOR_NEW_INSTANCE =
       instanceMethod().onExactClass(Constructor.class.getName()).named("newInstance");
 
@@ -70,7 +71,7 @@ public class UnsafeReflectiveConstructionCast extends BugChecker implements Type
     }
     ExpressionTree treeReceiver = ASTHelpers.getReceiver(newInstanceTree);
     // treeReceiver = Class.forName(someString).getDeclaredConstructor(...)
-    if (!CLASS_GET_DECLARED_CTOR.matches(treeReceiver, state)) {
+    if (!CLASS_GET_CONSTRUCTOR.matches(treeReceiver, state)) {
       return Description.NO_MATCH;
     }
     ExpressionTree classForName = ASTHelpers.getReceiver(treeReceiver);

@@ -18,21 +18,22 @@ package com.google.errorprone.refaster;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assert_;
-import static com.google.errorprone.util.RuntimeVersion.isAtLeast9;
 import static com.google.testing.compile.JavaFileObjects.forResource;
+import static com.google.testing.compile.JavaFileObjects.forSourceString;
 import static com.google.testing.compile.JavaSourceSubjectFactory.javaSource;
 import static org.junit.Assert.assertThrows;
-import static org.junit.Assume.assumeFalse;
 
 import com.google.common.base.CharMatcher;
-import com.google.common.base.Function;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.CodeTransformer;
+import com.google.errorprone.matchers.Description;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.Tree;
+import com.sun.source.util.TreePath;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import javax.tools.JavaFileObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -50,13 +51,9 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
     ClassTree classTree =
         Iterables.getOnlyElement(
             FluentIterable.from(compilationUnits)
-                .transformAndConcat(
-                    new Function<CompilationUnitTree, Iterable<? extends Tree>>() {
-                      @Override
-                      public Iterable<? extends Tree> apply(CompilationUnitTree input) {
-                        return input.getTypeDecls();
-                      }
-                    })
+                .transformAndConcat((CompilationUnitTree input) -> {
+                  return input.getTypeDecls();
+                })
                 .filter(ClassTree.class));
     return Iterables.getOnlyElement(RefasterRuleBuilderScanner.extractRules(classTree, context));
   }
@@ -86,6 +83,17 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
     JavaFileObject input = forResource(String.format("%s/%sExample.java", INPUT_DIR, testName));
     JavaFileObject output = forResource(String.format("%s/%sExample.java", OUTPUT_DIR, testName));
     expectTransforms(transformer, input, output);
+  }
+
+  @Test
+  public void keyBindingError() {
+    IllegalArgumentException failure =
+        assertThrows(IllegalArgumentException.class, () -> runTest("KeyBindingErrorTemplate"));
+    assertThat(failure)
+        .hasMessageThat()
+        .matches(
+            "@AfterTemplate of .*\\.KeyBindingErrorTemplate defines arguments that are not present"
+                + " in all @BeforeTemplate methods: \\[b, c\\]");
   }
 
   @Test
@@ -205,8 +213,6 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
 
   @Test
   public void freeIdentWildcardCapture() throws IOException {
-    // TODO(b/67786978): investigate JDK 9 test failures
-    assumeFalse(isAtLeast9());
     runTest("WildcardUnificationTemplate");
   }
 
@@ -223,6 +229,11 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
   @Test
   public void expressionPlaceholderAllowsIdentity() throws IOException {
     runTest("PlaceholderAllowsIdentityTemplate");
+  }
+
+  @Test
+  public void voidExpressionPlaceholder() throws IOException {
+    runTest("VoidExpressionPlaceholderTemplate");
   }
 
   @Test
@@ -267,8 +278,6 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
 
   @Test
   public void returnPlaceholder() throws IOException {
-    // TODO(b/67786978): investigate JDK 9 test failures
-    assumeFalse(isAtLeast9());
     runTest("ReturnPlaceholderTemplate");
   }
 
@@ -289,15 +298,11 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
 
   @Test
   public void samePackageImports() throws IOException {
-    // TODO(b/67786978): investigate JDK 9 test failures
-    assumeFalse(isAtLeast9());
     runTest("SamePackageImportsTemplate");
   }
 
   @Test
   public void ifFallthrough() throws IOException {
-    // TODO(b/67786978): investigate JDK 9 test failures
-    assumeFalse(isAtLeast9());
     runTest("IfFallthroughTemplate");
   }
 
@@ -359,5 +364,232 @@ public class TemplateIntegrationTest extends CompilerBasedTest {
   @Test
   public void suppressWarnings() throws IOException {
     runTest("SuppressWarningsTemplate");
+  }
+
+  @Test
+  public void typeArgumentsMethodInvocation() throws IOException {
+    runTest("TypeArgumentsMethodInvocationTemplate");
+  }
+
+  @Test
+  public void memberSelectAndMethodParameterDisambiguation() throws IOException {
+    runTest("MemberSelectAndMethodParameterDisambiguationTemplate");
+  }
+
+  @Test
+  public void unqualifiedMethod() throws IOException {
+    runTest("UnqualifiedMethodTemplate");
+  }
+
+  @Test
+  public void placeholderWithMatchesReceivesType() throws IOException {
+    CodeTransformer transformer =
+        extractRefasterRule(
+            forSourceString(
+                "PlaceholderWithMatchesTemplate",
+                """
+                import com.google.errorprone.refaster.IsIntMatcher;
+                import com.google.errorprone.refaster.annotation.AfterTemplate;
+                import com.google.errorprone.refaster.annotation.BeforeTemplate;
+                import com.google.errorprone.refaster.annotation.Matches;
+                import com.google.errorprone.refaster.annotation.Placeholder;
+
+                abstract class PlaceholderWithMatchesTemplate<T> {
+                  @Placeholder
+                  @Matches(IsIntMatcher.class)
+                  abstract int getInt(T t);
+
+                  @BeforeTemplate
+                  int before(T t) {
+                    return getInt(t) * 1;
+                  }
+
+                  @AfterTemplate
+                  int after(T t) {
+                    return getInt(t);
+                  }
+                }
+                """));
+
+    JavaFileObject input =
+        forSourceString(
+            "Example",
+            """
+            class Example {
+              int intField;
+              double doubleField;
+
+              void test(Example ex) {
+                int a = ex.intField * 1;
+                double b = ex.doubleField * 1;
+              }
+            }
+            """);
+
+    JavaFileObject expectedOutput =
+        forSourceString(
+            "Example",
+            """
+            class Example {
+              int intField;
+              double doubleField;
+
+              void test(Example ex) {
+                int a = ex.intField;
+                double b = ex.doubleField * 1;
+              }
+            }
+            """);
+
+    expectTransforms(transformer, input, expectedOutput);
+  }
+
+  @Test
+  public void applyToSubtreeChecksEnclosingClass() {
+    JavaFileObject template =
+        forResource(String.format("%s/SuppressWarningsTemplate.java", TEMPLATE_DIR));
+    CodeTransformer transformer = extractRefasterRule(template);
+
+    List<Description> descriptions = new ArrayList<>();
+    transformer.apply(
+        TreePath.getPath(compilationUnits.getFirst(), getMethodDeclaration("abs")),
+        context,
+        descriptions::add);
+    assertThat(descriptions).isEmpty();
+
+    compile(forResource(String.format("%s/SuppressWarningsTemplateExample.java", INPUT_DIR)));
+    transformer.apply(
+        TreePath.getPath(compilationUnits.getFirst(), getMethodDeclaration("abs2")),
+        context,
+        descriptions::add);
+    assertThat(descriptions).isEmpty();
+
+    transformer.apply(
+        TreePath.getPath(compilationUnits.getFirst(), getMethodDeclaration("abs4")),
+        context,
+        descriptions::add);
+    assertThat(descriptions).hasSize(1);
+  }
+
+  @Test
+  public void classCastInStatementContext() throws IOException {
+    CodeTransformer transformer =
+        extractRefasterRule(
+            forSourceString(
+                "ClassCastTemplate",
+                """
+                import com.google.errorprone.refaster.annotation.AfterTemplate;
+                import com.google.errorprone.refaster.annotation.BeforeTemplate;
+
+                public class ClassCastTemplate<T> {
+                  @BeforeTemplate
+                  T before(Class<T> clazz, Object o) {
+                    return clazz.cast(o);
+                  }
+
+                  @AfterTemplate
+                  @SuppressWarnings("unchecked")
+                  T after(Object o) {
+                    return (T) o;
+                  }
+                }
+                """));
+
+    JavaFileObject input =
+        forSourceString(
+            "Example",
+            """
+            class Example {
+              void test(Object o) {
+                // TODO(b/583897256): Do not rewrite clazz.cast(o) to (T) o in statement context.
+                String.class.cast(o);
+              }
+            }
+            """);
+
+    JavaFileObject transformedInput =
+        CodeTransformerTestHelper.create(transformer).transform(input);
+
+    assertThat(transformedInput.getCharContent(false).toString())
+        .isEqualTo(
+            """
+            class Example {
+              void test(Object o) {
+                // TODO(b/583897256): Do not rewrite clazz.cast(o) to (T) o in statement context.
+                (String)o;
+              }
+            }
+            """);
+  }
+
+  @Test
+  public void clazz() throws IOException {
+    CodeTransformer transformer =
+        extractRefasterRule(
+            forSourceString(
+                "IsInstanceToClazzTemplate",
+                """
+                import com.google.errorprone.refaster.Refaster;
+                import com.google.errorprone.refaster.annotation.AfterTemplate;
+                import com.google.errorprone.refaster.annotation.BeforeTemplate;
+
+                class IsInstanceToClazzTemplate<T> {
+                  @BeforeTemplate
+                  boolean before(Object o) {
+                    return Refaster.<T>isInstance(o);
+                  }
+
+                  @AfterTemplate
+                  boolean after(Object o) {
+                    return Refaster.<T>clazz().isInstance(o);
+                  }
+                }
+                """));
+
+    JavaFileObject input =
+        forSourceString(
+            "Example",
+            """
+            import java.util.List;
+            import java.util.Map;
+
+            class Example<U> {
+              class Inner {}
+
+              boolean test(Object o) {
+                return o instanceof String
+                    || o instanceof List<?>
+                    || o instanceof Map.Entry<?, ?>
+                    || o instanceof Example<?>.Inner
+                    || o instanceof List<?>[];
+              }
+            }
+            """);
+    // TODO(b/583393246): Emit compilable output for generic types (e.g., by stripping type
+    // arguments from .class literals, or by not rewriting at all) and use expectTransforms
+    // (currently the transformed output fails to compile).
+    JavaFileObject expectedOutput =
+        forSourceString(
+            "Example",
+            """
+            import java.util.List;
+            import java.util.Map;
+
+            class Example<U> {
+              class Inner {}
+
+              boolean test(Object o) {
+                return String.class.isInstance(o)
+                    || List<?>.class.isInstance(o)
+                    || Map.Entry<?, ?>.class.isInstance(o)
+                    || Example<?>.Inner.class.isInstance(o)
+                    || List<?>[].class.isInstance(o);
+              }
+            }
+            """);
+    JavaFileObject transformedInput =
+        CodeTransformerTestHelper.create(transformer).transform(input);
+    assertThat(transformedInput.getCharContent(false).toString())
+        .isEqualTo(expectedOutput.getCharContent(false).toString());
   }
 }

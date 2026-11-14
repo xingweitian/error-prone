@@ -24,6 +24,7 @@ import static com.google.errorprone.matchers.Matchers.instanceEqualsInvocation;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.common.base.Ascii;
 import com.google.common.collect.ImmutableMap;
@@ -60,7 +61,6 @@ import javax.lang.model.element.ElementKind;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "InconsistentHashCode",
     summary =
         "Including fields in hashCode which are not compared in equals violates "
             + "the contract of hashCode.",
@@ -75,7 +75,7 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
 
   /** Non-static methods that we might expect to see in #hashCode, and allow. */
   private static final Matcher<ExpressionTree> HASH_CODE_METHODS =
-      instanceMethod().anyClass().named("hashCode").withParameters();
+      instanceMethod().anyClass().named("hashCode").withNoParameters();
 
   /** Non-static methods that we might expect to see in #equals, and allow. */
   private static final Matcher<ExpressionTree> EQUALS_METHODS =
@@ -87,10 +87,9 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
     MethodTree equalsDeclaration = null;
     MethodTree hashCodeDeclaration = null;
     for (Tree member : tree.getMembers()) {
-      if (!(member instanceof MethodTree)) {
+      if (!(member instanceof MethodTree methodTree)) {
         continue;
       }
-      MethodTree methodTree = (MethodTree) member;
       if (hashCodeMethodDeclaration().matches(methodTree, state)) {
         hashCodeDeclaration = methodTree;
       } else if (equalsMethodDeclaration().matches(methodTree, state)) {
@@ -105,10 +104,9 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
     // "method accessed no fields".
     Map<MethodSymbol, ImmutableSet<Symbol>> fieldsByMethod = new HashMap<>();
     for (Tree member : tree.getMembers()) {
-      if (!(member instanceof MethodTree)) {
+      if (!(member instanceof MethodTree methodTree)) {
         continue;
       }
-      MethodTree methodTree = (MethodTree) member;
       if (!methodTree.equals(equalsDeclaration) && !methodTree.equals(hashCodeDeclaration)) {
         FieldAccessFinder finder = FieldAccessFinder.scanMethod(state, classSymbol, methodTree);
         if (!finder.failed()) {
@@ -183,12 +181,10 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
     @Override
     public Void visitMethodInvocation(MethodInvocationTree tree, Void unused) {
       MethodSymbol symbol = getSymbol(tree);
-      if (symbol != null) {
-        if (knownMethods.containsKey(symbol)) {
-          accessedFields.addAll(knownMethods.get(symbol));
-        } else if (!symbol.isStatic() && !acceptableMethods.matches(tree, state)) {
-          failed = true;
-        }
+      if (knownMethods.containsKey(symbol)) {
+        accessedFields.addAll(knownMethods.get(symbol));
+      } else if (!symbol.isStatic() && !acceptableMethods.matches(tree, state)) {
+        failed = true;
       }
       return super.visitMethodInvocation(tree, null);
     }
@@ -198,8 +194,8 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
       ExpressionTree receiver = getReceiver(tree);
       ExpressionTree e = tree.getExpression();
       if (receiver == null
-          || (e instanceof IdentifierTree
-              && ((IdentifierTree) e).getName().contentEquals("this"))) {
+          || (e instanceof IdentifierTree identifierTree
+              && identifierTree.getName().contentEquals("this"))) {
         Symbol symbol = ((JCFieldAccess) tree).sym;
         handleSymbol(symbol);
       }
@@ -216,7 +212,7 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
     private void handleSymbol(Symbol symbol) {
       if (symbol != null
           && symbol.getKind() == ElementKind.FIELD
-          && !symbol.isStatic()
+          && !isStatic(symbol)
           && symbol.owner.equals(classSymbol)) {
         String name = symbol.name.toString();
         if (name.equals("this") || name.equals("super")) {
@@ -230,7 +226,7 @@ public final class InconsistentHashCode extends BugChecker implements ClassTreeM
       return accessedFields.build();
     }
 
-    public boolean failed() {
+    boolean failed() {
       return failed;
     }
   }

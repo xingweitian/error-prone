@@ -14,11 +14,13 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
 
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -40,13 +42,13 @@ import java.util.List;
  * @author amalloy@google.com (Alan Malloy)
  */
 @BugPattern(
-    name = "UnnecessaryMethodInvocationMatcher",
     summary = "It is not necessary to wrap a MethodMatcher with methodInvocation().",
     severity = WARNING)
 public class UnnecessaryMethodInvocationMatcher extends BugChecker
     implements MethodInvocationTreeMatcher {
 
-  private static final String MATCHERS = Matchers.class.getCanonicalName();
+  private static final ClassName MATCHERS = ClassName.of(Matchers.class.getName());
+  private static final ClassName METHOD_MATCHER = ClassName.of(MethodMatcher.class.getName());
   private static final Matcher<ExpressionTree> METHOD_INVOCATION =
       staticMethod().onClass(MATCHERS).named("methodInvocation");
   private static final Matcher<ExpressionTree> COMBINATOR =
@@ -62,8 +64,8 @@ public class UnnecessaryMethodInvocationMatcher extends BugChecker
       // We can only unwrap if they haven't specified additional behavior.
       return NO_MATCH;
     }
-    Type methodMatcherType = state.getTypeFromString(MethodMatcher.class.getCanonicalName());
-    ExpressionTree argument = arguments.get(0);
+    Type methodMatcherType = METHOD_MATCHER.type(state);
+    ExpressionTree argument = getOnlyElement(arguments);
     if (!containsOnlyMethodMatchers(argument, methodMatcherType, state)) {
       return NO_MATCH;
     }

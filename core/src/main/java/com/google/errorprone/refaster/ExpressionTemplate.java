@@ -22,7 +22,6 @@ import static java.util.logging.Level.SEVERE;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.base.Function;
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -30,9 +29,10 @@ import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.refaster.annotation.AlsoNegation;
 import com.google.errorprone.refaster.annotation.UseImportPolicy;
+import com.sun.source.tree.ConditionalExpressionTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.util.TreeScanner;
+import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Types;
@@ -56,8 +56,9 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.lang.annotation.Annotation;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Implementation of a template to match and replace an expression anywhere in an AST.
@@ -93,10 +94,22 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
       UType returnType) {
     return new AutoValue_ExpressionTemplate(
         annotations,
+        ImmutableList.of(),
         ImmutableList.copyOf(typeVariables),
         ImmutableMap.copyOf(expressionArgumentTypes),
         expression,
         returnType);
+  }
+
+  @Override
+  public ExpressionTemplate withRuleTypeVariables(Iterable<UTypeVar> ruleTypeVariables) {
+    return new AutoValue_ExpressionTemplate(
+        annotations(),
+        ImmutableList.copyOf(ruleTypeVariables),
+        templateTypeVariables(),
+        expressionArgumentTypes(),
+        expression(),
+        returnType());
   }
 
   abstract UExpression expression();
@@ -112,8 +125,9 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
         returnType().equals(UPrimitiveType.BOOLEAN),
         "Return type must be boolean to generate negation, but was %s",
         returnType());
-    return create(
+    return new AutoValue_ExpressionTemplate(
         annotations(),
+        ruleTypeVariables(),
         templateTypeVariables(),
         expressionArgumentTypes(),
         expression().negate(),
@@ -122,10 +136,11 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
 
   /** Returns the matches of this template against the specified target AST. */
   @Override
-  public Iterable<ExpressionTemplateMatch> match(JCTree target, Context context) {
-    if (target instanceof JCExpression) {
-      JCExpression targetExpr = (JCExpression) target;
-      Optional<Unifier> unifier = unify(targetExpr, new Unifier(context)).first();
+  public Iterable<ExpressionTemplateMatch> match(
+      JCTree target, Context context, JCCompilationUnit compilationUnit) {
+    if (target instanceof JCExpression targetExpr) {
+      Optional<Unifier> unifier =
+          unify(targetExpr, new Unifier(context, compilationUnit)).findFirst();
       if (unifier.isPresent()) {
         return ImmutableList.of(new ExpressionTemplateMatch(targetExpr, unifier.get()));
       }
@@ -151,10 +166,10 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
 
         @Override
         public Boolean visitOther(Tree t, Unifier u) {
-          if (t instanceof UPlaceholderExpression) {
-            return ((UPlaceholderExpression) t).reverify(u);
-          } else if (t instanceof UPlaceholderStatement) {
-            return ((UPlaceholderStatement) t).reverify(u);
+          if (t instanceof UPlaceholderExpression uPlaceholderExpression) {
+            return uPlaceholderExpression.reverify(u);
+          } else if (t instanceof UPlaceholderStatement uPlaceholderStatement) {
+            return uPlaceholderStatement.reverify(u);
           } else {
             return super.visitOther(t, u);
           }
@@ -162,11 +177,11 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
       };
 
   @Override
-  public Choice<Unifier> unify(final JCExpression target, Unifier unifier) {
+  public Choice<Unifier> unify(JCExpression target, Unifier unifier) {
     return expression()
         .unify(target, unifier)
-        .condition(u -> trueOrNull(PLACEHOLDER_VERIFIER.scan(expression(), u)))
-        .thenOption(
+        .filter(u -> trueOrNull(PLACEHOLDER_VERIFIER.scan(expression(), u)))
+        .mapIfPresent(
             new Function<Unifier, Optional<Unifier>>() {
 
               @Override
@@ -191,7 +206,7 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
                     // they could be allowed, instead of the narrowest, where Refaster really wants
                     // the narrowest type possible.  We reconstruct that by taking the lub of the
                     // types from each branch.
-                    if (target.getKind() == Kind.CONDITIONAL_EXPRESSION) {
+                    if (target instanceof ConditionalExpressionTree) {
                       JCConditional cond = (JCConditional) target;
                       Type trueTy = cond.truepart.type;
                       Type falseTy = cond.falsepart.type;
@@ -209,7 +224,7 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
                       unifier, inliner, new Warner(target), expectedTypes, actualTypes);
                 } catch (CouldNotResolveImportException e) {
                   logger.log(FINE, "Failure to resolve import", e);
-                  return Optional.absent();
+                  return Optional.empty();
                 }
               }
             });
@@ -222,17 +237,14 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
   @Override
   public Fix replace(ExpressionTemplateMatch match) {
     Inliner inliner = match.createInliner();
-    Context context = inliner.getContext();
     if (annotations().containsKey(UseImportPolicy.class)) {
-      ImportPolicy.bind(context, annotations().getInstance(UseImportPolicy.class).value());
-    } else {
-      ImportPolicy.bind(context, ImportPolicy.IMPORT_TOP_LEVEL);
+      inliner.setImportPolicy(annotations().getInstance(UseImportPolicy.class).value());
     }
-    int prec = getPrecedence(match.getLocation(), context);
+    int prec = getPrecedence(match.getLocation(), inliner);
     SuggestedFix.Builder fix = SuggestedFix.builder();
     try {
       StringWriter writer = new StringWriter();
-      pretty(inliner.getContext(), writer).printExpr(expression().inline(inliner), prec);
+      pretty(inliner, writer).printExpr(expression().inline(inliner), prec);
       fix.replace(match.getLocation(), writer.toString());
     } catch (CouldNotResolveImportException e) {
       logger.log(SEVERE, "Failure to resolve in replacement", e);
@@ -246,9 +258,11 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
    * Returns the precedence level appropriate for unambiguously printing leaf as a subexpression of
    * its parent.
    */
-  private static int getPrecedence(JCTree leaf, Context context) {
-    JCCompilationUnit comp = context.get(JCCompilationUnit.class);
-    JCTree parent = TreeInfo.pathFor(leaf, comp).get(1);
+  private static int getPrecedence(JCTree leaf, Inliner inliner) {
+    JCCompilationUnit comp = inliner.compilationUnit();
+    JCTree parent =
+        (JCTree)
+            JavacTrees.instance(inliner.getContext()).getPath(comp, leaf).getParentPath().getLeaf();
 
     // In general, this should match the logic in com.sun.tools.javac.tree.Pretty.
     //
@@ -261,36 +275,23 @@ public abstract class ExpressionTemplate extends Template<ExpressionTemplateMatc
     // a different value than "0L + Integer.MIN_VALUE + Integer.MIN_VALUE" due
     // to integer promotion rules.
 
-    if (parent instanceof JCConditional) {
-      // This intentionally differs from Pretty, because Pretty appears buggy:
-      // http://mail.openjdk.java.net/pipermail/compiler-dev/2013-September/007303.html
-      JCConditional conditional = (JCConditional) parent;
-      return TreeInfo.condPrec + ((conditional.cond == leaf) ? 1 : 0);
-    } else if (parent instanceof JCAssign) {
-      JCAssign assign = (JCAssign) parent;
-      return TreeInfo.assignPrec + ((assign.lhs == leaf) ? 1 : 0);
-    } else if (parent instanceof JCAssignOp) {
-      JCAssignOp assignOp = (JCAssignOp) parent;
-      return TreeInfo.assignopPrec + ((assignOp.lhs == leaf) ? 1 : 0);
-    } else if (parent instanceof JCUnary) {
-      return TreeInfo.opPrec(parent.getTag());
-    } else if (parent instanceof JCBinary) {
-      JCBinary binary = (JCBinary) parent;
-      return TreeInfo.opPrec(parent.getTag()) + ((binary.rhs == leaf) ? 1 : 0);
-    } else if (parent instanceof JCTypeCast) {
-      JCTypeCast typeCast = (JCTypeCast) parent;
-      return (typeCast.expr == leaf) ? TreeInfo.prefixPrec : TreeInfo.noPrec;
-    } else if (parent instanceof JCInstanceOf) {
-      JCInstanceOf instanceOf = (JCInstanceOf) parent;
-      return TreeInfo.ordPrec + ((instanceOf.getType() == leaf) ? 1 : 0);
-    } else if (parent instanceof JCArrayAccess) {
-      JCArrayAccess arrayAccess = (JCArrayAccess) parent;
-      return (arrayAccess.indexed == leaf) ? TreeInfo.postfixPrec : TreeInfo.noPrec;
-    } else if (parent instanceof JCFieldAccess) {
-      JCFieldAccess fieldAccess = (JCFieldAccess) parent;
-      return (fieldAccess.selected == leaf) ? TreeInfo.postfixPrec : TreeInfo.noPrec;
-    } else {
-      return TreeInfo.noPrec;
-    }
+    return switch (parent) {
+      case JCConditional conditional -> {
+        // This intentionally differs from Pretty, because Pretty appears buggy:
+        // https://mail.openjdk.java.net/pipermail/compiler-dev/2013-September/007303.html
+        yield TreeInfo.condPrec + ((conditional.cond == leaf) ? 1 : 0);
+      }
+      case JCAssign assign -> TreeInfo.assignPrec + ((assign.lhs == leaf) ? 1 : 0);
+      case JCAssignOp assignOp -> TreeInfo.assignopPrec + ((assignOp.lhs == leaf) ? 1 : 0);
+      case JCUnary unused -> TreeInfo.opPrec(parent.getTag());
+      case JCBinary binary -> TreeInfo.opPrec(parent.getTag()) + ((binary.rhs == leaf) ? 1 : 0);
+      case JCTypeCast typeCast -> (typeCast.expr == leaf) ? TreeInfo.prefixPrec : TreeInfo.noPrec;
+      case JCInstanceOf instanceOf -> TreeInfo.ordPrec + ((instanceOf.getType() == leaf) ? 1 : 0);
+      case JCArrayAccess arrayAccess ->
+          (arrayAccess.indexed == leaf) ? TreeInfo.postfixPrec : TreeInfo.noPrec;
+      case JCFieldAccess fieldAccess ->
+          (fieldAccess.selected == leaf) ? TreeInfo.postfixPrec : TreeInfo.noPrec;
+      default -> TreeInfo.noPrec;
+    };
   }
 }

@@ -16,14 +16,18 @@
 
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
+import static com.google.common.collect.Streams.stream;
+import static com.google.errorprone.names.NamingConventions.splitToLowercaseTerms;
+import static java.util.Collections.disjoint;
+
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.names.NamingConventions;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Detect whether the method invocation we are examining is enclosed by either a method or a class
@@ -31,7 +35,7 @@ import java.util.Optional;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-class EnclosedByReverseHeuristic implements Heuristic {
+final class EnclosedByReverseHeuristic implements Heuristic {
 
   private static final ImmutableSet<String> DEFAULT_REVERSE_WORDS_TERMS =
       ImmutableSet.of(
@@ -74,27 +78,21 @@ class EnclosedByReverseHeuristic implements Heuristic {
     return findReverseWordsMatchInParentNodes(state) == null;
   }
 
-  protected String findReverseWordsMatchInParentNodes(VisitorState state) {
-    for (Tree tree : state.getPath()) {
-      Optional<String> name = getName(tree);
-      if (name.isPresent()) {
-        for (String term : NamingConventions.splitToLowercaseTerms(name.get())) {
-          if (reverseWordsTerms.contains(term)) {
-            return term;
-          }
-        }
-      }
-    }
-    return null;
+  private @Nullable String findReverseWordsMatchInParentNodes(VisitorState state) {
+    return stream(state.getPath())
+        .flatMap(t -> getName(t).stream())
+        .filter(n -> !disjoint(splitToLowercaseTerms(n), reverseWordsTerms))
+        .findFirst()
+        .orElse(null);
   }
 
   private static Optional<String> getName(Tree tree) {
-    if (tree instanceof MethodTree) {
-      return Optional.of(((MethodTree) tree).getName().toString());
+    if (tree instanceof MethodTree methodTree) {
+      return Optional.of(methodTree.getName().toString());
     }
 
-    if (tree instanceof ClassTree) {
-      return Optional.of(((ClassTree) tree).getSimpleName().toString());
+    if (tree instanceof ClassTree classTree) {
+      return Optional.of(classTree.getSimpleName().toString());
     }
 
     return Optional.empty();

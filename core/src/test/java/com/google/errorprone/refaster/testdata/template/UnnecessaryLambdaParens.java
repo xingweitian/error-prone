@@ -22,14 +22,14 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class UnnecessaryLambdaParen<T> {
+public class UnnecessaryLambdaParens<T> {
   @BeforeTemplate
   Optional<T> last(Stream<T> stream) {
-    return stream.map((x) -> x).collect(Collectors.reducing((a, b) -> b));
+    return stream.map(x -> x).collect(Collectors.reducing((a, b) -> b));
   }
 
   @AfterTemplate
   Optional<T> reduce(Stream<T> stream) {
-    return stream.map((x) -> x).reduce((a,b) -> b);
+    return stream.map(x -> x).reduce((a, b) -> b);
   }
 }

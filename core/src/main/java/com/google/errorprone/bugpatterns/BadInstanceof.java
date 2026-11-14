@@ -30,6 +30,7 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.sun.source.tree.InstanceOfTree;
+import com.sun.source.tree.ParenthesizedTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.Tree.Kind;
 
@@ -39,17 +40,10 @@ import com.sun.source.tree.Tree.Kind;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "BadInstanceof",
     summary = "instanceof used in a way that is equivalent to a null check.",
     severity = WARNING,
     tags = SIMPLIFICATION)
 public final class BadInstanceof extends BugChecker implements InstanceOfTreeMatcher {
-
-  private static final String NON_NULL =
-      "`%s` is a non-null instance of %s which is a subtype of %s, so this check is always true.";
-
-  private static final String NULLABLE =
-      "`%s` is an instance of %s which is a subtype of %s, so this is equivalent to a null check.";
 
   @Override
   public Description matchInstanceOf(InstanceOfTree tree, VisitorState state) {
@@ -61,20 +55,30 @@ public final class BadInstanceof extends BugChecker implements InstanceOfTreeMat
     String superType = state.getSourceForNode(tree.getType());
     if (isNonNullUsingDataflow().matches(tree.getExpression(), state)) {
       return buildDescription(tree)
-          .setMessage(String.format(NON_NULL, expression, subType, superType))
+          .setMessage(
+              String.format(
+                  "`%s` is a non-null instance of %s which is a subtype of %s, so this check is"
+                      + " always true.",
+                  expression, subType, superType))
           .build();
     }
     return buildDescription(tree)
-        .setMessage(String.format(NULLABLE, expression, subType, superType))
+        .setMessage(
+            String.format(
+                "`%s` is an instance of %s which is a subtype of %s, so this is equivalent to a"
+                    + " null check.",
+                expression, subType, superType))
         .addFix(getFix(tree, state))
         .build();
   }
 
   private static SuggestedFix getFix(InstanceOfTree tree, VisitorState state) {
+    if (tree.getPattern() != null) {
+      return SuggestedFix.emptyFix();
+    }
     Tree parent = state.getPath().getParentPath().getLeaf();
     Tree grandParent = state.getPath().getParentPath().getParentPath().getLeaf();
-    if (parent.getKind() == Kind.PARENTHESIZED
-        && grandParent.getKind() == Kind.LOGICAL_COMPLEMENT) {
+    if (parent instanceof ParenthesizedTree && grandParent.getKind() == Kind.LOGICAL_COMPLEMENT) {
       return SuggestedFix.replace(
           grandParent, state.getSourceForNode(tree.getExpression()) + " == null");
     }

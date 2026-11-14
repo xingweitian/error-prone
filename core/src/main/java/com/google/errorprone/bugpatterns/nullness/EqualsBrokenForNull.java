@@ -37,6 +37,7 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.IfTree;
 import com.sun.source.tree.InstanceOfTree;
+import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ParenthesizedTree;
@@ -49,7 +50,7 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import java.util.HashSet;
 import java.util.Set;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link BugChecker} adds a null check to {@code equals()} method implementations which don't
@@ -58,7 +59,6 @@ import javax.annotation.Nullable;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "EqualsBrokenForNull",
     summary = "equals() implementation may throw NullPointerException when given null",
     severity = SeverityLevel.WARNING)
 public class EqualsBrokenForNull extends BugChecker implements MethodTreeMatcher {
@@ -99,8 +99,7 @@ public class EqualsBrokenForNull extends BugChecker implements MethodTreeMatcher
         // Track variables assigned from our parameter.
         Tree initializer = variableTree.getInitializer();
         VarSymbol symbol = getSymbol(variableTree);
-        if (isConsideredFinal(symbol) && initializer instanceof InstanceOfTree) {
-          InstanceOfTree instanceOf = (InstanceOfTree) initializer;
+        if (isConsideredFinal(symbol) && initializer instanceof InstanceOfTree instanceOf) {
           if (instanceOf.getExpression() instanceof IdentifierTree
               && incomingVariableSymbols.contains(getSymbol(instanceOf.getExpression()))) {
             impliesNonNull.add(getSymbol(variableTree));
@@ -118,28 +117,31 @@ public class EqualsBrokenForNull extends BugChecker implements MethodTreeMatcher
         if (condition instanceof IdentifierTree && impliesNonNull.contains(getSymbol(condition))) {
           return scan(ifTree.getElseStatement(), null);
         }
-        return super.visitIf(ifTree, unused);
+        return super.visitIf(ifTree, null);
+      }
+
+      @Override
+      public Void visitLambdaExpression(LambdaExpressionTree node, Void unused) {
+        // Our nullness analyzer isn't good at straddling lambda boundaries.
+        return null;
       }
 
       /**
        * Unwraps expressions like `(Foo) foo` or `((Foo) foo)` to return the VarSymbol of `foo`, or
        * null if the expression wasn't of this form.
        */
-      @Nullable
-      private VarSymbol findVariable(Tree tree) {
+      private @Nullable VarSymbol findVariable(Tree tree) {
         while (tree != null) {
-          switch (tree.getKind()) {
-            case TYPE_CAST:
-              tree = ((TypeCastTree) tree).getExpression();
-              break;
-            case PARENTHESIZED:
-              tree = ((ParenthesizedTree) tree).getExpression();
-              break;
-            case IDENTIFIER:
-              Symbol symbol = getSymbol(tree);
-              return symbol instanceof VarSymbol ? (VarSymbol) symbol : null;
-            default:
+          switch (tree) {
+            case TypeCastTree typeCastTree -> tree = typeCastTree.getExpression();
+            case ParenthesizedTree parenthesizedTree -> tree = parenthesizedTree.getExpression();
+            case IdentifierTree identifierTree -> {
+              Symbol symbol = getSymbol(identifierTree);
+              return symbol instanceof VarSymbol varSymbol ? varSymbol : null;
+            }
+            default -> {
               return null;
+            }
           }
         }
         return null;
@@ -149,7 +151,7 @@ public class EqualsBrokenForNull extends BugChecker implements MethodTreeMatcher
       return NO_MATCH;
     }
     String stringAddition = String.format("if (%s == null) { return false; }\n", varSymbol.name);
-    Fix fix = SuggestedFix.prefixWith(tree.getBody().getStatements().get(0), stringAddition);
+    Fix fix = SuggestedFix.prefixWith(tree.getBody().getStatements().getFirst(), stringAddition);
     return describeMatch(tree, fix);
   }
 }

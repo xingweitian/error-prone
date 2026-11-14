@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
-import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
 
 import com.google.errorprone.BugPattern;
@@ -27,41 +26,31 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "MockitoUsage",
-    summary = "Missing method call for verify(mock) here",
-    severity = ERROR)
+@BugPattern(summary = "Missing method call for verify(mock) here", severity = ERROR)
 public class MockitoUsage extends BugChecker implements MethodInvocationTreeMatcher {
 
-  private static final String MESSAGE_FORMAT = "Missing method call for %s here";
-
   private static final Matcher<ExpressionTree> MOCK_METHOD =
-      anyOf(
-          staticMethod().onClass("org.mockito.Mockito").withSignature("<T>when(T)"),
-          staticMethod().onClass("org.mockito.Mockito").withSignature("<T>verify(T)"),
-          staticMethod()
-              .onClass("org.mockito.Mockito")
-              .withSignature("<T>verify(T,org.mockito.verification.VerificationMode)"));
+      staticMethod().onClass("org.mockito.Mockito").namedAnyOf("when", "verify");
 
   private static final Matcher<ExpressionTree> NEVER_METHOD =
-      staticMethod().onClass("org.mockito.Mockito").named("never").withParameters();
+      staticMethod().onClass("org.mockito.Mockito").named("never").withNoParameters();
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!MOCK_METHOD.matches(tree, state)) {
       return Description.NO_MATCH;
     }
-    if (state.getPath().getParentPath().getLeaf().getKind() != Tree.Kind.EXPRESSION_STATEMENT) {
+    if (!(state.getPath().getParentPath().getLeaf() instanceof ExpressionStatementTree)) {
       return Description.NO_MATCH;
     }
-    String message = String.format(MESSAGE_FORMAT, state.getSourceForNode(tree));
+    String message = String.format("Missing method call for %s here", state.getSourceForNode(tree));
     Description.Builder builder = buildDescription(tree).setMessage(message);
     buildFix(builder, tree, state);
     return builder.build();
@@ -83,8 +72,7 @@ public class MockitoUsage extends BugChecker implements MethodInvocationTreeMatc
     List<? extends ExpressionTree> args = mockitoCall.getArguments();
     Tree mock = mockitoCall.getArguments().get(0);
     boolean isVerify = ASTHelpers.getSymbol(tree).getSimpleName().contentEquals("verify");
-    if (isVerify && mock.getKind() == Kind.METHOD_INVOCATION) {
-      MethodInvocationTree invocation = (MethodInvocationTree) mock;
+    if (isVerify && mock instanceof MethodInvocationTree invocation) {
       String verify = state.getSourceForNode(mockitoCall.getMethodSelect());
       String receiver = state.getSourceForNode(ASTHelpers.getReceiver(invocation));
       String mode = args.size() > 1 ? ", " + state.getSourceForNode(args.get(1)) : "";
@@ -104,7 +92,7 @@ public class MockitoUsage extends BugChecker implements MethodInvocationTreeMatc
     // Always suggest the naive semantics-preserving option, which is just to
     // delete the assertion:
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (parent.getKind() == Kind.EXPRESSION_STATEMENT) {
+    if (parent instanceof ExpressionStatementTree) {
       // delete entire expression statement
       builder.addFix(SuggestedFix.delete(parent));
     } else {

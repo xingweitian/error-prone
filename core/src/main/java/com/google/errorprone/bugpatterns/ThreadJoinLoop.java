@@ -16,6 +16,7 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 
@@ -27,6 +28,7 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BlockTree;
@@ -43,12 +45,13 @@ import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Type;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** @author mariasam@google.com (Maria Sam) */
+/**
+ * @author mariasam@google.com (Maria Sam)
+ */
 @BugPattern(
-    name = "ThreadJoinLoop",
     summary =
-        "Thread.join needs to be surrounded by a loop until it succeeds, "
-            + "as in Uninterruptibles.joinUninterruptibly.",
+        "Thread.join needs to be immediately surrounded by a loop until it succeeds. "
+            + "Consider using Uninterruptibles.joinUninterruptibly.",
     severity = SeverityLevel.WARNING)
 public class ThreadJoinLoop extends BugChecker implements MethodInvocationTreeMatcher {
 
@@ -59,10 +62,8 @@ public class ThreadJoinLoop extends BugChecker implements MethodInvocationTreeMa
   public Description matchMethodInvocation(
       MethodInvocationTree methodInvocationTree, VisitorState state) {
     String threadString;
-    if (methodInvocationTree.getMethodSelect() instanceof MemberSelectTree) {
-      threadString =
-          state.getSourceForNode(
-              ((MemberSelectTree) methodInvocationTree.getMethodSelect()).getExpression());
+    if (methodInvocationTree.getMethodSelect() instanceof MemberSelectTree memberSelectTree) {
+      threadString = state.getSourceForNode(memberSelectTree.getExpression());
     } else {
       threadString = "this";
     }
@@ -86,7 +87,7 @@ public class ThreadJoinLoop extends BugChecker implements MethodInvocationTreeMa
     boolean hasWhileLoopOneStatement = false;
     if (pathToLoop != null) {
       Tree statements = pathToLoop.getStatement();
-      if (statements instanceof BlockTree && ((BlockTree) statements).getStatements().size() == 1) {
+      if (statements instanceof BlockTree blockTree && blockTree.getStatements().size() == 1) {
         hasWhileLoopOneStatement = true;
       }
     }
@@ -124,7 +125,7 @@ public class ThreadJoinLoop extends BugChecker implements MethodInvocationTreeMa
   private static boolean hasOtherInvocationsOrAssignments(
       MethodInvocationTree methodInvocationTree, TryTree tryTree, VisitorState state) {
     AtomicInteger count = new AtomicInteger(0);
-    Type threadType = state.getTypeFromString("java.lang.Thread");
+    Type threadType = JAVA_LANG_THREAD.get(state);
     new TreeScanner<Void, Void>() {
       @Override
       public Void visitMethodInvocation(MethodInvocationTree tree, Void unused) {
@@ -144,4 +145,6 @@ public class ThreadJoinLoop extends BugChecker implements MethodInvocationTreeMa
     }.scan(tryTree.getBlock(), null);
     return count.get() > 0;
   }
+
+  private static final Supplier<Type> JAVA_LANG_THREAD = typeFromString("java.lang.Thread");
 }

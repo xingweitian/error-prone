@@ -18,11 +18,10 @@ package com.google.errorprone.bugpatterns.flogger;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.fixes.SuggestedFixes.addModifiers;
-import static com.google.errorprone.fixes.SuggestedFixes.removeModifiers;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 import static javax.lang.model.element.Modifier.FINAL;
-import static javax.lang.model.element.Modifier.PRIVATE;
 import static javax.lang.model.element.Modifier.PROTECTED;
 import static javax.lang.model.element.Modifier.PUBLIC;
 import static javax.lang.model.element.Modifier.STATIC;
@@ -34,7 +33,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.LinkType;
-import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.IdentifierTreeMatcher;
@@ -71,12 +69,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.NestingKind;
 
 /** Ensures that class-level FluentLogger objects are private static final. */
 @BugPattern(
-    name = "FloggerRequiredModifiers",
     summary =
         "FluentLogger.forEnclosingClass should always be saved to a private static final field.",
     link = "https://google.github.io/flogger/best_practice#modifiers",
@@ -92,7 +90,7 @@ public final class FloggerRequiredModifiers extends BugChecker
   private static final Supplier<Type> LOGGER_TYPE = Suppliers.typeFromString(GOOGLE_LOGGER);
 
   private static final Matcher<ExpressionTree> INIT_LOGGER =
-      staticMethod().onClass(LOGGER_TYPE).named("forEnclosingClass").withParameters();
+      staticMethod().onClass(LOGGER_TYPE).named("forEnclosingClass").withNoParameters();
 
   private static final ImmutableList<Modifier> EXPECTED_MODIFIERS =
       ImmutableList.of(Modifier.PRIVATE, STATIC, FINAL);
@@ -119,102 +117,24 @@ public final class FloggerRequiredModifiers extends BugChecker
   private static final Matcher<Tree> CONTAINS_INIT_LOGGER =
       Matchers.contains(ExpressionTree.class, INIT_LOGGER);
 
-  /**
-   * Constructs a checker configured by {@code flags}. The only flag this constructor looks at is
-   * {@code "FloggerRequiredModifiers:Goal"}. It expects that flag to have one of the following
-   * values:
-   *
-   * <p>
-   *
-   * <ul>
-   *   <li>{@code REHOME_FOREIGN_LOGGERS}
-   *   <li>{@code HIDE_LOGGERS_IN_INTERFACES}
-   *   <li>{@code HOIST_CONSTANT_EXPRESSIONS}
-   *   <li>{@code ADD_FINAL}
-   *   <li>{@code ADD_STATIC}
-   *   <li>{@code MAKE_PRIVATE}
-   *   <li>{@code DEFAULT_ALL_GOALS}
-   * </ul>
-   *
-   * <p>The default value is {@code DEFAULT_ALL_GOALS}, which enables all features; other legal
-   * values check only a subset of the Flogger best practices, and are designed to generate a more
-   * fine grained adjustments.
-   */
-  public FloggerRequiredModifiers(ErrorProneFlags flags) {
-    this(flags.getEnum("FloggerRequiredModifiers:Goal", Goal.class).orElse(Goal.DEFAULT_ALL_GOALS));
-  }
-
-  FloggerRequiredModifiers(Goal goal) {
-    this.goal = goal;
-  }
-
-  enum Goal {
-    REHOME_FOREIGN_LOGGERS,
-    HIDE_LOGGERS_IN_INTERFACES,
-    HOIST_CONSTANT_EXPRESSIONS,
-    ADD_FINAL,
-    ADD_STATIC,
-    MAKE_PRIVATE,
-    /** Combines all other goals to be maximally picky and do a full rewrite at once. */
-    DEFAULT_ALL_GOALS,
-  }
-
-  private final Goal goal;
-
-  private boolean shouldRehomeForeignLoggers() {
-    return goal.equals(Goal.REHOME_FOREIGN_LOGGERS);
-  }
-
-  private boolean shouldHideInterfaceLoggers() {
-    switch (goal) {
-      case HIDE_LOGGERS_IN_INTERFACES:
-      case DEFAULT_ALL_GOALS:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private boolean shouldHoistConstantExpressions() {
-    switch (goal) {
-      case DEFAULT_ALL_GOALS:
-      case HOIST_CONSTANT_EXPRESSIONS:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private boolean shouldStandardizeModifiers() {
-    switch (goal) {
-      case DEFAULT_ALL_GOALS:
-      case ADD_FINAL:
-      case ADD_STATIC:
-      case MAKE_PRIVATE:
-        return true;
-      default:
-        return false;
-    }
-  }
+  @Inject
+  FloggerRequiredModifiers() {}
 
   @Override
   public Description matchVariable(VariableTree tree, VisitorState state) {
-    if (!shouldStandardizeModifiers()) {
-      return NO_MATCH;
-    }
     Type loggerType = LOGGER_TYPE.get(state);
     if (!ASTHelpers.isSameType(loggerType, ASTHelpers.getType(tree), state)) {
       return NO_MATCH;
     }
     VarSymbol sym = ASTHelpers.getSymbol(tree);
-    if (!(sym.owner instanceof ClassSymbol)) {
+    if (!(sym.owner instanceof ClassSymbol classSymbol)) {
       return NO_MATCH;
     }
     ExpressionTree initializer = tree.getInitializer();
     // Static fields with no initializer, or fields initialized to a constant FluentLogger
     if (initializer == null
         ? sym.isStatic()
-        : isConstantLogger(initializer, (ClassSymbol) sym.owner, state)) {
+        : isConstantLogger(initializer, classSymbol, state) && !sym.owner.isInterface()) {
       return fixModifier(tree, (ClassTree) state.getPath().getParentPath().getLeaf(), state);
     }
 
@@ -223,13 +143,10 @@ public final class FloggerRequiredModifiers extends BugChecker
 
   private static boolean isConstantLogger(
       ExpressionTree initializer, ClassSymbol owner, VisitorState state) {
-    if (initializer instanceof MethodInvocationTree) {
+    if (initializer instanceof MethodInvocationTree methodInvocationTree) {
       Type loggerType = LOGGER_TYPE.get(state);
-      MethodInvocationTree method = (MethodInvocationTree) initializer;
+      MethodInvocationTree method = methodInvocationTree;
       MethodSymbol methodSym = ASTHelpers.getSymbol(method);
-      if (methodSym == null) {
-        return false; // Something is broken, just give up
-      }
       if (methodSym.isStatic()
           && methodSym.owner.equals(owner)
           && ASTHelpers.isSameType(loggerType, methodSym.getReturnType(), state)) {
@@ -242,9 +159,6 @@ public final class FloggerRequiredModifiers extends BugChecker
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-    if (!shouldHoistConstantExpressions()) {
-      return NO_MATCH;
-    }
     if (!INIT_LOGGER.matches(tree, state)) {
       return NO_MATCH;
     }
@@ -253,7 +167,7 @@ public final class FloggerRequiredModifiers extends BugChecker
       return NO_MATCH;
     }
 
-    // An expression should always be inside of a method or a variable (initializer blocks count as
+    // An expression should always be inside a method or a variable (initializer blocks count as
     // a method), but just in case we use class as a final backstop.
     TreePath owner =
         state.findPathToEnclosing(ClassTree.class, MethodTree.class, VariableTree.class);
@@ -275,12 +189,10 @@ public final class FloggerRequiredModifiers extends BugChecker
     MethodTree owningMethod = state.findEnclosing(MethodTree.class);
     if (owningMethod != null) {
       MethodSymbol methodSym = ASTHelpers.getSymbol(owningMethod);
-      if (methodSym != null) {
-        Type returnType = methodSym.getReturnType();
-        // Could be null for initializer blocks
-        if (ASTHelpers.isSameType(loggerType, returnType, state)) {
-          return NO_MATCH;
-        }
+      Type returnType = methodSym.getReturnType();
+      // Could be null for initializer blocks
+      if (ASTHelpers.isSameType(loggerType, returnType, state)) {
+        return NO_MATCH;
       }
     }
 
@@ -289,10 +201,6 @@ public final class FloggerRequiredModifiers extends BugChecker
     // class-level logger.
     state.incrementCounter(this, parent instanceof VariableTree ? "local-variable" : "inline");
     return replaceWithFieldLookup(tree, state);
-  }
-
-  private boolean modifierChangesInclude(Goal g) {
-    return goal == Goal.DEFAULT_ALL_GOALS || goal == g;
   }
 
   private Description fixModifier(VariableTree field, ClassTree owningClass, VisitorState state) {
@@ -306,16 +214,9 @@ public final class FloggerRequiredModifiers extends BugChecker
     // We have to add all the modifiers as a single SuggestedFix or they conflict
     ImmutableSet.Builder<Modifier> toAdd = ImmutableSet.builder();
     SuggestedFix.Builder fix = SuggestedFix.builder();
-    if (modifierChangesInclude(Goal.MAKE_PRIVATE)) {
-      removeModifiers(field, state, PUBLIC, PROTECTED).ifPresent(fix::merge);
-      toAdd.add(PRIVATE);
-    }
-    if (modifierChangesInclude(Goal.ADD_FINAL)) {
-      toAdd.add(Modifier.FINAL);
-    }
-    if (modifierChangesInclude(Goal.ADD_STATIC)
-        && (flags.contains(FINAL) || modifierChangesInclude(Goal.ADD_FINAL))
-        && canHaveStaticFields(ASTHelpers.getSymbol(owningClass))) {
+    fix.merge(SuggestedFixes.Visibility.PRIVATE.refactor(field, state));
+    toAdd.add(Modifier.FINAL);
+    if (flags.contains(FINAL) && canHaveStaticFields(ASTHelpers.getSymbol(owningClass))) {
       // We only add static to fields which are already final, or that we're also making final.
       // It's a bit dangerous to quietly make something static if it might be getting reassigned.
       toAdd.add(STATIC);
@@ -348,8 +249,7 @@ public final class FloggerRequiredModifiers extends BugChecker
       TreePath path = state.getPath();
 
       do {
-        if (e instanceof AssignmentTree) {
-          AssignmentTree assignment = (AssignmentTree) e;
+        if (e instanceof AssignmentTree assignment) {
           if (ASTHelpers.getSymbol(assignment.getVariable()).equals(target)) {
             state.incrementCounter(this, "skip-self-assignment");
             return NO_MATCH;
@@ -361,8 +261,8 @@ public final class FloggerRequiredModifiers extends BugChecker
     }
     String loggerName = logger.name;
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (parent instanceof VariableTree
-        && ((VariableTree) parent).getName().contentEquals(loggerName)) {
+    if (parent instanceof VariableTree variableTree
+        && variableTree.getName().contentEquals(loggerName)) {
       // Instead of making a local shadow of a class member, just use the class member.
       return describeMatch(expr, fix.delete(parent).build());
     }
@@ -402,22 +302,11 @@ public final class FloggerRequiredModifiers extends BugChecker
     }
   }
 
-  private static final class LocalLogger {
-
-    LocalLogger(Provenance provenance, Optional<Symbol> sym, String name) {
-      this.provenance = provenance;
-      this.sym = sym;
-      this.name = name;
-    }
-
+  private record LocalLogger(Provenance provenance, Optional<Symbol> sym, String name) {
     enum Provenance {
       ALREADY_PRESENT,
       DEFINED_BY_FIX
     }
-
-    final Provenance provenance;
-    final Optional<Symbol> sym;
-    final String name;
   }
 
   private LocalLogger findOrDefineLogger(VisitorState state, SuggestedFix.Builder fix) {
@@ -464,10 +353,9 @@ public final class FloggerRequiredModifiers extends BugChecker
 
     String name =
         REASONABLE_LOGGER_NAMES.stream()
-            .filter(
-                candidate ->
-                    Iterables.isEmpty(
-                        targetClassSym.members().getSymbolsByName(state.getName(candidate))))
+            .filter(candidate ->
+                Iterables.isEmpty(
+                    targetClassSym.members().getSymbolsByName(state.getName(candidate))))
             .findFirst()
             .orElseThrow(IllegalStateException::new);
 
@@ -492,8 +380,8 @@ public final class FloggerRequiredModifiers extends BugChecker
     ClassTree result = null;
     while (path != null) {
       Tree leaf = path.getLeaf();
-      if (leaf instanceof ClassTree) {
-        result = (ClassTree) leaf;
+      if (leaf instanceof ClassTree classTree) {
+        result = classTree;
       }
       path = path.getParentPath();
     }
@@ -524,9 +412,6 @@ public final class FloggerRequiredModifiers extends BugChecker
    * refer to a logger in this file, defining one if necessary.
    */
   private Description rehomeLogger(ExpressionTree tree, VisitorState state) {
-    if (!shouldRehomeForeignLoggers() && !shouldHideInterfaceLoggers()) {
-      return NO_MATCH;
-    }
     Symbol sym = ASTHelpers.getSymbol(tree);
     if (sym == null) {
       return NO_MATCH;
@@ -540,7 +425,7 @@ public final class FloggerRequiredModifiers extends BugChecker
       // This may be looking up FluentLogger itself, as a member of its package, or reading a local.
       return NO_MATCH;
     }
-    if (!(sym.isStatic() || tree instanceof IdentifierTree)) {
+    if (!(isStatic(sym) || tree instanceof IdentifierTree)) {
       // We can only be referring to another class's logger statically, or implicitly through a
       // superclass as an identifier. This early exit avoids flagging instance field lookups.
       return NO_MATCH;
@@ -548,8 +433,7 @@ public final class FloggerRequiredModifiers extends BugChecker
     /* Loggers owned by public interfaces should be moved regardless of whether they're defined in
     the current file, because fields in interfaces must be public, but loggers should be private.
      */
-    boolean needsMoveFromInterface = shouldHideInterfaceLoggers() && owner.isInterface();
-    boolean local = false;
+    boolean needsMoveFromInterface = owner.isInterface();
     Symbol outermostClassOfLogger = findUltimateOwningClass(owner);
     ClassTree outermostClassOfFile = null;
     for (Tree parent : state.getPath()) {
@@ -559,20 +443,15 @@ public final class FloggerRequiredModifiers extends BugChecker
         if (!needsMoveFromInterface) {
           return NO_MATCH;
         }
-        local = true;
       }
-      if (parent instanceof ClassTree) {
-        outermostClassOfFile = (ClassTree) parent;
+      if (parent instanceof ClassTree classTree) {
+        outermostClassOfFile = classTree;
       }
     }
 
     if (outermostClassOfFile == null) {
       // Impossible, I think?
       state.incrementCounter(this, "error-no-outermost-class");
-      return NO_MATCH;
-    }
-
-    if (!local && !shouldRehomeForeignLoggers()) {
       return NO_MATCH;
     }
 

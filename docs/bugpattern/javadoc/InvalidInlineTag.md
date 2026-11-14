@@ -21,7 +21,27 @@ int twoTimes(int n) {
 }
 ```
 
+If the `@` symbol occurs inside a code excerpt, the fix is to escape the code
+excerpt using `<pre>{@code ... }</pre>`:
+
+```java
+/**
+ * Summary fragment.
+ *
+ * <pre>{@code
+ * Your code here.
+ * Can include <angle brackets>.
+ * You can even include snippets that contain annotations, e.g.:
+ * @Override public String toString() { ... }
+ * }</pre>
+ *
+ * <p>Following paragraph.
+ */
+```
+
 ## Suppression
 
 Suppress by applying `@SuppressWarnings("InvalidInlineTag")` to the element
 being documented.
+
+If you use nonstandard tags, you can exempt them globally using the `Javadoc:customInlineTags` tag, for example `-XepOpt:Javadoc:customInlineTags=todo,bugid`.

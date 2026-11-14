@@ -23,7 +23,9 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.annotations;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
 import static com.google.errorprone.util.FindIdentifiers.findIdent;
+import static com.google.errorprone.util.MoreAnnotations.isTypeAnnotation;
 
 import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
@@ -55,11 +57,7 @@ import com.sun.tools.javac.code.Kinds.KindSelector;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import com.sun.tools.javac.util.Position;
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Target;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -72,7 +70,6 @@ import java.util.Set;
  * OuterClass.InnerClass} and {@code InnerClass}).
  */
 @BugPattern(
-    name = "DifferentNameButSame",
     severity = SeverityLevel.WARNING,
     summary =
         "This type is referred to in different ways within this file, which may be confusing.",
@@ -95,8 +92,7 @@ public final class DifferentNameButSame extends BugChecker implements Compilatio
 
       @Override
       public Void visitMemberSelect(MemberSelectTree memberSelectTree, Void unused) {
-        if (getCurrentPath().getParentPath().getLeaf() instanceof MemberSelectTree) {
-          MemberSelectTree tree = (MemberSelectTree) getCurrentPath().getParentPath().getLeaf();
+        if (getCurrentPath().getParentPath().getLeaf() instanceof MemberSelectTree tree) {
           Symbol superSymbol = getSymbol(tree);
           if (superSymbol instanceof ClassSymbol) {
             return super.visitMemberSelect(memberSelectTree, null);
@@ -109,8 +105,7 @@ public final class DifferentNameButSame extends BugChecker implements Compilatio
       @Override
       public Void visitIdentifier(IdentifierTree identifierTree, Void unused) {
         Tree parent = getCurrentPath().getParentPath().getLeaf();
-        if (parent instanceof NewClassTree) {
-          NewClassTree newClassTree = (NewClassTree) parent;
+        if (parent instanceof NewClassTree newClassTree) {
           if (newClassTree.getIdentifier().equals(identifierTree)
               && newClassTree.getEnclosingExpression() != null) {
             // don't try to fix instantiations with explicit enclosing instances, e.g. `a.new B();`
@@ -122,13 +117,14 @@ public final class DifferentNameButSame extends BugChecker implements Compilatio
       }
 
       private void handle(Tree tree) {
-        if (state.getEndPosition(tree) == Position.NOPOS) {
+        if (!hasExplicitSource(tree, state)) {
           return;
         }
         Symbol symbol = getSymbol(tree);
         if (!(symbol instanceof ClassSymbol)) {
           return;
         }
+        @SuppressWarnings("TreeToString") // TODO(ghm): fix
         String name = tree.toString();
         List<TreePath> treePaths = names.get(symbol, name);
         if (treePaths == null) {
@@ -192,12 +188,8 @@ public final class DifferentNameButSame extends BugChecker implements Compilatio
 
   private boolean isDefinedInThisFile(Symbol symbol, CompilationUnitTree tree) {
     return tree.getTypeDecls().stream()
-        .anyMatch(
-            t -> {
-              Symbol topLevelClass = getSymbol(t);
-              return topLevelClass instanceof ClassSymbol
-                  && symbol.isEnclosedBy((ClassSymbol) topLevelClass);
-            });
+        .anyMatch(t ->
+            getSymbol(t) instanceof ClassSymbol classSymbol && symbol.isEnclosedBy(classSymbol));
   }
 
   private static boolean isGeneric(Symbol symbol) {
@@ -269,18 +261,5 @@ public final class DifferentNameButSame extends BugChecker implements Compilatio
   private static final Splitter DOT_SPLITTER = Splitter.on('.');
 
   private static final MultiMatcher<Tree, AnnotationTree> HAS_TYPE_USE_ANNOTATION =
-      annotations(AT_LEAST_ONE, (t, state) -> isTypeAnnotation(t));
-
-  private static boolean isTypeAnnotation(AnnotationTree t) {
-    Symbol annotationSymbol = getSymbol(t.getAnnotationType());
-    if (annotationSymbol == null) {
-      return false;
-    }
-    Target target = annotationSymbol.getAnnotation(Target.class);
-    if (target == null) {
-      return false;
-    }
-    List<ElementType> value = Arrays.asList(target.value());
-    return value.contains(ElementType.TYPE_USE) || value.contains(ElementType.TYPE_PARAMETER);
-  }
+      annotations(AT_LEAST_ONE, (t, state) -> isTypeAnnotation(getSymbol(t.getAnnotationType())));
 }

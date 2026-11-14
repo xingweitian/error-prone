@@ -38,7 +38,6 @@ import java.util.List;
  * @author yulissa@google.com (Yulissa Arroyo-Paredes)
  */
 @BugPattern(
-    name = "ThrowsUncheckedException",
     summary = "Unchecked exceptions do not need to be declared in the method signature.",
     severity = SUGGESTION)
 public class ThrowsUncheckedException extends BugChecker implements MethodTreeMatcher {
@@ -59,7 +58,7 @@ public class ThrowsUncheckedException extends BugChecker implements MethodTreeMa
       return NO_MATCH;
     }
     return describeMatch(
-        uncheckedExceptions.get(0),
+        uncheckedExceptions.getFirst(),
         SuggestedFixes.deleteExceptions(tree, state, uncheckedExceptions));
   }
 }

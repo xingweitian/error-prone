@@ -24,14 +24,17 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.CheckReturnValue;
+import com.google.errorprone.annotations.FormatMethod;
+import com.google.errorprone.annotations.FormatString;
+import com.google.errorprone.annotations.RestrictedApi;
+import com.google.errorprone.fixes.ErrorPronePosition;
 import com.google.errorprone.fixes.Fix;
-import com.sun.source.tree.Tree;
-import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
+import com.google.errorprone.fixes.SuggestedFix;
 import java.util.List;
 import java.util.Optional;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Simple data object containing the information captured about an AST match. Can be printed in a
@@ -39,14 +42,19 @@ import javax.annotation.Nullable;
  *
  * @author alexeagle@google.com (Alex Eagle)
  */
-public class Description {
+public final class Description {
   /** Describes the sentinel value of the case where the match failed. */
   public static final Description NO_MATCH =
       new Description(
-          null, "<no match>", "<no match>", "<no match>", ImmutableList.<Fix>of(), SUGGESTION);
+          null,
+          "<no match>",
+          "<no match>",
+          "<no match>",
+          ImmutableList.<Fix>of(),
+          Optional.of(SUGGESTION));
 
   /** The position of the match. */
-  public final DiagnosticPosition position;
+  public final ErrorPronePosition position;
 
   /** The name of the check that produced the match. */
   public final String checkName;
@@ -55,16 +63,20 @@ public class Description {
   private final String rawMessage;
 
   /** The raw link URL for the check. May be null if there is no link. */
-  @Nullable private final String linkUrl;
+  private final @Nullable String linkUrl;
 
   /**
    * A list of fixes to suggest in an error message or use in automated refactoring. Fixes are in
    * order of decreasing preference, from most preferred to least preferred.
    */
-  public final List<Fix> fixes;
+  public final ImmutableList<Fix> fixes;
 
   /** Is this a warning, error, etc.? */
-  public final BugPattern.SeverityLevel severity;
+  private final Optional<BugPattern.SeverityLevel> severity;
+
+  public BugPattern.SeverityLevel severity() {
+    return severity.get();
+  }
 
   /**
    * Returns the message to be printed by the compiler when a match is found in interactive use.
@@ -75,8 +87,7 @@ public class Description {
   }
 
   /** Returns a link associated with this finding or null if there is no link. */
-  @Nullable
-  public String getLink() {
+  public @Nullable String getLink() {
     return linkUrl;
   }
 
@@ -93,12 +104,12 @@ public class Description {
   }
 
   private Description(
-      DiagnosticPosition position,
+      ErrorPronePosition position,
       String checkName,
       String rawMessage,
       @Nullable String linkUrl,
       List<Fix> fixes,
-      SeverityLevel severity) {
+      Optional<SeverityLevel> severity) {
     this.position = position;
     this.checkName = checkName;
     this.rawMessage = rawMessage;
@@ -107,62 +118,53 @@ public class Description {
     this.severity = severity;
   }
 
-  /** Internal-only. Has no effect if applied to a Description within a BugChecker. */
+  /** Internal-only. */
   @CheckReturnValue
   public Description applySeverityOverride(SeverityLevel severity) {
-    return new Description(position, checkName, rawMessage, linkUrl, fixes, severity);
+    return new Description(
+        position,
+        checkName,
+        rawMessage,
+        linkUrl,
+        fixes,
+        Optional.of(this.severity.orElse(severity)));
   }
 
   /**
    * Construct the link text to include in the compiler error message. Returns null if there is no
    * link.
    */
-  @Nullable
-  private static String linkTextForDiagnostic(String linkUrl) {
+  private static @Nullable String linkTextForDiagnostic(String linkUrl) {
     return isNullOrEmpty(linkUrl) ? null : "  (see " + linkUrl + ")";
   }
 
   /** Returns a new builder for {@link Description}s. */
+  @RestrictedApi(
+      explanation = "Use describeMatch or buildDescription on BugChecker instead.",
+      link = "",
+      allowedPaths = {
+        "third_party/java_src/error_prone/project/check_api/src/main/java/com/google/errorprone/bugpatterns/BugChecker.java",
+        "third_party/java_src/error_prone/project/core/src/main/java/com/google/errorprone/refaster/RefasterScanner.java",
+      })
   public static Builder builder(
-      Tree node, String name, @Nullable String link, SeverityLevel severity, String message) {
-    return new Builder((DiagnosticPosition) node, name, link, severity, message);
-  }
-
-  /** Returns a new builder for {@link Description}s. */
-  public static Builder builder(
-      DiagnosticPosition position,
-      String name,
-      @Nullable String link,
-      SeverityLevel severity,
-      String message) {
-    return new Builder(position, name, link, severity, message);
-  }
-
-  /** Returns a new builder for {@link Description}s. */
-  public static Builder builder(
-      JCTree tree, String name, @Nullable String link, SeverityLevel severity, String message) {
-    return new Builder(tree, name, link, severity, message);
+      ErrorPronePosition position, String name, @Nullable String link, String message) {
+    return new Builder(position, name, link, message);
   }
 
   /** Builder for {@code Description}s. */
-  public static class Builder {
-    private final DiagnosticPosition position;
+  public static final class Builder {
+    private final ErrorPronePosition position;
     private final String name;
     private String linkUrl;
-    private final SeverityLevel severity;
+    private Optional<SeverityLevel> severity = Optional.empty();
     private final ImmutableList.Builder<Fix> fixListBuilder = ImmutableList.builder();
     private String rawMessage;
 
     private Builder(
-        DiagnosticPosition position,
-        String name,
-        @Nullable String linkUrl,
-        SeverityLevel severity,
-        String rawMessage) {
+        ErrorPronePosition position, String name, @Nullable String linkUrl, String rawMessage) {
       this.position = Preconditions.checkNotNull(position);
       this.name = Preconditions.checkNotNull(name);
       this.linkUrl = linkUrl;
-      this.severity = Preconditions.checkNotNull(severity);
       this.rawMessage = Preconditions.checkNotNull(rawMessage);
     }
 
@@ -173,6 +175,7 @@ public class Description {
      * @param fix a suggested fix for this problem
      * @throws NullPointerException if {@code fix} is {@code null}
      */
+    @CanIgnoreReturnValue
     public Builder addFix(Fix fix) {
       checkNotNull(fix, "fix must not be null");
       if (!fix.isEmpty()) {
@@ -187,7 +190,10 @@ public class Description {
      *
      * @param fix a suggested fix for this problem
      * @throws NullPointerException if {@code fix} is {@code null}
+     * @deprecated prefer referring to empty fixes using {@link SuggestedFix#emptyFix()}.
      */
+    @CanIgnoreReturnValue
+    @Deprecated
     public Builder addFix(Optional<? extends Fix> fix) {
       checkNotNull(fix, "fix must not be null");
       fix.ifPresent(this::addFix);
@@ -200,6 +206,7 @@ public class Description {
      * @param fixes a list of suggested fixes for this problem
      * @throws NullPointerException if {@code fixes} or any of its elements are {@code null}
      */
+    @CanIgnoreReturnValue
     public Builder addAllFixes(List<? extends Fix> fixes) {
       checkNotNull(fixes, "fixes must not be null");
       for (Fix fix : fixes) {
@@ -214,6 +221,7 @@ public class Description {
      *
      * @param message A custom error message without the check name ("[checkname]") or link
      */
+    @CanIgnoreReturnValue
     public Builder setMessage(String message) {
       checkNotNull(message, "message must not be null");
       this.rawMessage = message;
@@ -221,12 +229,47 @@ public class Description {
     }
 
     /**
+     * Set a custom error message for this {@code Description}. The custom message will be used
+     * instead of the summary field as the text for the diagnostic message.
+     *
+     * @param format A custom error message format string without the check name ("[checkname]") or
+     *     link
+     * @param args arguments for the format string
+     */
+    @CanIgnoreReturnValue
+    @FormatMethod
+    public Builder setMessage(@FormatString String format, Object... args) {
+      return setMessage(String.format(format, args));
+    }
+
+    /**
      * Set a custom link URL. The custom URL will be used instead of the default one which forms
      * part of the {@code @}BugPattern.
      */
+    @CanIgnoreReturnValue
     public Builder setLinkUrl(String linkUrl) {
       checkNotNull(linkUrl, "linkUrl must not be null");
       this.linkUrl = linkUrl;
+      return this;
+    }
+
+    @RestrictedApi(
+        explanation =
+            "Prefer to set a single default severity using @BugPattern. Overriding the severity for"
+                + " individual Descriptions causes any command line options to be ignored, which is"
+                + " potentially very confusing.",
+        link = "",
+        allowedPaths = {
+          "third_party/java_src/error_prone/project/check_api/src/main/java/com/google/errorprone/matchers/Description.java",
+          "java/com/google/devtools/javatools/staticanalysis/xlang/java/BugCheckerUsingXlang.java",
+          "java/com/google/devtools/staticanalysis/errorprone/RestrictedInheritanceChecker.java",
+          "third_party/java_src/error_prone/project/core/src/main/java/com/google/errorprone/bugpatterns/RestrictedApiChecker.java",
+          "third_party/java_src/error_prone/project/core/src/main/java/com/google/errorprone/refaster/RefasterScanner.java",
+        })
+    @CanIgnoreReturnValue
+    public Builder overrideSeverity(SeverityLevel severity) {
+      checkNotNull(severity, "severity must not be null");
+      this.severity = Optional.of(severity);
       return this;
     }
 

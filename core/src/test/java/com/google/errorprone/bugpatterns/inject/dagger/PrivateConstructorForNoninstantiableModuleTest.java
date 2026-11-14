@@ -16,30 +16,30 @@
 package com.google.errorprone.bugpatterns.inject.dagger;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author Gregory Kick (gak@google.com) */
+/**
+ * @author Gregory Kick (gak@google.com)
+ */
 @RunWith(JUnit4.class)
 public final class PrivateConstructorForNoninstantiableModuleTest {
-  private BugCheckerRefactoringTestHelper testHelper;
-
-  @Before
-  public void setUp() {
-    testHelper =
-        BugCheckerRefactoringTestHelper.newInstance(
-            PrivateConstructorForNoninstantiableModule.class, getClass());
-  }
+  private final BugCheckerRefactoringTestHelper testHelper =
+      BugCheckerRefactoringTestHelper.newInstance(
+          PrivateConstructorForNoninstantiableModule.class, getClass());
 
   @Test
   public void emptyModuleGetsLeftAlone() {
     testHelper
         .addInputLines(
-            "in/Test.java", //
-            "import dagger.Module;",
-            "@Module class Test {}")
+            "in/Test.java",
+            """
+            import dagger.Module;
+
+            @Module
+            class Test {}
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -48,22 +48,45 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
   public void onlyStaticMethods() {
     testHelper
         .addInputLines(
-            "in/TestModule.java", //
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module final class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "}")
+            "in/TestModule.java",
+            """
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            final class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+            }
+            """)
         .addOutputLines(
-            "out/TestModule.java", //
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module final class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "  private TestModule() {}",
-            "}")
+            "out/TestModule.java",
+            """
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            final class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+
+              private TestModule() {}
+            }
+            """)
         .doTest();
   }
 
@@ -71,14 +94,26 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
   public void onlyStaticMethods_withConstructorGetsLeftAlone() {
     testHelper
         .addInputLines(
-            "in/TestModule.java", //
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module final class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "  private TestModule() {}",
-            "}")
+            "in/TestModule.java",
+            """
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            final class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+
+              private TestModule() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -88,27 +123,58 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
     testHelper
         .addInputLines(
             "in/TestModule.java",
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module abstract class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "}")
+            """
+            import dagger.Binds;
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            abstract class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+            }
+            """)
         .addOutputLines(
-            "out/TestModule.java", //
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module abstract class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "  private TestModule() {}",
-            "}")
+            "out/TestModule.java",
+            """
+            import dagger.Binds;
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            abstract class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+
+              private TestModule() {}
+            }
+            """)
         .doTest();
   }
 
@@ -117,16 +183,32 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
     testHelper
         .addInputLines(
             "in/TestModule.java",
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "import dagger.Provides;",
-            "@Module abstract class TestModule {",
-            "  @Provides static String provideString() { return \"\"; }",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Provides static Integer provideInteger() { return 1; }",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "  private TestModule() {}",
-            "}")
+            """
+            import dagger.Binds;
+            import dagger.Module;
+            import dagger.Provides;
+
+            @Module
+            abstract class TestModule {
+              @Provides
+              static String provideString() {
+                return "";
+              }
+
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Provides
+              static Integer provideInteger() {
+                return 1;
+              }
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+
+              private TestModule() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -136,21 +218,36 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
     testHelper
         .addInputLines(
             "in/TestModule.java",
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "@Module abstract class TestModule {",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "}")
+            """
+            import dagger.Binds;
+            import dagger.Module;
+
+            @Module
+            abstract class TestModule {
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+            }
+            """)
         .addOutputLines(
-            "out/TestModule.java", //
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "@Module abstract class TestModule {",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "  private TestModule() {}",
-            "}")
+            "out/TestModule.java",
+            """
+            import dagger.Binds;
+            import dagger.Module;
+
+            @Module
+            abstract class TestModule {
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+
+              private TestModule() {}
+            }
+            """)
         .doTest();
   }
 
@@ -159,13 +256,21 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
     testHelper
         .addInputLines(
             "in/TestModule.java",
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "@Module abstract class TestModule {",
-            "  @Binds abstract Object bindObject(String string);",
-            "  @Binds abstract Number bindNumber(Integer integer);",
-            "  private TestModule() {}",
-            "}")
+            """
+            import dagger.Binds;
+            import dagger.Module;
+
+            @Module
+            abstract class TestModule {
+              @Binds
+              abstract Object bindObject(String string);
+
+              @Binds
+              abstract Number bindNumber(Integer integer);
+
+              private TestModule() {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -175,12 +280,19 @@ public final class PrivateConstructorForNoninstantiableModuleTest {
     testHelper
         .addInputLines(
             "in/TestModule.java",
-            "import dagger.Binds;",
-            "import dagger.Module;",
-            "@Module interface TestModule {",
-            "  @Binds Object bindObject(String string);",
-            "  @Binds Number bindNumber(Integer integer);",
-            "}")
+            """
+            import dagger.Binds;
+            import dagger.Module;
+
+            @Module
+            interface TestModule {
+              @Binds
+              Object bindObject(String string);
+
+              @Binds
+              Number bindNumber(Integer integer);
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }

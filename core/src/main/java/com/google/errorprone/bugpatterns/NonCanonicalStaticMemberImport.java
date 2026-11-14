@@ -27,15 +27,16 @@ import com.google.errorprone.matchers.Description;
 import com.sun.source.tree.ImportTree;
 
 /**
- * Members shouldn't be statically by their non-canonical name.
+ * Members shouldn't be statically imported by their non-canonical name.
  *
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 @BugPattern(
-    name = "NonCanonicalStaticMemberImport",
     summary = "Static import of member uses non-canonical name",
     severity = WARNING,
     documentSuppression = false)
+// TODO(b/516778721): Enable this as an AutoKlippy:
+// @RefactoringMetadata(automationStatus = FOR_GLOBAL_APPROVAL, behaviorChanges = NO_KNOWN_ISSUES)
 public class NonCanonicalStaticMemberImport extends BugChecker implements ImportTreeMatcher {
 
   @Override
@@ -44,6 +45,12 @@ public class NonCanonicalStaticMemberImport extends BugChecker implements Import
     if (importInfo == null || importInfo.isCanonical() || importInfo.members().isEmpty()) {
       return Description.NO_MATCH;
     }
-    return describeMatch(tree, SuggestedFix.replace(tree, importInfo.importStatement()));
+    return buildDescription(tree)
+        .addFix(SuggestedFix.replace(tree, importInfo.importStatement()))
+        .setMessage(
+            String.format(
+                "Static import of '%s' uses non-canonical name; prefer '%s'",
+                importInfo.simpleName().get(), importInfo.canonicalName()))
+        .build();
   }
 }

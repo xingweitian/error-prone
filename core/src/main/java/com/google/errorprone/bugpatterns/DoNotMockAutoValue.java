@@ -20,22 +20,14 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 
 import com.google.auto.value.AutoValue;
 import com.google.errorprone.BugPattern;
-import com.sun.source.tree.VariableTree;
-import java.util.stream.Stream;
 
 /** Suggests not mocking AutoValue classes. */
 @BugPattern(
-    name = "DoNotMockAutoValue",
     summary =
         "AutoValue classes represent pure data classes, so mocking them should not be necessary."
             + " Construct a real instance of the class instead.",
     severity = WARNING)
 public final class DoNotMockAutoValue extends AbstractMockChecker<AutoValue> {
-  private static final TypeExtractor<VariableTree> MOCKED_VAR =
-      fieldAnnotatedWithOneOf(
-          Stream.of(
-              "org.mockito.Mock",
-              "org.mockito.Spy"));
 
   public DoNotMockAutoValue() {
     super(

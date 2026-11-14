@@ -29,10 +29,12 @@ import com.sun.source.tree.UnaryTree;
 import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCLiteral;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
-/** @author Sumit Bhagwani (bhagwani@google.com) */
+/**
+ * @author Sumit Bhagwani (bhagwani@google.com)
+ */
 @BugPattern(
-    name = "ComplexBooleanConstant",
     summary = "Non-trivial compile time constant boolean expressions shouldn't be used.",
     severity = WARNING)
 public class ComplexBooleanConstant extends BugChecker implements BinaryTreeMatcher {
@@ -47,12 +49,12 @@ public class ComplexBooleanConstant extends BugChecker implements BinaryTreeMatc
         .addFix(SuggestedFix.replace(tree, constValue.toString()))
         .setMessage(
             String.format(
-                "This expression always evalutes to `%s`, prefer a boolean literal for clarity.",
+                "This expression always evaluates to `%s`, prefer a boolean literal for clarity.",
                 constValue))
         .build();
   }
 
-  Boolean booleanValue(BinaryTree tree) {
+  @Nullable Boolean booleanValue(BinaryTree tree) {
     if (tree.getLeftOperand() instanceof JCLiteral && tree.getRightOperand() instanceof JCLiteral) {
       return ASTHelpers.constValue(tree, Boolean.class);
     }
@@ -61,49 +63,45 @@ public class ComplexBooleanConstant extends BugChecker implements BinaryTreeMatc
     SimpleTreeVisitor<Boolean, Void> boolValue =
         new SimpleTreeVisitor<Boolean, Void>() {
           @Override
-          public Boolean visitLiteral(LiteralTree node, Void unused) {
-            if (node.getValue() instanceof Boolean) {
-              return (Boolean) node.getValue();
+          public @Nullable Boolean visitLiteral(LiteralTree node, Void unused) {
+            if (node.getValue() instanceof Boolean b) {
+              return b;
             }
             return null;
           }
 
           @Override
-          public Boolean visitUnary(UnaryTree node, Void unused) {
+          public @Nullable Boolean visitUnary(UnaryTree node, Void unused) {
             Boolean r = node.getExpression().accept(this, null);
             if (r == null) {
               return null;
             }
-            switch (node.getKind()) {
-              case LOGICAL_COMPLEMENT:
-                return !r;
-              default:
-                return null;
-            }
+            return switch (node.getKind()) {
+              case LOGICAL_COMPLEMENT -> !r;
+              default -> null;
+            };
           }
         };
     Boolean lhs = tree.getLeftOperand().accept(boolValue, null);
     Boolean rhs = tree.getRightOperand().accept(boolValue, null);
     switch (tree.getKind()) {
-      case CONDITIONAL_AND:
-      case AND:
+      case CONDITIONAL_AND, AND -> {
         if (lhs != null && rhs != null) {
           return lhs && rhs;
         }
         if (Objects.equals(lhs, Boolean.FALSE) || Objects.equals(rhs, Boolean.FALSE)) {
           return false;
         }
-        break;
-      case CONDITIONAL_OR:
-      case OR:
+      }
+      case CONDITIONAL_OR, OR -> {
         if (lhs != null && rhs != null) {
           return lhs || rhs;
         }
         if (Objects.equals(lhs, Boolean.TRUE) || Objects.equals(rhs, Boolean.TRUE)) {
           return true;
         }
-        break;
-      default: // fall out
+      }
+      default -> {}
     }
     return null;
   }

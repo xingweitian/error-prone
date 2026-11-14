@@ -16,53 +16,127 @@
 
 package com.google.errorprone.dataflow.nullnesspropagation;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static javax.lang.model.element.ElementKind.TYPE_PARAMETER;
 
-import com.google.errorprone.util.MoreAnnotations;
+import com.google.common.collect.ImmutableList;
+import com.sun.source.tree.AnnotationTree;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
+import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Name;
 import javax.lang.model.element.Parameterizable;
 import javax.lang.model.element.TypeParameterElement;
 import javax.lang.model.type.IntersectionType;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.type.TypeVariable;
+import org.jspecify.annotations.Nullable;
+import org.safere.Pattern;
 
 /** Utilities to extract {@link Nullness} from annotations. */
-public class NullnessAnnotations {
+public final class NullnessAnnotations {
   // TODO(kmb): Correctly handle JSR 305 @Nonnull(NEVER) etc.
   private static final Predicate<String> ANNOTATION_RELEVANT_TO_NULLNESS =
       Pattern.compile(
-              ".*\\.((Recently)?Nullable(Decl)?|(Recently)?NotNull(Decl)?|NonNull(Decl)?|Nonnull|"
-                  + "CheckForNull)$")
-          .asPredicate();
+              "(Recently)?NonNull(Decl|Type)?|NotNull|Nonnull|"
+                  + "(Recently)?Nullable(Decl|Type)?|CheckForNull|PolyNull|MonotonicNonNull(Decl)?|"
+                  + "ProtoMethodMayReturnNull|ProtoMethodAcceptsNullParameter|"
+                  + "ProtoPassThroughNullness")
+          .asMatchPredicate();
   private static final Predicate<String> NULLABLE_ANNOTATION =
-      Pattern.compile(".*\\.((Recently)?Nullable(Decl)?|CheckForNull)$").asPredicate();
+      Pattern.compile(
+              "(Recently)?Nullable(Decl|Type)?|CheckForNull|PolyNull|MonotonicNonNull(Decl)?|"
+                  + "ProtoMethodMayReturnNull|ProtoMethodAcceptsNullParameter|"
+                  + "ProtoPassThroughNullness")
+          .asMatchPredicate();
 
   private NullnessAnnotations() {} // static methods only
 
-  public static Optional<Nullness> fromAnnotations(Collection<String> annotations) {
+  public static Optional<Nullness> fromAnnotationTrees(List<? extends AnnotationTree> annotations) {
+    return fromAnnotationSimpleNames(annotations.stream().map(a -> simpleName(a)));
+  }
+
+  public static Optional<Nullness> fromAnnotationMirrors(
+      List<? extends AnnotationMirror> annotations) {
     return fromAnnotationStream(annotations.stream());
   }
 
-  public static Optional<Nullness> fromAnnotationsOn(@Nullable Symbol sym) {
-    if (sym != null) {
-      return fromAnnotationStream(
-          MoreAnnotations.getDeclarationAndTypeAttributes(sym).map(Object::toString));
+  public static boolean annotationsAreAmbiguous(
+      Collection<? extends AnnotationMirror> annotations) {
+    return annotationsRelevantToNullness(annotations).stream()
+            .map(a -> NULLABLE_ANNOTATION.test(simpleName(a).toString()))
+            .distinct()
+            .count()
+        == 2;
+  }
+
+  public static ImmutableList<AnnotationMirror> annotationsRelevantToNullness(
+      Collection<? extends AnnotationMirror> annotations) {
+    return annotations.stream()
+        .filter(a -> ANNOTATION_RELEVANT_TO_NULLNESS.test(simpleName(a).toString()))
+        .collect(toImmutableList());
+  }
+
+  public static ImmutableList<AnnotationTree> annotationsRelevantToNullness(
+      List<? extends AnnotationTree> annotations) {
+    return annotations.stream()
+        .filter(a -> ANNOTATION_RELEVANT_TO_NULLNESS.test(simpleName(a)))
+        .collect(toImmutableList());
+  }
+
+  private static String simpleName(AnnotationTree annotation) {
+    Tree annotationType = annotation.getAnnotationType();
+    if (annotationType instanceof IdentifierTree identifierTree) {
+      return identifierTree.getName().toString();
+    } else if (annotationType instanceof MemberSelectTree memberSelectTree) {
+      return memberSelectTree.getIdentifier().toString();
+    } else {
+      throw new AssertionError(annotationType.getKind());
     }
-    return Optional.empty();
+  }
+
+  private static Name simpleName(AnnotationMirror annotation) {
+    return annotation.getAnnotationType().asElement().getSimpleName();
+  }
+
+  public static Optional<Nullness> fromAnnotationsOn(@Nullable Symbol sym) {
+    if (sym == null) {
+      return Optional.empty();
+    }
+
+    /*
+     * We try to read annotations in two ways:
+     *
+     * 1. from the TypeMirror
+     *
+     * 2. from the Symbols, to handle declaration annotations
+     */
+    TypeMirror elementType =
+        switch (sym.getKind()) {
+          case METHOD -> ((ExecutableElement) sym).getReturnType();
+          default -> sym.asType();
+        };
+    Optional<Nullness> fromElement = fromAnnotationsOn(elementType);
+    if (fromElement.isPresent()) {
+      return fromElement;
+    }
+
+    return fromAnnotationStream(sym.getAnnotationMirrors().stream());
   }
 
   public static Optional<Nullness> fromAnnotationsOn(@Nullable TypeMirror type) {
     if (type != null) {
-      return fromAnnotationList(type.getAnnotationMirrors());
+      return fromAnnotationStream(type.getAnnotationMirrors().stream());
     }
     return Optional.empty();
   }
@@ -74,12 +148,11 @@ public class NullnessAnnotations {
   // Note this may be a good candidate for caching
   public static Optional<Nullness> fromDefaultAnnotations(@Nullable Element sym) {
     while (sym != null) {
-      // Just look through declaration annotations here for simplicitly; default annotations aren't
+      // Just look through declaration annotations here for simplicity; default annotations aren't
       // type annotations.  For now we're just using a hard-coded simple name.
       // TODO(b/121272440): Look for existing default annotations
       if (sym.getAnnotationMirrors().stream()
-          .map(Object::toString)
-          .anyMatch(it -> it.endsWith(".DefaultNotNull"))) {
+          .anyMatch(a -> simpleName(a).contentEquals("DefaultNotNull"))) {
         return Optional.of(Nullness.NONNULL);
       }
       sym = sym.getEnclosingElement();
@@ -95,14 +168,12 @@ public class NullnessAnnotations {
   public static Optional<Nullness> getUpperBound(TypeVariable typeVar) {
     // Annotations on bounds at type variable declaration
     Optional<Nullness> result;
-    if (typeVar.getUpperBound() instanceof IntersectionType) {
+    if (typeVar.getUpperBound() instanceof IntersectionType intersectionType) {
       // For intersection types, use the lower bound of any annotations on the individual bounds
       result =
           fromAnnotationStream(
-              ((IntersectionType) typeVar.getUpperBound())
-                  .getBounds().stream()
-                      .map(TypeMirror::getAnnotationMirrors)
-                      .map(Object::toString));
+              intersectionType.getBounds().stream()
+                  .flatMap(t -> t.getAnnotationMirrors().stream()));
     } else {
       result = fromAnnotationsOn(typeVar.getUpperBound());
     }
@@ -122,25 +193,25 @@ public class NullnessAnnotations {
         result =
             ((Parameterizable) genericElt)
                 .getTypeParameters().stream()
-                    .filter(
-                        typeParam ->
-                            typeParam.getSimpleName().equals(typeVar.asElement().getSimpleName()))
+                    .filter(typeParam ->
+                        typeParam.getSimpleName().equals(typeVar.asElement().getSimpleName()))
                     .findFirst()
                     // Annotations at class/interface/method type variable declaration
-                    .flatMap(decl -> fromAnnotationList(decl.getAnnotationMirrors()));
+                    .flatMap(decl -> fromAnnotationStream(decl.getAnnotationMirrors().stream()));
       }
     }
 
     // If the type variable doesn't have an explicit bound, see if its declaration is in the scope
     // of a default and use that as the bound.
-    return result.isPresent() ? result : fromDefaultAnnotations(typeVar.asElement());
+    return result.or(() -> fromDefaultAnnotations(typeVar.asElement()));
   }
 
-  private static Optional<Nullness> fromAnnotationList(List<?> annotations) {
-    return fromAnnotationStream(annotations.stream().map(Object::toString));
+  private static Optional<Nullness> fromAnnotationStream(
+      Stream<? extends AnnotationMirror> annotations) {
+    return fromAnnotationSimpleNames(annotations.map(a -> simpleName(a).toString()));
   }
 
-  private static Optional<Nullness> fromAnnotationStream(Stream<String> annotations) {
+  private static Optional<Nullness> fromAnnotationSimpleNames(Stream<String> annotations) {
     return annotations
         .filter(ANNOTATION_RELEVANT_TO_NULLNESS)
         .map(annot -> NULLABLE_ANNOTATION.test(annot) ? Nullness.NULLABLE : Nullness.NONNULL)

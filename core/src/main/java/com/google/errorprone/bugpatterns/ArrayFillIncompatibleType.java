@@ -19,6 +19,9 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.INT_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.OBJECT_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.arrayOf;
 
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
@@ -32,7 +35,6 @@ import com.sun.source.tree.ConditionalExpressionTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Type;
 
 /**
@@ -40,7 +42,6 @@ import com.sun.tools.javac.code.Type;
  * result in an ArrayStoreException.
  */
 @BugPattern(
-    name = "ArrayFillIncompatibleType",
     summary = "Arrays.fill(Object[], Object) called with incompatible types.",
     severity = ERROR)
 public class ArrayFillIncompatibleType extends BugChecker implements MethodInvocationTreeMatcher {
@@ -48,20 +49,22 @@ public class ArrayFillIncompatibleType extends BugChecker implements MethodInvoc
       anyOf(
           staticMethod()
               .onClass("java.util.Arrays")
-              .withSignature("fill(java.lang.Object[],java.lang.Object)"),
+              .named("fill")
+              .withParametersOfType(arrayOf(OBJECT_TYPE), OBJECT_TYPE),
           staticMethod()
               .onClass("java.util.Arrays")
-              .withSignature("fill(java.lang.Object[],int,int,java.lang.Object)"));
+              .named("fill")
+              .withParametersOfType(arrayOf(OBJECT_TYPE), INT_TYPE, INT_TYPE, OBJECT_TYPE));
 
   @Override
   public Description matchMethodInvocation(
-      MethodInvocationTree invocationTree, final VisitorState state) {
+      MethodInvocationTree invocationTree, VisitorState state) {
     if (!ARRAY_FILL_MATCHER.matches(invocationTree, state)) {
       return Description.NO_MATCH;
     }
 
     Type arrayComponentType =
-        state.getTypes().elemtype(ASTHelpers.getType(invocationTree.getArguments().get(0)));
+        state.getTypes().elemtype(ASTHelpers.getType(invocationTree.getArguments().getFirst()));
     Tree fillingArgument = Iterables.getLast(invocationTree.getArguments());
     Type fillingObjectType = ASTHelpers.getType(fillingArgument);
 
@@ -75,8 +78,7 @@ public class ArrayFillIncompatibleType extends BugChecker implements MethodInvoc
 
     // Due to some funky behavior, javac doesn't appear to fully expand the type of a ternary
     // when passed into an "Object" context. Let's explore both sides
-    if (fillingArgument.getKind() == Kind.CONDITIONAL_EXPRESSION) {
-      ConditionalExpressionTree cet = (ConditionalExpressionTree) fillingArgument;
+    if (fillingArgument instanceof ConditionalExpressionTree cet) {
       Type trueExpressionType = ASTHelpers.getType(cet.getTrueExpression());
       if (!isValidArrayFill(state, arrayComponentType, trueExpressionType)) {
         return reportMismatch(invocationTree, arrayComponentType, trueExpressionType);

@@ -16,47 +16,539 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static org.junit.Assume.assumeFalse;
+import static com.google.common.truth.TruthJUnit.assume;
 
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import java.util.Arrays;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author avenet@google.com (Arnaud J. Venet) */
+/**
+ * @author avenet@google.com (Arnaud J. Venet)
+ */
 @RunWith(JUnit4.class)
 public class EqualsIncompatibleTypeTest {
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(EqualsIncompatibleType.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("EqualsIncompatibleTypePositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "EqualsIncompatibleTypePositiveCases.java",
+"""
+package com.google.errorprone.bugpatterns.testdata;
+
+import com.google.common.collect.ImmutableList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * @author avenet@google.com (Arnaud J. Venet)
+ */
+public class EqualsIncompatibleTypePositiveCases {
+  class A {}
+
+  class B {}
+
+  void checkEqualsAB(A a, B b) {
+    // BUG: Diagnostic contains: incompatible types
+    a.equals(b);
+    // BUG: Diagnostic contains: incompatible types
+    b.equals(a);
+  }
+
+  class C {}
+
+  abstract class C1 extends C {
+    public abstract boolean equals(Object o);
+  }
+
+  abstract class C2 extends C1 {}
+
+  abstract class C3 extends C {}
+
+  void checkEqualsCC1C2C3(C c, C1 c1, C2 c2, C3 c3) {
+    // BUG: Diagnostic contains: incompatible types
+    c3.equals(c1);
+    // BUG: Diagnostic contains: incompatible types
+    c3.equals(c2);
+    // BUG: Diagnostic contains: incompatible types
+    c1.equals(c3);
+    // BUG: Diagnostic contains: incompatible types
+    c2.equals(c3);
+  }
+
+  void checkStaticEqualsCC1C2C3(C c, C1 c1, C2 c2, C3 c3) {
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(c3, c1);
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(c3, c2);
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(c1, c3);
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(c2, c3);
+  }
+
+  void checkGuavaStaticEqualsCC1C2C3(C c, C1 c1, C2 c2, C3 c3) {
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(c3, c1);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(c3, c2);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(c1, c3);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(c2, c3);
+  }
+
+  void checkPrimitiveEquals(int a, long b) {
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(a, b);
+    // BUG: Diagnostic contains: incompatible types
+    java.util.Objects.equals(b, a);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(a, b);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(b, a);
+  }
+
+  interface I {
+    boolean equals(Object o);
+  }
+
+  class D {}
+
+  class D1 extends D {}
+
+  class D2 extends D implements I {}
+
+  void checkEqualsDD1D2(D d, D1 d1, D2 d2) {
+    // BUG: Diagnostic contains: incompatible types
+    d1.equals(d2);
+    // BUG: Diagnostic contains: incompatible types
+    d2.equals(d1);
+  }
+
+  enum MyEnum {}
+
+  enum MyOtherEnum {}
+
+  void enumEquals(MyEnum m, MyOtherEnum mm) {
+    // BUG: Diagnostic contains: incompatible types
+    m.equals(mm);
+    // BUG: Diagnostic contains: incompatible types
+    mm.equals(m);
+
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(m, mm);
+    // BUG: Diagnostic contains: incompatible types
+    com.google.common.base.Objects.equal(mm, m);
+  }
+
+  void collectionsWithGenericMismatches(
+      List<String> stringList,
+      List<Integer> intList,
+      Set<String> stringSet,
+      Set<Integer> intSet,
+      ImmutableList<String> stringImmutableList) {
+
+    // BUG: Diagnostic contains: incompatible types
+    stringList.equals(intList);
+
+    // BUG: Diagnostic contains: incompatible types
+    stringSet.equals(intSet);
+
+    // BUG: Diagnostic contains: incompatible types
+    stringList.equals(stringSet);
+
+    // BUG: Diagnostic contains: incompatible types
+    intList.equals(stringImmutableList);
+  }
+
+  void mapKeyChecking(
+      Map<String, Integer> stringIntegerMap,
+      Map<Integer, String> integerStringMap,
+      Map<List<String>, Set<String>> stringListSetMap,
+      Map<List<String>, Set<Integer>> intListSetMap) {
+    // BUG: Diagnostic contains: incompatible types
+    stringIntegerMap.equals(integerStringMap);
+
+    // BUG: Diagnostic contains: incompatible types
+    stringListSetMap.equals(intListSetMap);
+  }
+
+  void nestedColls(Set<List<String>> setListString, Set<List<Integer>> setListInteger) {
+    // BUG: Diagnostic contains: String and Integer are incompatible
+    boolean equals = setListString.equals(setListInteger);
+  }
+
+  class MyGenericClazz<T> {}
+
+  <T extends I> void testSomeGenerics(
+      MyGenericClazz<String> strClazz, MyGenericClazz<Integer> intClazz, MyGenericClazz<T> iClazz) {
+    // BUG: Diagnostic contains: String and Integer are incompatible
+    strClazz.equals(intClazz);
+
+    // BUG: Diagnostic contains: T and String are incompatible
+    iClazz.equals(strClazz);
+  }
+}
+""")
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("EqualsIncompatibleTypeNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "EqualsIncompatibleTypeNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import com.google.common.collect.ImmutableList;
+            import com.google.common.collect.ImmutableSet;
+            import java.util.List;
+            import java.util.Set;
+
+            /**
+             * @author avenet@google.com (Arnaud J. Venet)
+             */
+            public class EqualsIncompatibleTypeNegativeCases {
+              class A {
+                public boolean equals(Object o) {
+                  if (o instanceof A) {
+                    return true;
+                  }
+                  return false;
+                }
+              }
+
+              class B1 extends A {}
+
+              class B2 extends A {}
+
+              class B3 extends B2 {}
+
+              void checkEqualsAB1B2B3(A a, B1 b1, B2 b2, B3 b3) {
+                a.equals(a);
+                a.equals(b1);
+                a.equals(b2);
+                a.equals(b3);
+                a.equals(null);
+
+                b1.equals(a);
+                b1.equals(b1);
+                b1.equals(b2);
+                b1.equals(b3);
+                b1.equals(null);
+
+                b2.equals(a);
+                b2.equals(b1);
+                b2.equals(b2);
+                b2.equals(b3);
+                b2.equals(null);
+
+                b3.equals(a);
+                b3.equals(b1);
+                b3.equals(b2);
+                b3.equals(b3);
+                b3.equals(null);
+              }
+
+              void checks(Object o, boolean[] bools, boolean bool) {
+                o.equals(bool);
+                o.equals(bools[0]);
+              }
+
+              void checkJUnit(B1 b1, B2 b2) {
+                org.junit.Assert.assertFalse(b1.equals(b2));
+              }
+
+              void checkStaticEquals(A a, B1 b1, B2 b2, B3 b3) {
+                java.util.Objects.equals(a, a);
+                java.util.Objects.equals(a, b1);
+                java.util.Objects.equals(a, b2);
+                java.util.Objects.equals(a, b3);
+                java.util.Objects.equals(a, null);
+
+                java.util.Objects.equals(b1, b3);
+                java.util.Objects.equals(b2, b3);
+                java.util.Objects.equals(b3, b3);
+                java.util.Objects.equals(null, b3);
+              }
+
+              void checkGuavaStaticEquals(A a, B1 b1, B2 b2, B3 b3) {
+                com.google.common.base.Objects.equal(a, a);
+                com.google.common.base.Objects.equal(a, b1);
+                com.google.common.base.Objects.equal(a, b2);
+                com.google.common.base.Objects.equal(a, b3);
+                com.google.common.base.Objects.equal(a, null);
+
+                com.google.common.base.Objects.equal(b1, b3);
+                com.google.common.base.Objects.equal(b2, b3);
+                com.google.common.base.Objects.equal(b3, b3);
+                com.google.common.base.Objects.equal(null, b3);
+              }
+
+              class C {}
+
+              abstract class C1 extends C {
+                public abstract boolean equals(Object o);
+              }
+
+              abstract class C2 extends C1 {}
+
+              abstract class C3 extends C1 {}
+
+              void checkEqualsC1C2C3(C1 c1, C2 c2, C3 c3) {
+                c1.equals(c1);
+                c1.equals(c2);
+                c1.equals(c3);
+                c1.equals(null);
+
+                c2.equals(c1);
+                c2.equals(c2);
+                c2.equals(c3);
+                c2.equals(null);
+
+                c3.equals(c1);
+                c3.equals(c2);
+                c3.equals(c3);
+                c3.equals(null);
+              }
+
+              interface I {
+                boolean equals(Object o);
+              }
+
+              class E1 implements I {}
+
+              class E2 implements I {}
+
+              class E3 extends E2 {}
+
+              void checkEqualsIE1E2E3(
+                  I e, E1 e1, E2 e2, E3 e3, List<I> eList, List<E1> e1List, List<E2> e2List) {
+                e.equals(e);
+                e.equals(e1);
+                e.equals(e2);
+                e.equals(e3);
+                e.equals(null);
+
+                e1.equals(e);
+                e1.equals(e1);
+                e1.equals(e2);
+                e1.equals(e3);
+                e1.equals(null);
+
+                e2.equals(e);
+                e2.equals(e1);
+                e2.equals(e2);
+                e2.equals(e3);
+                e2.equals(null);
+
+                e3.equals(e);
+                e3.equals(e1);
+                e3.equals(e2);
+                e3.equals(e3);
+                e3.equals(null);
+
+                eList.equals(e1List);
+                eList.equals(e2List);
+                eList.equals(null);
+
+                e1List.equals(eList);
+                e1List.equals(e2List);
+                e1List.equals(null);
+
+                e2List.equals(eList);
+                e2List.equals(e1List);
+                e2List.equals(null);
+              }
+
+              void collectionStuff(
+                  List rawList,
+                  List<String> stringList,
+                  Set<String> stringSet,
+                  ImmutableSet<String> immutableStringSet,
+                  ImmutableList<String> immutableStringList) {
+
+                // With raw types, we can't be sure. So... /shrug
+                rawList.equals(stringList);
+
+                stringSet.equals(immutableStringSet);
+                stringList.equals(immutableStringList);
+              }
+
+              interface J {}
+
+              class F1 implements J {}
+
+              abstract class F2 {
+                public abstract boolean equals(J o);
+              }
+
+              void checkOtherEquals(F1 f1, F2 f2) {
+                f2.equals(f1);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase_recursive() {
-    compilationHelper.addSourceFile("EqualsIncompatibleTypeRecursiveTypes.java").doTest();
+  public void negativeCase_recursive() {
+    compilationHelper
+        .addSourceLines(
+            "EqualsIncompatibleTypeRecursiveTypes.java",
+"""
+package com.google.errorprone.bugpatterns.testdata;
+
+import java.time.DayOfWeek;
+import java.time.Month;
+import java.util.Objects;
+
+/** Checks for objects with recursive type bounds. */
+public class EqualsIncompatibleTypeRecursiveTypes {
+
+  interface Bar<X, Y> {}
+
+  final class ConcreteBar<X, Y> implements Bar<X, Y> {}
+
+  static class Foo<T extends Enum<T>> implements Bar<String, T> {
+    T field;
+
+    void check(Foo<?> other) {
+      // OK since Enum<?> and Enum<T> are not incompatible
+      this.field.equals(other.field);
+    }
+
+    <X extends ConcreteBar<String, X>> void badCheck(Bar<String, X> other) {
+      // BUG: Diagnostic contains: T and X are incompatible
+      this.equals(other);
+    }
+  }
+
+  interface RandomInterface {}
+
+  interface Entity<
+      E extends Entity<E, K, V, V2>,
+      K extends EntityKey<K>,
+      V extends Enum<V>,
+      V2 extends Enum<V2>> {}
+
+  interface EntityKey<K extends EntityKey<K>> extends Comparable<K> {}
+
+  static final class EK1 implements EntityKey<EK1> {
+    @Override
+    public int compareTo(EK1 o) {
+      return 0;
+    }
+  }
+
+  static final class E1 implements Entity<E1, EK1, DayOfWeek, Month>, RandomInterface {}
+
+  static final class E2 implements Entity<E2, EK1, Month, DayOfWeek>, RandomInterface {}
+
+  void testMultilayer(Class<? extends Entity<?, ?, ?, ?>> eClazz, Class<? extends E2> e2Clazz) {
+    if (Objects.equals(eClazz, E1.class)) {
+      System.out.println("yay");
+    }
+
+    if (Objects.equals(eClazz, E2.class)) {
+      System.out.println("yay");
+    }
+
+    if (Objects.equals(e2Clazz, E2.class)) {
+      System.out.println("yay");
+    }
+
+    // BUG: Diagnostic contains: E2 and E1 are incompatible.
+    if (Objects.equals(e2Clazz, E1.class)) {
+      System.out.println("boo");
+    }
+  }
+
+  interface First<A extends First<A>> {
+    default A get() {
+      return null;
+    }
+  }
+
+  interface Second<B> extends First<Second<B>> {}
+
+  interface Third extends Second<Third> {}
+
+  interface Fourth extends Second<Fourth> {}
+
+  void testing(Third third, Fourth fourth) {
+    // BUG: Diagnostic contains: Third and Fourth
+    boolean equals = third.equals(fourth);
+  }
+
+  interface RecOne extends Comparable<Comparable<RecOne>> {}
+
+  interface RecTwo extends Comparable<Comparable<RecTwo>> {}
+
+  void testMultiRecursion(RecOne a, RecTwo b) {
+    // BUG: Diagnostic contains: RecOne and RecTwo
+    boolean bad = a.equals(b);
+  }
+
+  interface Quux<A extends Quux<A>> {}
+
+  interface Quuz<A extends Quux<A>> extends Quux<A> {}
+
+  interface Quiz<A extends Quux<A>> extends Quux<A> {}
+
+  interface Id1 extends Quuz<Id1> {}
+
+  interface Id2 extends Quiz<Id2> {}
+
+  abstract static class Id3 implements Quuz<Id3>, Quiz<Id3> {}
+
+  void test(Id1 first, Id3 second) {
+    // BUG: Diagnostic contains: Id1 and Id3
+    boolean res = Objects.equals(first, second);
+  }
+
+  class I<T> {}
+
+  class J<A extends I<B>, B extends I<C>, C extends I<A>> {}
+
+  <
+          A1 extends I<B1>,
+          B1 extends I<C1>,
+          C1 extends I<A1>,
+          A2 extends I<B2>,
+          B2 extends I<C2>,
+          C2 extends I<A2>>
+      void something(J<A1, B1, C1> j1, J<A2, B2, C2> j2) {
+    // Technically this could work, since there's nothing stopping A1 == A2, etc.
+    boolean equals = j1.equals(j2);
+  }
+}
+""")
+        .doTest();
   }
 
   @Test
-  public void testPrimitiveBoxingIntoObject() {
-    assumeFalse(RuntimeVersion.isAtLeast12()); // https://bugs.openjdk.java.net/browse/JDK-8028563
+  public void primitiveBoxingIntoObject() {
+    assume()
+        .that(Runtime.version().feature())
+        .isLessThan(12); // https://bugs.openjdk.java.net/browse/JDK-8028563
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void something(boolean b, Object o) {",
-            "     o.equals(b);",
-            "  }",
-            "}")
+            """
+            class Test {
+              void something(boolean b, Object o) {
+                o.equals(b);
+              }
+            }
+            """)
         .setArgs(Arrays.asList("-source", "1.6", "-target", "1.6"))
         .doTest();
   }
@@ -66,13 +558,16 @@ public class EqualsIncompatibleTypeTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  interface B {}",
-            "  <T extends B> void t(T x) {",
-            "    // BUG: Diagnostic contains: T and String",
-            "    x.equals(\"foo\");",
-            "  }",
-            "}")
+            """
+            class Test {
+              interface B {}
+
+              <T extends B> void t(T x) {
+                // BUG: Diagnostic contains: T and String
+                x.equals("foo");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -81,14 +576,18 @@ public class EqualsIncompatibleTypeTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  interface B {}",
-            "  interface String {}",
-            "  void t(String x) {",
-            "    // BUG: Diagnostic contains: types Test.String and java.lang.String",
-            "    x.equals(\"foo\");",
-            "  }",
-            "}")
+            """
+            class Test {
+              interface B {}
+
+              interface String {}
+
+              void t(String x) {
+                // BUG: Diagnostic contains: types Test.String and java.lang.String
+                x.equals("foo");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -97,13 +596,16 @@ public class EqualsIncompatibleTypeTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  boolean t(Stream<Integer> xs, String x) {",
-            "    // BUG: Diagnostic contains:",
-            "    return xs.anyMatch(x::equals);",
-            "  }",
-            "}")
+            """
+            import java.util.stream.Stream;
+
+            class Test {
+              boolean t(Stream<Integer> xs, String x) {
+                // BUG: Diagnostic contains:
+                return xs.anyMatch(x::equals);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -112,12 +614,678 @@ public class EqualsIncompatibleTypeTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.stream.Stream;",
-            "class Test {",
-            "  boolean t(Stream<Integer> xs, Object x) {",
-            "    return xs.anyMatch(x::equals);",
-            "  }",
-            "}")
+            """
+            import java.util.stream.Stream;
+
+            class Test {
+              boolean t(Stream<Integer> xs, Object x) {
+                return xs.anyMatch(x::equals);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void wildcards_whenIncompatible() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public void test(Class<? extends Integer> a, Class<? extends String> b) {
+                // BUG: Diagnostic contains:
+                a.equals(b);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unconstrainedWildcard_compatibleWithAnything() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestProtoMessage;
+
+            public class Test {
+              public void test(java.lang.reflect.Method m, Class<?> c) {
+                TestProtoMessage.class.equals(m.getParameterTypes()[0]);
+                TestProtoMessage.class.equals(c);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void enumsCanBeEqual() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum E {
+                A,
+                B
+              }
+
+              public void test() {
+                E.A.equals(E.B);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unrelatedRecordsCannotBeEqual() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              record UserId(long id) {}
+
+              record OrderId(long id) {}
+
+              public void test(UserId userId, OrderId orderId) {
+                // BUG: Diagnostic contains: incompatible types
+                userId.equals(orderId);
+                // BUG: Diagnostic contains: incompatible types
+                orderId.equals(userId);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void sameRecordCanBeEqual() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              record UserId(long id) {}
+
+              public boolean test(UserId a, UserId b) {
+                return a.equals(b);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void protoBuildersCannotBeEqual() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestOneOfMessage;
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestProtoMessage;
+
+            public class Test {
+              public void test() {
+                // BUG: Diagnostic contains: . Though
+                TestProtoMessage.newBuilder().equals(TestProtoMessage.newBuilder());
+                // BUG: Diagnostic contains:
+                TestProtoMessage.newBuilder().equals(TestOneOfMessage.newBuilder());
+                // BUG: Diagnostic contains:
+                TestProtoMessage.newBuilder().equals(TestOneOfMessage.getDefaultInstance());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void enumsAndRecordsNamedBuilderCanBeEqual() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              enum FooBuilder {
+                A
+              }
+
+              record BarBuilder(int x) {}
+
+              public boolean test(FooBuilder a, FooBuilder b, BarBuilder c, BarBuilder d) {
+                return a.equals(b) && c.equals(d);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void flaggedOff_protoBuildersNotConsideredIncomparable() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+"""
+import com.google.errorprone.bugpatterns.proto.ProtoTest.TestProtoMessage;
+
+public class Test {
+  public void test() {
+    TestProtoMessage.newBuilder().equals(TestProtoMessage.newBuilder());
+    TestProtoMessage.getDefaultInstance().equals(TestProtoMessage.getDefaultInstance());
+  }
+}
+""")
+        .setArgs("-XepOpt:TypeCompatibility:TreatBuildersAsIncomparable=false")
+        .doTest();
+  }
+
+  @Test
+  public void protoBuilderComparedWithinAutoValue() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.auto.value.AutoValue;
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestProtoMessage;
+
+            @AutoValue
+            abstract class Test {
+              abstract TestProtoMessage.Builder b();
+            }
+            """)
+        .addSourceLines(
+            "AutoValue_Test.java",
+            """
+            import javax.annotation.processing.Generated;
+
+            @Generated("com.google.auto.value.processor.AutoValueProcessor")
+            abstract class AutoValue_Test extends Test {
+              @Override
+              public boolean equals(Object o) {
+                return ((Test) o).b().equals(b());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void predicateIsEqual_incompatible() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static java.util.function.Predicate.isEqual;
+
+            import java.util.stream.Stream;
+
+            class Test {
+              boolean test(Stream<Long> xs) {
+                // BUG: Diagnostic contains:
+                return xs.allMatch(isEqual(1));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void predicateIsEqual_compatible() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static java.util.function.Predicate.isEqual;
+
+            import java.util.stream.Stream;
+
+            class Test {
+              boolean test(Stream<Long> xs) {
+                return xs.allMatch(isEqual(1L));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void predicateIsEqual_methodRef() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.function.Function;
+            import java.util.function.Predicate;
+
+            class Test {
+              boolean test(Function<Long, Predicate<Integer>> fn) {
+                // BUG: Diagnostic contains:
+                return test(Predicate::isEqual);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void additionalTypes_guavaFunctionalAndBaseTypes() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.base.Converter;
+            import com.google.common.base.Equivalence;
+            import com.google.common.base.Function;
+            import com.google.common.base.Predicate;
+            import com.google.common.base.Supplier;
+            import com.google.common.reflect.AbstractInvocationHandler;
+
+            class Test {
+              static class SupplierA implements Supplier<String> {
+                @Override
+                public String get() {
+                  return "";
+                }
+              }
+
+              static class SupplierB implements Supplier<String> {
+                @Override
+                public String get() {
+                  return "";
+                }
+              }
+
+              static class PredicateA implements Predicate<String> {
+                @Override
+                public boolean apply(String input) {
+                  return true;
+                }
+              }
+
+              static class PredicateB implements Predicate<String> {
+                @Override
+                public boolean apply(String input) {
+                  return false;
+                }
+              }
+
+              static class FunctionA implements Function<String, String> {
+                @Override
+                public String apply(String input) {
+                  return input;
+                }
+              }
+
+              static class FunctionB implements Function<String, String> {
+                @Override
+                public String apply(String input) {
+                  return input;
+                }
+              }
+
+              static class ConverterA extends Converter<String, String> {
+                @Override
+                protected String doForward(String s) {
+                  return s;
+                }
+
+                @Override
+                protected String doBackward(String s) {
+                  return s;
+                }
+              }
+
+              static class ConverterB extends Converter<String, String> {
+                @Override
+                protected String doForward(String s) {
+                  return s;
+                }
+
+                @Override
+                protected String doBackward(String s) {
+                  return s;
+                }
+              }
+
+              static class EquivalenceA extends Equivalence<String> {
+                @Override
+                protected boolean doEquivalent(String a, String b) {
+                  return a.equals(b);
+                }
+
+                @Override
+                protected int doHash(String t) {
+                  return t.hashCode();
+                }
+              }
+
+              static class EquivalenceB extends Equivalence<String> {
+                @Override
+                protected boolean doEquivalent(String a, String b) {
+                  return a.equals(b);
+                }
+
+                @Override
+                protected int doHash(String t) {
+                  return t.hashCode();
+                }
+              }
+
+              abstract static class HandlerA extends AbstractInvocationHandler {}
+
+              abstract static class HandlerB extends AbstractInvocationHandler {}
+
+              void test(
+                  SupplierA sa,
+                  SupplierB sb,
+                  Supplier<String> rawSupplier,
+                  PredicateA pa,
+                  PredicateB pb,
+                  FunctionA fa,
+                  FunctionB fb,
+                  ConverterA ca,
+                  ConverterB cb,
+                  EquivalenceA ea,
+                  EquivalenceB eb,
+                  HandlerA ha,
+                  HandlerB hb) {
+                // BUG: Diagnostic contains: incompatible types
+                sa.equals(sb);
+                // BUG: Diagnostic contains: incompatible types
+                pa.equals(pb);
+                // BUG: Diagnostic contains: incompatible types
+                fa.equals(fb);
+                // BUG: Diagnostic contains: incompatible types
+                ca.equals(cb);
+                // BUG: Diagnostic contains: incompatible types
+                ea.equals(eb);
+                // BUG: Diagnostic contains: incompatible types
+                ha.equals(hb);
+
+                // Interface vs concrete implementation remains compatible
+                rawSupplier.equals(sa);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void additionalTypes_collections() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.collect.ImmutableList;
+            import com.google.common.collect.ImmutableSet;
+            import java.util.ArrayDeque;
+            import java.util.ArrayList;
+            import java.util.Deque;
+            import java.util.HashSet;
+            import java.util.LinkedList;
+            import java.util.List;
+
+            class Test {
+              void test(
+                  ArrayList<String> arrayList,
+                  LinkedList<String> linkedList,
+                  HashSet<String> hashSet,
+                  ArrayDeque<String> arrayDeque,
+                  ImmutableList<String> immutableList,
+                  ImmutableSet<String> immutableSet,
+                  Deque<String> deque,
+                  List<String> list) {
+                // BUG: Diagnostic contains: incompatible types
+                arrayList.equals(hashSet);
+                // BUG: Diagnostic contains: incompatible types
+                immutableList.equals(immutableSet);
+                // BUG: Diagnostic contains: incompatible types
+                arrayDeque.equals(arrayList);
+
+                // Compatible collection comparisons
+                arrayList.equals(linkedList);
+                deque.equals(list);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void additionalTypes_jdkInterfacesAndBaseClasses() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.io.FilePermission;
+            import java.net.Inet4Address;
+            import java.net.Inet6Address;
+            import java.nio.file.Path;
+            import java.security.Principal;
+            import java.security.SecurityPermission;
+            import java.text.ChoiceFormat;
+            import java.text.Collator;
+            import java.text.DateFormat;
+            import java.text.DecimalFormat;
+            import java.text.RuleBasedCollator;
+            import java.text.SimpleDateFormat;
+            import java.time.Clock;
+            import java.time.LocalDate;
+            import java.time.chrono.JapaneseDate;
+            import java.util.Comparator;
+
+            @SuppressWarnings("removal")
+            class Test {
+              static class ComparatorA implements Comparator<String> {
+                @Override
+                public int compare(String a, String b) {
+                  return 0;
+                }
+              }
+
+              static class ComparatorB implements Comparator<String> {
+                @Override
+                public int compare(String a, String b) {
+                  return 0;
+                }
+              }
+
+              abstract static class ClockA extends Clock {}
+
+              abstract static class ClockB extends Clock {}
+
+              static class DateFormatA extends DateFormat {
+                @Override
+                public StringBuffer format(
+                    java.util.Date date,
+                    StringBuffer toAppendTo,
+                    java.text.FieldPosition fieldPosition) {
+                  return toAppendTo;
+                }
+
+                @Override
+                public java.util.Date parse(String source, java.text.ParsePosition pos) {
+                  return null;
+                }
+              }
+
+              static class CollatorA extends Collator {
+                @Override
+                public int compare(String source, String target) {
+                  return 0;
+                }
+
+                @Override
+                public java.text.CollationKey getCollationKey(String source) {
+                  return null;
+                }
+
+                @Override
+                public int hashCode() {
+                  return 0;
+                }
+              }
+
+              static class PrincipalA implements Principal {
+                @Override
+                public String getName() {
+                  return "a";
+                }
+              }
+
+              static class PrincipalB implements Principal {
+                @Override
+                public String getName() {
+                  return "b";
+                }
+              }
+
+              abstract static class PathA implements Path {}
+
+              abstract static class PathB implements Path {}
+
+              abstract static class ProcessHandleA implements ProcessHandle {}
+
+              abstract static class ProcessHandleB implements ProcessHandle {}
+
+              void test(
+                  ComparatorA compA,
+                  ComparatorB compB,
+                  ClockA clockA,
+                  ClockB clockB,
+                  LocalDate localDate,
+                  JapaneseDate japaneseDate,
+                  DecimalFormat decimalFormat,
+                  ChoiceFormat choiceFormat,
+                  SimpleDateFormat simpleDateFormat,
+                  DateFormatA dateFormatA,
+                  RuleBasedCollator ruleBasedCollator,
+                  CollatorA collatorA,
+                  Inet4Address inet4Address,
+                  Inet6Address inet6Address,
+                  FilePermission filePermission,
+                  RuntimePermission runtimePermission,
+                  SecurityPermission securityPermission,
+                  PrincipalA principalA,
+                  PrincipalB principalB,
+                  PathA pathA,
+                  PathB pathB,
+                  ProcessHandleA processHandleA,
+                  ProcessHandleB processHandleB) {
+                // BUG: Diagnostic contains: incompatible types
+                compA.equals(compB);
+                // BUG: Diagnostic contains: incompatible types
+                clockA.equals(clockB);
+                // BUG: Diagnostic contains: incompatible types
+                localDate.equals(japaneseDate);
+                // BUG: Diagnostic contains: incompatible types
+                decimalFormat.equals(choiceFormat);
+                // BUG: Diagnostic contains: incompatible types
+                simpleDateFormat.equals(dateFormatA);
+                // BUG: Diagnostic contains: incompatible types
+                ruleBasedCollator.equals(collatorA);
+                // BUG: Diagnostic contains: incompatible types
+                inet4Address.equals(inet6Address);
+                // BUG: Diagnostic contains: incompatible types
+                filePermission.equals(runtimePermission);
+                // BUG: Diagnostic contains: incompatible types
+                runtimePermission.equals(securityPermission);
+                // BUG: Diagnostic contains: incompatible types
+                principalA.equals(principalB);
+                // BUG: Diagnostic contains: incompatible types
+                pathA.equals(pathB);
+                // BUG: Diagnostic contains: incompatible types
+                processHandleA.equals(processHandleB);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void additionalTypes_finalIdentityEquals() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.flogger.MetadataKey;
+            import java.text.AttributedCharacterIterator;
+            import java.text.Format;
+
+            class Test {
+              static class KeyA extends MetadataKey<String> {
+                KeyA() {
+                  super("a", String.class, false);
+                }
+              }
+
+              static class KeyB extends MetadataKey<String> {
+                KeyB() {
+                  super("b", String.class, false);
+                }
+              }
+
+              static class AttrA extends AttributedCharacterIterator.Attribute {
+                AttrA() {
+                  super("a");
+                }
+              }
+
+              void test(
+                  KeyA keyA,
+                  KeyB keyB,
+                  Format.Field formatField,
+                  AttrA attrA) {
+                // BUG: Diagnostic contains: incompatible types
+                keyA.equals(keyB);
+                // BUG: Diagnostic contains: incompatible types
+                formatField.equals(attrA);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void customClassesWithNonInheritedEqualsFlag() {
+    compilationHelper
+        .setArgs(
+            "-XepOpt:TypeCompatibility:ClassesWithNonInheritedEquals=Test.BaseInterface,Test.BaseClass")
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              interface BaseInterface {
+                @Override
+                boolean equals(Object o);
+              }
+
+              static class ImplA implements BaseInterface {}
+
+              static class ImplB implements BaseInterface {}
+
+              abstract static class BaseClass {
+                @Override
+                public abstract boolean equals(Object o);
+              }
+
+              abstract static class SubA extends BaseClass {}
+
+              abstract static class SubB extends BaseClass {}
+
+              void test(ImplA implA, ImplB implB, BaseInterface base, SubA subA, SubB subB) {
+                // BUG: Diagnostic contains: incompatible types
+                implA.equals(implB);
+                // BUG: Diagnostic contains: incompatible types
+                subA.equals(subB);
+
+                base.equals(implA);
+              }
+            }
+            """)
         .doTest();
   }
 }

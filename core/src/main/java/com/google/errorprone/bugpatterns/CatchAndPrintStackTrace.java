@@ -33,7 +33,6 @@ import com.sun.source.tree.CatchTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "CatchAndPrintStackTrace",
     summary =
         "Logging or rethrowing exceptions should usually be preferred to catching and calling"
             + " printStackTrace",
@@ -43,7 +42,10 @@ public class CatchAndPrintStackTrace extends BugChecker implements CatchTreeMatc
   private static final Matcher<BlockTree> MATCHER =
       matchSingleStatementBlock(
           expressionStatement(
-              instanceMethod().onDescendantOf("java.lang.Throwable").named("printStackTrace")));
+              instanceMethod()
+                  .onDescendantOf("java.lang.Throwable")
+                  .named("printStackTrace")
+                  .withNoParameters()));
 
   @Override
   public Description matchCatch(CatchTree tree, VisitorState state) {

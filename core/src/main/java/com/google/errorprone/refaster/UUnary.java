@@ -32,7 +32,7 @@ import com.sun.tools.javac.tree.JCTree.JCConditional;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.TreeCopier;
 import com.sun.tools.javac.tree.TreeMaker;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UTree} version of {@link UnaryTree}.
@@ -51,7 +51,7 @@ abstract class UUnary extends UExpression implements UnaryTree {
           .put(Kind.UNARY_MINUS, JCTree.Tag.NEG)
           .put(Kind.BITWISE_COMPLEMENT, JCTree.Tag.COMPL)
           .put(Kind.LOGICAL_COMPLEMENT, JCTree.Tag.NOT)
-          .build();
+          .buildOrThrow();
 
   public static UUnary create(Kind unaryOp, UExpression expression) {
     checkArgument(
@@ -66,11 +66,9 @@ abstract class UUnary extends UExpression implements UnaryTree {
   public abstract UExpression getExpression();
 
   @Override
-  @Nullable
-  public Choice<Unifier> visitUnary(UnaryTree unary, @Nullable Unifier unifier) {
+  public @Nullable Choice<Unifier> visitUnary(UnaryTree unary, @Nullable Unifier unifier) {
     return Choice.condition(getKind().equals(unary.getKind()), unifier)
-        .thenChoose(
-            unifications(getExpression(), ASTHelpers.stripParentheses(unary.getExpression())));
+        .flatMap(unifications(getExpression(), ASTHelpers.stripParentheses(unary.getExpression())));
   }
 
   @Override
@@ -81,7 +79,7 @@ abstract class UUnary extends UExpression implements UnaryTree {
   @Override
   public JCExpression inline(Inliner inliner) throws CouldNotResolveImportException {
     JCExpression expr = getExpression().inline(inliner);
-    final TreeMaker maker = inliner.maker();
+    TreeMaker maker = inliner.maker();
     if (getKind() == Kind.LOGICAL_COMPLEMENT) {
       return new TreeCopier<Void>(maker) {
         @SuppressWarnings("unchecked")
@@ -91,13 +89,13 @@ abstract class UUnary extends UExpression implements UnaryTree {
           if (t instanceof BinaryTree
               || t instanceof UnaryTree
               || t instanceof ConditionalExpressionTree) {
-            return super.copy(t, v);
+            return super.copy(t, null);
           } else {
             return (T) defaultNegation(t);
           }
         }
 
-        public JCExpression defaultNegation(Tree expr) {
+        JCExpression defaultNegation(Tree expr) {
           return maker.Unary(JCTree.Tag.NOT, (JCExpression) expr);
         }
 

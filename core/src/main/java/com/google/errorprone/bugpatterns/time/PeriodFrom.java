@@ -38,7 +38,6 @@ import java.time.Duration;
  * @author kak@google.com (Kurt Alfred Kluever)
  */
 @BugPattern(
-    name = "PeriodFrom",
     summary = "Period.from(Period) returns itself; from(Duration) throws a runtime exception.",
     explanation =
         "Period.from(TemporalAmount) will always throw a DateTimeException when "
@@ -56,7 +55,7 @@ public final class PeriodFrom extends BugChecker implements MethodInvocationTree
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (PERIOD_FROM.matches(tree, state)) {
-      ExpressionTree arg0 = tree.getArguments().get(0);
+      ExpressionTree arg0 = tree.getArguments().getFirst();
       if (DURATION.matches(arg0, state)) {
         return describeMatch(tree);
       }

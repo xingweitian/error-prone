@@ -32,11 +32,10 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import javax.lang.model.element.Modifier;
 
-/** @author sulku@google.com (Marsela Sulku) */
-@BugPattern(
-    name = "CollectorShouldNotUseState",
-    summary = "Collector.of() should not use state",
-    severity = WARNING)
+/**
+ * @author sulku@google.com (Marsela Sulku)
+ */
+@BugPattern(summary = "Collector.of() should not use state", severity = WARNING)
 public class CollectorShouldNotUseState extends BugChecker implements MethodInvocationTreeMatcher {
 
   public static final Matcher<ExpressionTree> COLLECTOR_OF_CALL =
@@ -64,11 +63,9 @@ public class CollectorShouldNotUseState extends BugChecker implements MethodInvo
 
     @Override
     public boolean matches(Tree tree, VisitorState visitorState) {
-      if (!(tree instanceof NewClassTree)) {
+      if (!(tree instanceof NewClassTree newClassTree)) {
         return false;
       }
-
-      NewClassTree newClassTree = (NewClassTree) tree;
 
       if (newClassTree.getClassBody() == null) {
         return false;

@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.Iterables.getLast;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.BugPattern.StandardTags.STYLE;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
 
@@ -31,6 +32,7 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CatchTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.CatchTree;
 import com.sun.source.tree.NewClassTree;
@@ -60,7 +62,6 @@ import javax.lang.model.element.Modifier;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "UnusedException",
     summary =
         "This catch block catches an exception and re-throws another, but swallows the caught"
             + " exception rather than setting it as a cause. This can make debugging harder.",
@@ -74,11 +75,13 @@ public final class UnusedException extends BugChecker implements CatchTreeMatche
 
   @Override
   public Description matchCatch(CatchTree tree, VisitorState state) {
-    if (isSuppressed(tree.getParameter()) || isSuppressedViaName(tree.getParameter())) {
+    if (isSuppressed(tree.getParameter(), state) || isSuppressedViaName(tree.getParameter())) {
       return Description.NO_MATCH;
     }
     VarSymbol exceptionSymbol = ASTHelpers.getSymbol(tree.getParameter());
-    if (isSameType(exceptionSymbol.asType(), state.getSymtab().interruptedExceptionType, state)) {
+    Type exceptionType = exceptionSymbol.asType();
+    if (isSameType(exceptionType, state.getSymtab().interruptedExceptionType, state)
+        || isSameType(exceptionType, JAVA_IO_INTERRUPTEDIOEXCEPTION.get(state), state)) {
       return Description.NO_MATCH;
     }
     AtomicBoolean symbolUsed = new AtomicBoolean(false);
@@ -118,28 +121,25 @@ public final class UnusedException extends BugChecker implements CatchTreeMatche
     SuggestedFix.Builder allFixes = SuggestedFix.builder();
     throwTrees.stream()
         .filter(badThrow -> badThrow.getExpression() instanceof NewClassTree)
-        .forEach(
-            badThrow ->
-                fixConstructor((NewClassTree) badThrow.getExpression(), exceptionSymbol, state)
-                    .ifPresent(allFixes::merge));
+        .forEach(badThrow ->
+            fixConstructor((NewClassTree) badThrow.getExpression(), exceptionSymbol, state)
+                .ifPresent(allFixes::merge));
     return describeMatch(tree, allFixes.build());
   }
 
   private static boolean isSuppressedViaName(VariableTree parameter) {
-    return parameter.getName().toString().startsWith("unused");
+    String name = parameter.getName().toString();
+    return name.isEmpty() || name.startsWith("unused");
   }
 
   private static Optional<SuggestedFix> fixConstructor(
       NewClassTree constructor, VarSymbol exception, VisitorState state) {
     Symbol symbol = ASTHelpers.getSymbol(((JCNewClass) constructor).clazz);
-    if (!(symbol instanceof ClassSymbol)) {
+    if (!(symbol instanceof ClassSymbol classSymbol)) {
       return Optional.empty();
     }
-    ImmutableList<MethodSymbol> constructors = ASTHelpers.getConstructors((ClassSymbol) symbol);
+    ImmutableList<MethodSymbol> constructors = ASTHelpers.getConstructors(classSymbol);
     MethodSymbol constructorSymbol = ASTHelpers.getSymbol(constructor);
-    if (constructorSymbol == null) {
-      return Optional.empty();
-    }
     List<Type> types = getParameterTypes(constructorSymbol);
     for (MethodSymbol proposedConstructor : constructors) {
       List<Type> proposedTypes = getParameterTypes(proposedConstructor);
@@ -189,4 +189,7 @@ public final class UnusedException extends BugChecker implements CatchTreeMatche
   private static List<Type> getParameterTypes(MethodSymbol constructorSymbol) {
     return constructorSymbol.type.getParameterTypes();
   }
+
+  private static final Supplier<Type> JAVA_IO_INTERRUPTEDIOEXCEPTION =
+      typeFromString("java.io.InterruptedIOException");
 }

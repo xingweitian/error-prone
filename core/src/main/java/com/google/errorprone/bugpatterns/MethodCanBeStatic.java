@@ -16,11 +16,19 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.Sets.immutableEnumSet;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.fixes.SuggestedFixes.addModifiers;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.SERIALIZATION_METHODS;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
+import static com.google.errorprone.util.ASTHelpers.streamSuperMethods;
+import static java.util.Collections.disjoint;
+import static javax.lang.model.element.Modifier.ABSTRACT;
+import static javax.lang.model.element.Modifier.DEFAULT;
+import static javax.lang.model.element.Modifier.NATIVE;
+import static javax.lang.model.element.Modifier.SYNCHRONIZED;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -32,6 +40,7 @@ import com.google.errorprone.bugpatterns.CanBeStaticAnalyzer.CanBeStaticResult;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.SourceVersion;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
@@ -47,22 +56,32 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "MethodCanBeStatic",
     altNames = "static-method",
-    summary = "A private method that does not reference the enclosing instance can be static",
-    severity = SUGGESTION)
+    summary = "This method does not reference the enclosing instance and can be static",
+    severity = SUGGESTION,
+    documentSuppression = false)
 public class MethodCanBeStatic extends BugChecker implements CompilationUnitTreeMatcher {
+
+  private static final ImmutableSet<String> GUICE_PROVIDES_ANNOTATION_NAMES =
+      ImmutableSet.of("com.google.inject.Provides");
+
   private final FindingOutputStyle findingOutputStyle;
 
-  public MethodCanBeStatic(ErrorProneFlags flags) {
+  private final WellKnownKeep wellKnownKeep;
+
+  @Inject
+  MethodCanBeStatic(ErrorProneFlags flags, WellKnownKeep wellKnownKeep) {
     boolean findingPerSite = flags.getBoolean("MethodCanBeStatic:FindingPerSite").orElse(false);
     this.findingOutputStyle =
         findingPerSite ? FindingOutputStyle.FINDING_PER_SITE : FindingOutputStyle.ONE_FINDING;
+    this.wellKnownKeep = wellKnownKeep;
   }
 
   @Override
@@ -73,7 +92,7 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
 
       @Override
       public Void visitClass(ClassTree classTree, Void unused) {
-        if (isSuppressed(classTree)) {
+        if (isSuppressed(classTree, state)) {
           suppressions++;
           super.visitClass(classTree, null);
           suppressions--;
@@ -85,7 +104,7 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
 
       @Override
       public Void visitMethod(MethodTree tree, Void unused) {
-        if (isSuppressed(tree)) {
+        if (isSuppressed(tree, state)) {
           suppressions++;
           matchMethod(tree);
           super.visitMethod(tree, null);
@@ -99,7 +118,7 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
 
       @Override
       public Void visitVariable(VariableTree variableTree, Void unused) {
-        if (isSuppressed(variableTree)) {
+        if (isSuppressed(variableTree, state)) {
           suppressions++;
           super.visitVariable(variableTree, null);
           suppressions--;
@@ -126,7 +145,7 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
       }
     }.scan(state.getPath(), null);
 
-    propagateNonStaticness(nodes);
+    propagateNonStaticness(nodes, state);
     nodes
         .entrySet()
         .removeIf(
@@ -134,7 +153,8 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
     return generateDescription(nodes, state);
   }
 
-  private static void propagateNonStaticness(Map<MethodSymbol, MethodDetails> nodes) {
+  private static void propagateNonStaticness(
+      Map<MethodSymbol, MethodDetails> nodes, VisitorState state) {
     for (Map.Entry<MethodSymbol, MethodDetails> entry : nodes.entrySet()) {
       MethodSymbol sym = entry.getKey();
       MethodDetails methodDetails = entry.getValue();
@@ -168,6 +188,12 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
       }
       toVisit = nextVisit;
     }
+
+    nodes.keySet().stream()
+        .flatMap(ms -> streamSuperMethods(ms, state.getTypes()))
+        .map(nodes::get)
+        .filter(Objects::nonNull)
+        .forEach(sms -> sms.couldPossiblyBeStatic = false);
   }
 
   private Description generateDescription(
@@ -199,58 +225,67 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
    * `EnclosingClass.foo(...)` and `this::foo` to `EnclosingClass::foo`).
    */
   private SuggestedFix fixQualifiers(VisitorState state, MethodSymbol sym, SuggestedFix f) {
-    SuggestedFix.Builder builder = SuggestedFix.builder().merge(f);
+    SuggestedFix.Builder builder = f.toBuilder();
     new TreeScanner<Void, Void>() {
       @Override
       public Void visitMemberSelect(MemberSelectTree tree, Void unused) {
         fixQualifier(tree, tree.getExpression());
-        return super.visitMemberSelect(tree, unused);
+        return super.visitMemberSelect(tree, null);
       }
 
       @Override
       public Void visitMemberReference(MemberReferenceTree tree, Void unused) {
         fixQualifier(tree, tree.getQualifierExpression());
-        return super.visitMemberReference(tree, unused);
+        return super.visitMemberReference(tree, null);
       }
 
       private void fixQualifier(Tree tree, ExpressionTree qualifierExpression) {
         if (sym.equals(ASTHelpers.getSymbol(tree))) {
-          builder.replace(qualifierExpression, sym.owner.enclClass().getSimpleName().toString());
+          builder.replace(qualifierExpression, enclosingClass(sym).getSimpleName().toString());
         }
       }
     }.scan(state.getPath().getCompilationUnit(), null);
     return builder.build();
   }
 
-  private static boolean isExcluded(MethodTree tree, VisitorState state) {
+  private boolean isExcluded(MethodTree tree, VisitorState state) {
     MethodSymbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null) {
+    if (sym.isConstructor() || !disjoint(EXCLUDED_MODIFIERS, sym.getModifiers())) {
       return true;
     }
-    if (sym.isConstructor()
-        || sym.getModifiers().contains(Modifier.NATIVE)
-        || sym.getModifiers().contains(Modifier.SYNCHRONIZED)) {
-      return true;
+
+    boolean isGuiceProvidesMethod =
+        GUICE_PROVIDES_ANNOTATION_NAMES.stream()
+            .anyMatch(annotationName -> ASTHelpers.hasDirectAnnotation(sym, annotationName));
+
+    if (!isGuiceProvidesMethod) {
+      if (!ASTHelpers.canBeRemoved(sym, state) || wellKnownKeep.shouldKeep(tree)) {
+        return true;
+      }
     }
-    if (!sym.isPrivate()) {
-      // Methods that override other methods, or that are overridden, can't be static.
-      // We conservatively warn only for private methods.
-      return true;
-    }
-    switch (sym.owner.enclClass().getNestingKind()) {
-      case TOP_LEVEL:
-        break;
-      case MEMBER:
-        if (sym.owner.enclClass().hasOuterInstance()) {
+
+    switch (enclosingClass(sym).getNestingKind()) {
+      case TOP_LEVEL -> {}
+      case MEMBER -> {
+        if (!SourceVersion.supportsStaticInnerClass(state.context)
+            && enclosingClass(sym).hasOuterInstance()) {
           return true;
         }
-        break;
-      case LOCAL:
-      case ANONYMOUS:
+      }
+      case LOCAL -> {
+        if (!SourceVersion.supportsStaticInnerClass(state.context)) {
+          return true;
+        }
+      }
+      case ANONYMOUS -> {
         return true;
+      }
     }
     return SERIALIZATION_METHODS.matches(tree, state);
   }
+
+  private static final ImmutableSet<Modifier> EXCLUDED_MODIFIERS =
+      immutableEnumSet(NATIVE, SYNCHRONIZED, ABSTRACT, DEFAULT);
 
   /** Information about a {@link MethodSymbol} and whether it can be made static. */
   private static final class MethodDetails {
@@ -293,7 +328,7 @@ public class MethodCanBeStatic extends BugChecker implements CompilationUnitTree
       }
     };
 
-    public abstract Description report(
+    abstract Description report(
         Set<MethodTree> affectedTrees, SuggestedFix fix, VisitorState state, BugChecker checker);
   }
 }

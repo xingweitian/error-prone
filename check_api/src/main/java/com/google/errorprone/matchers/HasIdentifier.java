@@ -49,7 +49,7 @@ public class HasIdentifier implements Matcher<Tree> {
     private Matcher<IdentifierTree> idMatcher;
     private VisitorState ancestorState;
 
-    public HasIdentifierScanner(VisitorState ancestorState, Matcher<IdentifierTree> idMatcher) {
+    HasIdentifierScanner(VisitorState ancestorState, Matcher<IdentifierTree> idMatcher) {
       this.ancestorState = ancestorState;
       this.idMatcher = idMatcher;
     }
@@ -66,7 +66,7 @@ public class HasIdentifier implements Matcher<Tree> {
 
     @Override
     public Boolean visitClass(ClassTree node, Void v) {
-      return firstNonNull(super.visitClass(node, v), false);
+      return firstNonNull(super.visitClass(node, null), false);
     }
   }
 }

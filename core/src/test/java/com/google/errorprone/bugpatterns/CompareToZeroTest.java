@@ -35,12 +35,30 @@ public final class CompareToZeroTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  boolean test(Integer i) {",
-            "    // BUG: Diagnostic contains: compared",
-            "    return i.compareTo(2) == -1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              boolean test(Integer i) {
+                // BUG: Diagnostic contains: compared
+                return i.compareTo(2) == -1;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveStaticCompare() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              boolean test(boolean x, boolean y) {
+                // BUG: Diagnostic contains: compared
+                return Boolean.compare(x, y) == -1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -49,12 +67,14 @@ public final class CompareToZeroTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  boolean test(Integer i) {",
-            "    // BUG: Diagnostic contains: consistency",
-            "    return i.compareTo(2) <= -1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              boolean test(Integer i) {
+                // BUG: Diagnostic contains: consistency
+                return i.compareTo(2) <= -1;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -63,12 +83,14 @@ public final class CompareToZeroTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  boolean test(Integer i) {",
-            "    // BUG: Diagnostic matches: KEY",
-            "    return i.compareTo(2) >= 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              boolean test(Integer i) {
+                // BUG: Diagnostic matches: KEY
+                return i.compareTo(2) >= 1;
+              }
+            }
+            """)
         .expectErrorMessage(
             "KEY", msg -> msg.contains("consistency") && !msg.contains("implementation"))
         .doTest();
@@ -79,25 +101,86 @@ public final class CompareToZeroTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  int test(Integer i) {",
-            "    // BUG: Diagnostic contains:",
-            "    return i.compareTo(2) + i.compareTo(3);",
-            "  }",
-            "}")
+            """
+            class Test {
+              int test(Integer i) {
+                // BUG: Diagnostic contains: unsafe to perform arithmetic operations
+                return i.compareTo(2) + i.compareTo(3);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testStringConcat_ignored() {
+  public void positiveArithmetic() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  String test(Integer i) {",
-            "    return \"\" + i.compareTo(3);",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test(Integer i) {
+                // BUG: Diagnostic contains: unsafe to perform arithmetic operations
+                int a = i.compareTo(2) * 2;
+                // BUG: Diagnostic contains: unsafe to perform arithmetic operations
+                int c = i.compareTo(2) / 2;
+                // BUG: Diagnostic contains: unsafe to perform arithmetic or logical operations
+                int b = i.compareTo(2) % -1;
+                // BUG: Diagnostic contains: unsafe to perform arithmetic operations
+                int d = i.compareTo(2) - 1;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveUnaryOperators() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void test(Integer i) {
+                // BUG: Diagnostic contains: unsafe to negate the result
+                int a = -i.compareTo(2);
+                // BUG: Diagnostic contains: unsafe to perform arithmetic or logical operations
+                int c = ~i.compareTo(2);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveBitwise() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              int test(Integer i) {
+                // BUG: Diagnostic contains: unsafe to perform arithmetic or logical operations
+                return i.compareTo(2) & 1;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void stringConcat() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              String test(Integer i) {
+                // BUG: Diagnostic contains: unsafe to perform arithmetic or logical operations
+                return "" + i.compareTo(3);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -106,32 +189,36 @@ public final class CompareToZeroTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  void test(Integer i) {",
-            "    boolean b1 = i.compareTo(2) == -1;",
-            "    boolean b2 = i.compareTo(2) > -1;",
-            "    boolean b3 = -1 < i.compareTo(2);",
-            "    boolean b4 = i.compareTo(2) < 1;",
-            "    boolean b5 = i.compareTo(2) != -1;",
-            "    boolean b6 = i.compareTo(2) != 1;",
-            "    boolean b7 = i.compareTo(2) <= -1;",
-            "    boolean b8 = ((i.compareTo(2))) >= 1;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test(Integer i) {
+                boolean b1 = i.compareTo(2) == -1;
+                boolean b2 = i.compareTo(2) > -1;
+                boolean b3 = -1 < i.compareTo(2);
+                boolean b4 = i.compareTo(2) < 1;
+                boolean b5 = i.compareTo(2) != -1;
+                boolean b6 = i.compareTo(2) != 1;
+                boolean b7 = i.compareTo(2) <= -1;
+                boolean b8 = ((i.compareTo(2))) >= 1;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  void test(Integer i) {",
-            "    boolean b1 = i.compareTo(2) < 0;",
-            "    boolean b2 = i.compareTo(2) >= 0;",
-            "    boolean b3 = i.compareTo(2) >= 0;",
-            "    boolean b4 = i.compareTo(2) <= 0;",
-            "    boolean b5 = i.compareTo(2) >= 0;",
-            "    boolean b6 = i.compareTo(2) <= 0;",
-            "    boolean b7 = i.compareTo(2) < 0;",
-            "    boolean b8 = ((i.compareTo(2))) > 0;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test(Integer i) {
+                boolean b1 = i.compareTo(2) < 0;
+                boolean b2 = i.compareTo(2) >= 0;
+                boolean b3 = i.compareTo(2) >= 0;
+                boolean b4 = i.compareTo(2) <= 0;
+                boolean b5 = i.compareTo(2) >= 0;
+                boolean b6 = i.compareTo(2) <= 0;
+                boolean b7 = i.compareTo(2) < 0;
+                boolean b8 = ((i.compareTo(2))) > 0;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -140,13 +227,179 @@ public final class CompareToZeroTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void test(Integer i) {",
-            "    boolean b1 = i.compareTo(2) < 0;",
-            "    boolean b2 = i.compareTo(2) > 0;",
-            "    boolean b3 = i.compareTo(2) == 0;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test(Integer i) {
+                boolean b1 = i.compareTo(2) < 0;
+                boolean b2 = i.compareTo(2) > 0;
+                boolean b3 = i.compareTo(2) == 0;
+                int b4 = +i.compareTo(2);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchStatements_positive() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.Comparator;
+
+            class Test {
+              boolean switchCompare(String left, String right, Comparator<String> comparator) {
+                switch (comparator.compare(left, right)) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+
+              boolean switchCompareTo(String left, String right) {
+                switch (left.compareTo(right)) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+              boolean switchCompareToOnlyZero(String left, String right) {
+                switch (left.compareTo(right)) {
+                  case 0 -> {
+                    return true;
+                  }
+                  default -> {
+                    return false;
+                  }
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import static java.lang.Integer.signum;
+
+            import java.util.Comparator;
+
+            class Test {
+              boolean switchCompare(String left, String right, Comparator<String> comparator) {
+                switch (signum(comparator.compare(left, right))) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+
+              boolean switchCompareTo(String left, String right) {
+                switch (signum(left.compareTo(right))) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+
+              boolean switchCompareToOnlyZero(String left, String right) {
+                switch (signum(left.compareTo(right))) {
+                  case 0 -> {
+                    return true;
+                  }
+                  default -> {
+                    return false;
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchStatements_negative() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static java.lang.Integer.signum;
+
+            import java.util.Comparator;
+
+            class Test {
+              boolean switchCompare(String left, String right, Comparator<String> comparator) {
+                switch (Integer.signum(comparator.compare(left, right))) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+
+              boolean switchCompareTo(String left, String right) {
+                switch (Integer.signum(left.compareTo(right))) {
+                  case 1 -> {
+                    return false;
+                  }
+                  case -1 -> {
+                    return true;
+                  }
+                  case 0 -> {}
+                  default -> {}
+                }
+                return false;
+              }
+
+              boolean switchNegativeOneAndDefault(String left, String right) {
+                return switch (signum(left.compareTo(right))) {
+                  case -1 -> true;
+                  default -> false;
+                };
+              }
+
+              boolean switchNegativeOnePositiveOneAndDefault(String left, String right) {
+                return switch (signum(left.compareTo(right))) {
+                  case -1, 1 -> true;
+                  default -> false;
+                };
+              }
+
+              boolean switchZeroPositiveOneAndDefault(String left, String right) {
+                return switch (signum(left.compareTo(right))) {
+                  case 0, 1 -> true;
+                  default -> false;
+                };
+              }
+            }
+            """)
         .doTest();
   }
 }

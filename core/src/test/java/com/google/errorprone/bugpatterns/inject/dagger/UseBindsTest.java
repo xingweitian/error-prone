@@ -22,8 +22,7 @@ import dagger.Provides;
 import dagger.producers.ProducerModule;
 import dagger.producers.Produces;
 import java.util.Arrays;
-import java.util.Collection;
-import org.junit.Before;
+import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -33,7 +32,7 @@ import org.junit.runners.Parameterized.Parameters;
 @RunWith(Parameterized.class)
 public class UseBindsTest {
   @Parameters(name = "{0}")
-  public static Collection<Object[]> data() {
+  public static List<Object[]> data() {
     return Arrays.asList(
         new Object[][] {
           {Provides.class.getCanonicalName(), Module.class.getCanonicalName()},
@@ -44,16 +43,12 @@ public class UseBindsTest {
   private final String bindingMethodAnnotation;
   private final String moduleAnnotation;
 
-  private BugCheckerRefactoringTestHelper testHelper;
+  private final BugCheckerRefactoringTestHelper testHelper =
+      BugCheckerRefactoringTestHelper.newInstance(UseBinds.class, getClass());
 
   public UseBindsTest(String bindingMethodAnnotation, String moduleAnnotation) {
     this.bindingMethodAnnotation = bindingMethodAnnotation;
     this.moduleAnnotation = moduleAnnotation;
-  }
-
-  @Before
-  public void setUp() {
-    testHelper = BugCheckerRefactoringTestHelper.newInstance(UseBinds.class, getClass());
   }
 
   @Test
@@ -78,6 +73,32 @@ public class UseBindsTest {
             "@" + moduleAnnotation,
             "abstract class Test {",
             "  @Binds abstract Random provideRandom(SecureRandom impl);",
+            "}")
+        .doTest();
+  }
+
+  @Test
+  public void staticProvidesMethod_inInterface() {
+    testHelper
+        .addInputLines(
+            "in/Test.java",
+            "import java.security.SecureRandom;",
+            "import java.util.Random;",
+            "@" + moduleAnnotation,
+            "interface Test {",
+            "  @" + bindingMethodAnnotation,
+            "  static Random provideRandom(SecureRandom impl) {",
+            "    return impl;",
+            "  }",
+            "}")
+        .addOutputLines(
+            "out/Test.java",
+            "import dagger.Binds;",
+            "import java.security.SecureRandom;",
+            "import java.util.Random;",
+            "@" + moduleAnnotation,
+            "interface Test {",
+            "  @Binds Random provideRandom(SecureRandom impl);",
             "}")
         .doTest();
   }

@@ -16,29 +16,25 @@
 
 package com.google.errorprone.refaster;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ascii;
-import com.google.common.base.Joiner;
-import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 import com.google.errorprone.CodeTransformer;
 import com.google.errorprone.DescriptionListener;
-import com.google.errorprone.SubContext;
 import com.sun.source.util.TreePath;
-import com.sun.tools.javac.code.Symbol.PackageSymbol;
-import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.util.Context;
 import java.io.Serializable;
 import java.lang.annotation.Annotation;
 import java.util.Collection;
-import java.util.List;
-import javax.tools.JavaFileManager;
+import java.util.Set;
 
 /**
  * A representation of an entire Refaster rule, corresponding to a class with @BeforeTemplates
@@ -83,7 +79,22 @@ public abstract class RefasterRule<M extends TemplateMatch, T extends Template<M
           beforeTemplate.getClass(),
           qualifiedTemplateClass);
     }
+
     for (Template<?> afterTemplate : afterTemplates) {
+      Set<String> missingArguments =
+          Sets.difference(
+              afterTemplate.expressionArgumentTypes().keySet(),
+              beforeTemplates.stream()
+                  .<Set<String>>map(t -> t.expressionArgumentTypes().keySet())
+                  .reduce(Sets::intersection)
+                  .get());
+      checkArgument(
+          missingArguments.isEmpty(),
+          "@AfterTemplate of %s defines arguments that are not present in all @BeforeTemplate"
+              + " methods: %s",
+          qualifiedTemplateClass,
+          missingArguments);
+
       checkState(
           afterTemplate.getClass().equals(templateType),
           "Expected all templates to be of type %s but found template of type %s in %s",
@@ -91,20 +102,32 @@ public abstract class RefasterRule<M extends TemplateMatch, T extends Template<M
           afterTemplate.getClass(),
           qualifiedTemplateClass);
     }
+    ImmutableList<UTypeVar> typeVars = ImmutableList.copyOf(typeVariables);
+    ImmutableList<Template<?>> before =
+        beforeTemplates.stream()
+            .map(t -> t.withRuleTypeVariables(typeVars))
+            .collect(toImmutableList());
+    ImmutableList<Template<?>> after =
+        afterTemplates.stream()
+            .map(t -> t.withRuleTypeVariables(typeVars))
+            .collect(toImmutableList());
     @SuppressWarnings({"unchecked", "rawtypes"})
     RefasterRule<?, ?> result =
         new AutoValue_RefasterRule(
             qualifiedTemplateClass,
-            ImmutableList.copyOf(typeVariables),
-            ImmutableList.copyOf(beforeTemplates),
-            ImmutableList.copyOf(afterTemplates),
+            fromSecondLevel(qualifiedTemplateClass),
+            typeVars,
+            before,
+            after,
             annotations);
     return result;
   }
 
   RefasterRule() {}
 
-  abstract String qualifiedTemplateClass();
+  public abstract String qualifiedTemplateClass();
+
+  abstract String simpleTemplateName();
 
   abstract ImmutableList<UTypeVar> typeVariables();
 
@@ -117,41 +140,25 @@ public abstract class RefasterRule<M extends TemplateMatch, T extends Template<M
 
   @Override
   public void apply(TreePath path, Context context, DescriptionListener listener) {
-    RefasterScanner.create(this, listener)
-        .scan(
-            path.getLeaf(), prepareContext(context, (JCCompilationUnit) path.getCompilationUnit()));
+    JCCompilationUnit compilationUnit = (JCCompilationUnit) path.getCompilationUnit();
+    RefasterScanner.create(this, listener, compilationUnit).scan(path, context);
   }
 
   boolean rejectMatchesWithComments() {
-    return true; // TODO(lowasser): worth making configurable?
-  }
-
-  static final Context.Key<ImmutableList<UTypeVar>> RULE_TYPE_VARS = new Context.Key<>();
-
-  private Context prepareContext(Context baseContext, JCCompilationUnit compilationUnit) {
-    Context context = new SubContext(baseContext);
-    if (context.get(JavaFileManager.class) == null) {
-      JavacFileManager.preRegister(context);
-    }
-    context.put(JCCompilationUnit.class, compilationUnit);
-    context.put(PackageSymbol.class, compilationUnit.packge);
-    context.put(RULE_TYPE_VARS, typeVariables());
-    return context;
+    return true; // TODO: b/12365776 - Make this option configurable.
   }
 
   @VisibleForTesting
   static String fromSecondLevel(String qualifiedTemplateClass) {
-    List<String> path = Splitter.on('.').splitToList(qualifiedTemplateClass);
-    for (int topLevel = 0; topLevel < path.size() - 1; topLevel++) {
-      if (Ascii.isUpperCase(path.get(topLevel).charAt(0))) {
-        return Joiner.on('_').join(path.subList(topLevel + 1, path.size()));
+    int start = 0;
+    int dot;
+    while ((dot = qualifiedTemplateClass.indexOf('.', start)) != -1) {
+      if (Ascii.isUpperCase(qualifiedTemplateClass.charAt(start))) {
+        return qualifiedTemplateClass.substring(dot + 1).replace('.', '_');
       }
+      start = dot + 1;
     }
-    return Iterables.getLast(path);
-  }
-
-  String simpleTemplateName() {
-    return fromSecondLevel(qualifiedTemplateClass());
+    return qualifiedTemplateClass.substring(start);
   }
 
   @Override

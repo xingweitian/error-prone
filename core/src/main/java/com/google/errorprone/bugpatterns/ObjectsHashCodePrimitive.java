@@ -19,6 +19,8 @@ import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.argument;
 import static com.google.errorprone.matchers.Matchers.isPrimitiveType;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.boxedClass;
+import static com.google.errorprone.util.ASTHelpers.getType;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -27,7 +29,6 @@ import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.MethodInvocationTree;
 import java.util.Objects;
 
@@ -37,7 +38,6 @@ import java.util.Objects;
  * @author seibelsabrina@google.com (Sabrina Seibel)
  */
 @BugPattern(
-    name = "ObjectsHashCodePrimitive",
     summary = "Objects.hashCode(Object o) should not be passed a primitive value",
     severity = WARNING)
 public final class ObjectsHashCodePrimitive extends BugChecker
@@ -56,15 +56,10 @@ public final class ObjectsHashCodePrimitive extends BugChecker
 
   private static Fix adjustHashCodeCall(MethodInvocationTree tree, VisitorState state) {
     String argumentClass =
-        state
-            .getTypes()
-            .boxedTypeOrType(ASTHelpers.getType(tree.getArguments().get(0)))
-            .tsym
-            .getSimpleName()
-            .toString();
+        boxedClass(getType(tree.getArguments().getFirst()), state).getSimpleName().toString();
     return SuggestedFix.builder()
         .prefixWith(tree, argumentClass + ".hashCode(")
-        .replace(tree, state.getSourceForNode(tree.getArguments().get(0)))
+        .replace(tree, state.getSourceForNode(tree.getArguments().getFirst()))
         .postfixWith(tree, ")")
         .build();
   }

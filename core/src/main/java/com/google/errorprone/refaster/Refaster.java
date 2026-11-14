@@ -16,12 +16,16 @@
 
 package com.google.errorprone.refaster;
 
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+
 /**
  * Static utilities to indicate special handling in Refaster templates.
  *
  * @author lowasser@google.com (Louis Wasserman)
  */
-public class Refaster {
+// We need to call these methods from templates that aren't run as normal Java code.
+@SuppressWarnings("DoNotCallSuggester")
+public final class Refaster {
   private Refaster() {}
 
   /**
@@ -30,11 +34,11 @@ public class Refaster {
    *
    * <p>For example, you might write
    *
-   * <pre><code>
-   *    {@literal @}BeforeTemplate void something(@Repeated T arg) {
-   *     Stream.of(asVarargs(arg)); // doesn't use the Stream.of(T) overload, but Stream.of(T...)
-   *    }
-   * </code></pre>
+   * <pre>{@code
+   * @BeforeTemplate void something(@Repeated T arg) {
+   *  Stream.of(asVarargs(arg)); // doesn't use the Stream.of(T) overload, but Stream.of(T...)
+   * }
+   * }</pre>
    */
   public static <T> T[] asVarargs(T arg) {
     throw new UnsupportedOperationException();
@@ -48,26 +52,27 @@ public class Refaster {
    *
    * <p>For example, instead of writing
    *
-   * <pre><code>
-   * {@literal @}BeforeTemplate &lt;E&gt; List&lt;E&gt; copyOfSingleton(E element) {
+   * <pre>{@code
+   * @BeforeTemplate <E> List<E> copyOfSingleton(E element) {
    *   return ImmutableList.copyOf(Collections.singletonList(element));
    * }
-   * {@literal @}BeforeTemplate &lt;E&gt; List&lt;E&gt; copyOfArrayList(E element) {
+   * @BeforeTemplate <E> List<E> copyOfArrayList(E element) {
    *   return ImmutableList.copyOf(Lists.newArrayList(element));
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>one could alternately write
    *
-   * <pre><code>
-   * {@literal @}BeforeTemplate &lt;E&gt; List&lt;E&gt; singleton(E element) {
+   * <pre>{@code
+   * @BeforeTemplate <E> List<E> singleton(E element) {
    *   return ImmutableList.copyOf(Refaster.anyOf(
    *     Collections.singletonList(element),
    *     Lists.newArrayList(element)));
    * }
-   * </code></pre>
+   * }</pre>
    */
   @SafeVarargs
+  @CanIgnoreReturnValue
   public static <T> T anyOf(T... expressions) {
     throw new UnsupportedOperationException();
   }
@@ -79,22 +84,23 @@ public class Refaster {
    *
    * <p>For example, instead of writing the broken
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; boolean instanceOf(Object o) {
+   * <pre>{@code
+   * @AfterTemplate <T> boolean instanceOf(Object o) {
    *   return o instanceof T; // you want to match this, but it won't compile
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>you would instead write
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; boolean instanceOf(Object o) {
-   *   return Refaster.&lt;T&gt;isInstance(o); // generates the replacement "o instanceof T"
+   * <pre>{@code
+   * @AfterTemplate <T> boolean instanceOf(Object o) {
+   *   return Refaster.<T>isInstance(o); // generates the replacement "o instanceof T"
    * }
-   * </code></pre>
+   * }</pre>
    *
    * @throws IllegalArgumentException if T is not specified explicitly.
    */
+  @SuppressWarnings("UnusedTypeParameter") // The type parameter supports extralinguistic magic
   public static <T> boolean isInstance(Object o) {
     // real code wouldn't have an unused type parameter (T) or an unused argument (o)
     throw new UnsupportedOperationException(o.toString());
@@ -106,19 +112,19 @@ public class Refaster {
    *
    * <p>For example, instead of writing the broken
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; T[] newTArray(int size) {
+   * <pre>{@code
+   * @AfterTemplate <T> T[] newTArray(int size) {
    *   return new T[size]; // you want to generate this code, but it won't compile
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>you would instead write
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; T[] newTArray(int size) {
-   *   return Refaster.&lt;T&gt;newArray(size);
+   * <pre>{@code
+   * @AfterTemplate <T> T[] newTArray(int size) {
+   *   return Refaster.<T>newArray(size);
    * }
-   * </code></pre>
+   * }</pre>
    *
    * @throws IllegalArgumentException if T is not specified explicitly.
    */
@@ -132,19 +138,19 @@ public class Refaster {
    *
    * <p>For example, instead of writing the broken
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; T[] getEnumConstants() {
+   * <pre>{@code
+   * @AfterTemplate <T> T[] getEnumConstants() {
    *   return T.class.getEnumConstants(); // you want to inline this, but it won't compile
    * }
-   * </code></pre>
+   * }</pre>
    *
    * you would instead write
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate &lt;T&gt; T[] getEnumConstants() {
-   *   return Refaster.&lt;T&gt;clazz().getEnumConstants();
+   * <pre>{@code
+   * @AfterTemplate <T> T[] getEnumConstants() {
+   *   return Refaster.<T>clazz().getEnumConstants();
    * }
-   * </code></pre>
+   * }</pre>
    *
    * @throws IllegalArgumentException if T is not specified explicitly.
    */
@@ -158,19 +164,19 @@ public class Refaster {
    *
    * <p>For example, instead of writing the broken
    *
-   * <pre><code>
-   * {@literal @}BeforeTemplate &lt;E extends Enum&lt;E&gt;&gt; E valueOf(String str) {
+   * <pre>{@code
+   * @BeforeTemplate <E extends Enum<E>> E valueOf(String str) {
    *   return E.valueOf(str);
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>you would instead write
    *
-   * <pre><code>
-   * {@literal @}BeforeTemplate &lt;E extends Enum&lt;E&gt;&gt; E valueOf(String str) {
-   *   return Refaster.&lt;E&gt;enumValueOf(str);
+   * <pre>{@code
+   * @BeforeTemplate <E extends Enum<E>> E valueOf(String str) {
+   *   return Refaster.<E>enumValueOf(str);
    * }
-   * </code></pre>
+   * }</pre>
    *
    * @throws IllegalArgumentException if E is not specified explicitly.
    */
@@ -184,19 +190,19 @@ public class Refaster {
    *
    * <p>For example, instead of writing
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate int lengthWithComment(String str) {
+   * <pre>{@code
+   * @AfterTemplate int lengthWithComment(String str) {
    *   return /* comment \*\/ str.length();
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>you would instead write
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate int lengthWithComment(String str) {
+   * <pre>{@code
+   * @AfterTemplate int lengthWithComment(String str) {
    *   return Refaster.emitCommentBefore("comment", str.length());
    * }
-   * </code></pre>
+   * }</pre>
    */
   public static <T> T emitCommentBefore(String literal, T expression) {
     throw new UnsupportedOperationException();
@@ -208,21 +214,21 @@ public class Refaster {
    *
    * <p>For example, instead of writing
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate void printWithComment(String str) {
+   * <pre>{@code
+   * @AfterTemplate void printWithComment(String str) {
    *   // comment
    *   System.out.println(str);
    * }
-   * </code></pre>
+   * }</pre>
    *
    * <p>you would instead write
    *
-   * <pre><code>
-   * {@literal @}AfterTemplate void printWithComment(String str) {
+   * <pre>{@code
+   * @AfterTemplate void printWithComment(String str) {
    *   Refaster.emitComment("comment");
    *   System.out.println(str);
    * }
-   * </code></pre>
+   * }</pre>
    */
   public static void emitComment(String literal) {
     throw new UnsupportedOperationException();

@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
+import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -25,47 +26,125 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class AssertThrowsMultipleStatementsTest {
 
-  private final BugCheckerRefactoringTestHelper compilationHelper =
+  private final BugCheckerRefactoringTestHelper refactoringHelper =
       BugCheckerRefactoringTestHelper.newInstance(AssertThrowsMultipleStatements.class, getClass());
+
+  private final CompilationTestHelper compilationHelper =
+      CompilationTestHelper.newInstance(AssertThrowsMultipleStatements.class, getClass());
 
   @Test
   public void ignoreInThrowingRunnables() {
-    compilationHelper
+    refactoringHelper
         .addInputLines(
             "Test.java",
-            "import static org.junit.Assert.assertThrows;",
-            "class Test {",
-            "  void f() {",
-            "   assertThrows(IllegalStateException.class, () -> {",
-            "     System.err.println();",
-            "   });",
-            "   IllegalStateException e = assertThrows(IllegalStateException.class, () -> {",
-            "     System.err.println(1);",
-            "     System.err.println(2);",
-            "   });",
-            "   assertThrows(IllegalStateException.class, () -> {",
-            "     int x = 2;",
-            "     int y = x;",
-            "   });",
-            "  }",
-            "}")
+            """
+            import static org.junit.Assert.assertThrows;
+
+            class Test {
+              void f() {
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      System.err.println();
+                    });
+                IllegalStateException e =
+                    assertThrows(
+                        IllegalStateException.class,
+                        () -> {
+                          System.err.println(1);
+                          System.err.println(2);
+                        });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      int x = 2;
+                      int y = x;
+                    });
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import static org.junit.Assert.assertThrows;",
-            "class Test {",
-            "  void f() {",
-            "   assertThrows(IllegalStateException.class, () -> {",
-            "     System.err.println();",
-            "   });",
-            "   System.err.println(1);",
-            "   IllegalStateException e = assertThrows(IllegalStateException.class,",
-            "       () -> System.err.println(2));",
-            "   int x = 2;",
-            "   assertThrows(IllegalStateException.class, () -> {",
-            "     int y = x;",
-            "   });",
-            "  }",
-            "}")
+            """
+            import static org.junit.Assert.assertThrows;
+
+            class Test {
+              void f() {
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      System.err.println();
+                    });
+                System.err.println(1);
+                IllegalStateException e =
+                    assertThrows(IllegalStateException.class, () -> System.err.println(2));
+                int x = 2;
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      int y = x;
+                    });
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void complexSingleStatementLambdas() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static org.junit.Assert.assertThrows;
+
+            class Test {
+              void f() {
+                assertThrows(IllegalStateException.class, () -> {});
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      System.err.println();
+                    });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      int x = 1;
+                    });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      // BUG: Diagnostic contains:
+                      if (true) {
+                        System.err.println();
+                      }
+                    });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      // BUG: Diagnostic contains:
+                      try {
+                        System.err.println();
+                      } catch (Exception e) {
+                      }
+                    });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      // BUG: Diagnostic contains:
+                      {
+                        System.err.println();
+                      }
+                    });
+                assertThrows(
+                    IllegalStateException.class,
+                    () -> {
+                      // BUG: Diagnostic contains:
+                      return;
+                    });
+              }
+            }
+            """)
         .doTest();
   }
 }

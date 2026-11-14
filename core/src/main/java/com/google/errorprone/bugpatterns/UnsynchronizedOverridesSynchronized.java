@@ -20,14 +20,19 @@ import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
+import com.google.errorprone.bugpatterns.threadsafety.ConstantExpressions;
+import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ExpressionStatementTree;
@@ -40,15 +45,23 @@ import com.sun.source.tree.TypeCastTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import com.sun.tools.javac.code.Type;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "UnsynchronizedOverridesSynchronized",
     summary = "Unsynchronized method overrides a synchronized method.",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
 public class UnsynchronizedOverridesSynchronized extends BugChecker implements MethodTreeMatcher {
+  private final ConstantExpressions constantExpressions;
+
+  @Inject
+  UnsynchronizedOverridesSynchronized(ConstantExpressions constantExpressions) {
+    this.constantExpressions = constantExpressions;
+  }
+
   @Override
   public Description matchMethod(MethodTree methodTree, VisitorState state) {
     MethodSymbol methodSymbol = ASTHelpers.getSymbol(methodTree);
@@ -60,14 +73,16 @@ public class UnsynchronizedOverridesSynchronized extends BugChecker implements M
       if (isSynchronized(s)) {
         // Input streams are typically not used across threads, so this case isn't
         // worth enforcing.
-        if (isSameType(s.owner.type, state.getTypeFromString("java.io.InputStream"), state)) {
+        if (isSameType(s.owner.type, JAVA_IO_INPUTSTREAM.get(state), state)) {
           continue;
         }
         if (ignore(methodTree, state)) {
           return NO_MATCH;
         }
         return buildDescription(methodTree)
-            .addFix(SuggestedFixes.addModifiers(methodTree, state, Modifier.SYNCHRONIZED))
+            .addFix(
+                SuggestedFixes.addModifiers(methodTree, state, Modifier.SYNCHRONIZED)
+                    .orElse(SuggestedFix.emptyFix()))
             .setMessage(
                 String.format(
                     "Unsynchronized method %s overrides synchronized method in %s",
@@ -82,24 +97,29 @@ public class UnsynchronizedOverridesSynchronized extends BugChecker implements M
     return sym.getModifiers().contains(Modifier.SYNCHRONIZED);
   }
 
-  /** Don't flag methods that are empty or trivially delegate to a super-implementation. */
-  private static boolean ignore(MethodTree method, VisitorState state) {
+  /**
+   * Don't flag methods that are empty, trivially delegate to a super-implementation, or return a
+   * constant.
+   */
+  private boolean ignore(MethodTree method, VisitorState state) {
     return firstNonNull(
         new TreeScanner<Boolean, Void>() {
           @Override
           public Boolean visitBlock(BlockTree tree, Void unused) {
-            switch (tree.getStatements().size()) {
-              case 0:
-                return true;
-              case 1:
-                return scan(getOnlyElement(tree.getStatements()), null);
-              default:
-                return false;
-            }
+            return switch (tree.getStatements().size()) {
+              case 0 -> true;
+              case 1 -> scan(getOnlyElement(tree.getStatements()), null);
+              default -> false;
+            };
           }
 
           @Override
           public Boolean visitReturn(ReturnTree tree, Void unused) {
+            ExpressionTree expression = tree.getExpression();
+            if (expression == null
+                || constantExpressions.constantExpression(expression, state).isPresent()) {
+              return true;
+            }
             return scan(tree.getExpression(), null);
           }
 
@@ -116,8 +136,8 @@ public class UnsynchronizedOverridesSynchronized extends BugChecker implements M
           @Override
           public Boolean visitMethodInvocation(MethodInvocationTree node, Void unused) {
             ExpressionTree receiver = ASTHelpers.getReceiver(node);
-            return receiver instanceof IdentifierTree
-                && ((IdentifierTree) receiver).getName().contentEquals("super")
+            return receiver instanceof IdentifierTree identifierTree
+                && identifierTree.getName().contentEquals("super")
                 && overrides(ASTHelpers.getSymbol(method), ASTHelpers.getSymbol(node));
           }
 
@@ -127,9 +147,11 @@ public class UnsynchronizedOverridesSynchronized extends BugChecker implements M
                 && (((sym.flags() | other.flags()) & Flags.SYNTHETIC) == 0)
                 && sym.name.contentEquals(other.name)
                 && sym.overrides(
-                    other, sym.owner.enclClass(), state.getTypes(), /* checkResult= */ false);
+                    other, enclosingClass(sym), state.getTypes(), /* checkResult= */ false);
           }
         }.scan(method.getBody(), null),
         false);
   }
+
+  private static final Supplier<Type> JAVA_IO_INPUTSTREAM = typeFromString("java.io.InputStream");
 }

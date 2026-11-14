@@ -35,7 +35,7 @@ import java.util.Objects;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-class CreatesDuplicateCallHeuristic implements Heuristic {
+final class CreatesDuplicateCallHeuristic implements Heuristic {
 
   /**
    * Returns true if there are no other calls to this method which already have an actual parameter
@@ -54,26 +54,28 @@ class CreatesDuplicateCallHeuristic implements Heuristic {
   private static boolean anyArgumentsMatch(
       List<ParameterPair> changedPairs, List<Parameter> arguments) {
     return changedPairs.stream()
-        .anyMatch(
-            change ->
-                Objects.equals(
-                    change.actual().text(), arguments.get(change.formal().index()).text()));
+        .anyMatch(change ->
+            Objects.equals(change.actual().text(), arguments.get(change.formal().index()).text()));
   }
 
   /**
    * Find all the other calls to {@code calledMethod} within the method (or class) which enclosed
    * the original call.
    *
-   * <p>We are interested in two different cases: 1) where there are other calls to the method we
-   * are calling; 2) declarations of the method we are calling (this catches the case when there is
-   * a recursive call with the arguments correctly swapped).
+   * <p>We are interested in two different cases:
+   *
+   * <ol>
+   *   <li>where there are other calls to the method we are calling
+   *   <li>declarations of the method we are calling (this catches the case when there is a
+   *       recursive call with the arguments correctly swapped).
+   * </ol>
    *
    * @param calledMethod is the method call we are analysing for swaps
    * @param currentNode is the tree node the method call occurred at
    * @param state is the current visitor state
    * @return a list containing argument lists for each call found
    */
-  private static List<List<Parameter>> findArgumentsForOtherInstances(
+  private static ImmutableList<List<Parameter>> findArgumentsForOtherInstances(
       MethodSymbol calledMethod, Tree currentNode, VisitorState state) {
 
     Tree enclosingNode = ASTHelpers.findEnclosingNode(state.getPath(), MethodTree.class);
@@ -89,29 +91,27 @@ class CreatesDuplicateCallHeuristic implements Heuristic {
       @Override
       public Void visitMethodInvocation(MethodInvocationTree methodInvocationTree, Void unused) {
         addToResult(ASTHelpers.getSymbol(methodInvocationTree), methodInvocationTree);
-        return super.visitMethodInvocation(methodInvocationTree, unused);
+        return super.visitMethodInvocation(methodInvocationTree, null);
       }
 
       @Override
       public Void visitNewClass(NewClassTree newClassTree, Void unused) {
         addToResult(ASTHelpers.getSymbol(newClassTree), newClassTree);
-        return super.visitNewClass(newClassTree, unused);
+        return super.visitNewClass(newClassTree, null);
       }
 
       @Override
       public Void visitMethod(MethodTree methodTree, Void unused) {
         MethodSymbol methodSymbol = ASTHelpers.getSymbol(methodTree);
-        if (methodSymbol != null) {
-          // if the method declared here is the one we are calling then add it
-          addToResult(methodSymbol, methodTree);
+        // if the method declared here is the one we are calling then add it
+        addToResult(methodSymbol, methodTree);
 
-          // if any supermethod of the one declared here is the one we are calling then add it
-          for (MethodSymbol superSymbol :
-              ASTHelpers.findSuperMethods(methodSymbol, state.getTypes())) {
-            addToResult(superSymbol, methodTree);
-          }
+        // if any supermethod of the one declared here is the one we are calling then add it
+        for (MethodSymbol superSymbol :
+            ASTHelpers.findSuperMethods(methodSymbol, state.getTypes())) {
+          addToResult(superSymbol, methodTree);
         }
-        return super.visitMethod(methodTree, unused);
+        return super.visitMethod(methodTree, null);
       }
 
       private void addToResult(MethodSymbol foundSymbol, Tree tree) {
@@ -123,15 +123,14 @@ class CreatesDuplicateCallHeuristic implements Heuristic {
       }
 
       private ImmutableList<Parameter> createParameterList(Tree tree) {
-        if (tree instanceof MethodInvocationTree) {
-          return Parameter.createListFromExpressionTrees(
-              ((MethodInvocationTree) tree).getArguments());
+        if (tree instanceof MethodInvocationTree methodInvocationTree) {
+          return Parameter.createListFromExpressionTrees(methodInvocationTree.getArguments());
         }
-        if (tree instanceof NewClassTree) {
-          return Parameter.createListFromExpressionTrees(((NewClassTree) tree).getArguments());
+        if (tree instanceof NewClassTree newClassTree) {
+          return Parameter.createListFromExpressionTrees(newClassTree.getArguments());
         }
-        if (tree instanceof MethodTree) {
-          return Parameter.createListFromVariableTrees(((MethodTree) tree).getParameters());
+        if (tree instanceof MethodTree methodTree) {
+          return Parameter.createListFromVariableTrees(methodTree.getParameters());
         }
         return ImmutableList.of();
       }

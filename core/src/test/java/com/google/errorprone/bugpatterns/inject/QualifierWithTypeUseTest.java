@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @RunWith(JUnit4.class)
 public class QualifierWithTypeUseTest {
 
@@ -29,12 +31,73 @@ public class QualifierWithTypeUseTest {
       CompilationTestHelper.newInstance(QualifierWithTypeUse.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("QualifierWithTypeUsePositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "QualifierWithTypeUsePositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.inject.BindingAnnotation;
+            import java.lang.annotation.ElementType;
+            import java.lang.annotation.Target;
+            import javax.inject.Qualifier;
+
+            /** Tests for {@code QualifierWithTypeUse} */
+            public class QualifierWithTypeUsePositiveCases {
+
+              @Qualifier
+              // BUG: Diagnostic contains: @Target({CONSTRUCTOR})
+              @Target({ElementType.TYPE_USE, ElementType.CONSTRUCTOR})
+              @interface Qualifier1 {}
+
+              @Qualifier
+              // BUG: Diagnostic contains: remove
+              @Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+              @interface Qualifier2 {}
+
+              @BindingAnnotation
+              // BUG: Diagnostic contains: @Target({FIELD})
+              @Target({ElementType.FIELD, ElementType.TYPE_USE})
+              @interface BindingAnnotation1 {}
+
+              @BindingAnnotation
+              // BUG: Diagnostic contains: remove
+              @Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+              @interface BindingAnnotation2 {}
+
+              @BindingAnnotation
+              // BUG: Diagnostic contains: remove
+              @Target(ElementType.TYPE_USE)
+              @interface BindingAnnotation3 {}
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("QualifierWithTypeUseNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "QualifierWithTypeUseNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import java.lang.annotation.ElementType;
+            import java.lang.annotation.Target;
+            import javax.inject.Qualifier;
+
+            /** Tests for {@code QualifierWithTypeUse} */
+            public class QualifierWithTypeUseNegativeCases {
+
+              @Qualifier
+              @Target({ElementType.CONSTRUCTOR})
+              @interface Qualifier1 {}
+
+              @Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+              @interface NotAQualifier {}
+            }
+            """)
+        .doTest();
   }
 }

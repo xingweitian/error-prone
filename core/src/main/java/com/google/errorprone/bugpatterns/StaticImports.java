@@ -17,9 +17,10 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static com.google.errorprone.util.ASTHelpers.enclosingPackage;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.VisitorState;
@@ -32,7 +33,8 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Name;
-import javax.annotation.Nullable;
+import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Logic for inspecting static imports used by {@link NonCanonicalStaticImport}, {@link
@@ -40,21 +42,19 @@ import javax.annotation.Nullable;
  */
 public final class StaticImports {
 
-  /** Information about a static import. */
-  @AutoValue
-  public abstract static class StaticImportInfo {
-    /** The fully qualified name used to import the type (possibly non-canonical). */
-    public abstract String importedName();
-
-    /** The fully-qualified canonical name of the type. */
-    public abstract String canonicalName();
-
-    /** The simple name of the imported member. */
-    public abstract Optional<String> simpleName();
-
-    /** The field or variable symbol for a static non-type member import. */
-    public abstract ImmutableSet<Symbol> members();
-
+  /**
+   * Information about a static import.
+   *
+   * @param importedName The fully qualified name used to import the type (possibly non-canonical).
+   * @param canonicalName The fully-qualified canonical name of the type.
+   * @param simpleName The simple name of the imported member.
+   * @param members The field or variable symbol for a static non-type member import.
+   */
+  public record StaticImportInfo(
+      String importedName,
+      String canonicalName,
+      Optional<String> simpleName,
+      ImmutableSet<Symbol> members) {
     /**
      * Returns whether the import is canonical, i.e. the fully qualified name used to import the
      * type matches the scopes it was declared in.
@@ -73,13 +73,13 @@ public final class StaticImports {
     }
 
     private static StaticImportInfo create(String importedName, String canonicalName) {
-      return new AutoValue_StaticImports_StaticImportInfo(
+      return new StaticImportInfo(
           importedName, canonicalName, Optional.<String>absent(), ImmutableSet.<Symbol>of());
     }
 
     private static StaticImportInfo create(
         String importedName, String canonicalName, String simpleName, Iterable<Symbol> members) {
-      return new AutoValue_StaticImports_StaticImportInfo(
+      return new StaticImportInfo(
           importedName, canonicalName, Optional.of(simpleName), ImmutableSet.copyOf(members));
     }
   }
@@ -89,15 +89,13 @@ public final class StaticImports {
    * {@code null} otherwise, e.g. because the import is non-static, or an on-demand import, or
    * statically imports a field or method.
    */
-  @Nullable
-  public static StaticImportInfo tryCreate(ImportTree tree, VisitorState state) {
+  public static @Nullable StaticImportInfo tryCreate(ImportTree tree, VisitorState state) {
     if (!tree.isStatic()) {
       return null;
     }
-    if (!(tree.getQualifiedIdentifier() instanceof JCTree.JCFieldAccess)) {
+    if (!(tree.getQualifiedIdentifier() instanceof JCTree.JCFieldAccess access)) {
       return null;
     }
-    JCTree.JCFieldAccess access = (JCTree.JCFieldAccess) tree.getQualifiedIdentifier();
     Name identifier = access.getIdentifier();
     if (identifier.contentEquals("*")) {
       // Java doesn't allow non-canonical types inside wildcard imports,
@@ -107,8 +105,7 @@ public final class StaticImports {
     return tryCreate(access, state);
   }
 
-  @Nullable
-  public static StaticImportInfo tryCreate(MemberSelectTree access, VisitorState state) {
+  public static @Nullable StaticImportInfo tryCreate(MemberSelectTree access, VisitorState state) {
     Name identifier = (Name) access.getIdentifier();
     Symbol importedType = getSymbol(access.getExpression());
     if (importedType == null) {
@@ -123,10 +120,9 @@ public final class StaticImports {
     }
 
     Symbol sym = getSymbol(access.getExpression());
-    if (!(sym instanceof Symbol.TypeSymbol)) {
+    if (!(sym instanceof Symbol.TypeSymbol baseType)) {
       return null;
     }
-    Symbol.TypeSymbol baseType = (Symbol.TypeSymbol) sym;
     Symbol.PackageSymbol pkgSym =
         ((JCTree.JCCompilationUnit) state.getPath().getCompilationUnit()).packge;
     ImmutableSet<Symbol> members = lookup(baseType, baseType, identifier, types, pkgSym);
@@ -138,24 +134,40 @@ public final class StaticImports {
     // TODO(gak): we should instead find the most specific subtype with a member that is _used_
     Type canonicalOwner = null;
     for (Symbol member : members) {
-      Type owner = types.erasure(member.owner.type);
+      Type owner = canonicalOwner(member, baseType, types, pkgSym);
       if (canonicalOwner == null || types.isSubtype(owner, canonicalOwner)) {
         canonicalOwner = owner;
       }
     }
 
-    if (canonicalOwner == null) {
-      return null;
-    }
-
-    if (members.size() == 1 && getOnlyElement(members) instanceof ClassSymbol) {
-      return StaticImportInfo.create(access.toString(), getOnlyElement(members).toString());
+    if (members.size() == 1
+        && getOnlyElement(members) instanceof ClassSymbol classSymbol
+        && isTypeAccessibleFromPackage(classSymbol, pkgSym)) {
+      return StaticImportInfo.create(access.toString(), classSymbol.toString());
     }
     return StaticImportInfo.create(
         access.getExpression().toString(),
         canonicalOwner.toString(),
         identifier.toString(),
         members);
+  }
+
+  /**
+   * Finds the most canonical type that owns or inherits {@code member} from {@code baseType} and is
+   * accessible from {@code pkg}.
+   */
+  private static Type canonicalOwner(
+      Symbol member, Symbol.TypeSymbol baseType, Types types, Symbol.PackageSymbol pkg) {
+    Type memberOwner = types.erasure(member.owner.type);
+    Type owner = types.erasure(baseType.type);
+    for (Type superType : types.closure(baseType.type)) {
+      Type erasedSuperType = types.erasure(superType);
+      if (types.isSubtype(erasedSuperType, memberOwner)
+          && isTypeAccessibleFromPackage(erasedSuperType.tsym, pkg)) {
+        owner = erasedSuperType;
+      }
+    }
+    return owner;
   }
 
   /**
@@ -185,21 +197,11 @@ public final class StaticImports {
     }
 
     for (Symbol member : typeSym.members().getSymbolsByName(identifier)) {
-      if (!member.isStatic()) {
+      if (!isStatic(member)) {
         continue;
       }
-      switch ((int) (member.flags() & Flags.AccessFlags)) {
-        case Flags.PRIVATE:
-          continue;
-        case 0:
-        case Flags.PROTECTED:
-          if (member.packge() != pkg) {
-            continue;
-          }
-          break;
-        case Flags.PUBLIC:
-        default:
-          break;
+      if (!isAccessibleFromPackage(member, pkg)) {
+        continue;
       }
       if (member.isMemberOf(start, types)) {
         members.add(member);
@@ -207,6 +209,23 @@ public final class StaticImports {
     }
 
     return members.build();
+  }
+
+  private static boolean isTypeAccessibleFromPackage(Symbol type, Symbol.PackageSymbol pkg) {
+    for (Symbol curr = type; !(curr instanceof Symbol.PackageSymbol); curr = curr.owner) {
+      if (!isAccessibleFromPackage(curr, pkg)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean isAccessibleFromPackage(Symbol sym, Symbol.PackageSymbol pkg) {
+    return switch ((int) (sym.flags() & Flags.AccessFlags)) {
+      case Flags.PRIVATE -> false;
+      case 0, Flags.PROTECTED -> Objects.equals(enclosingPackage(sym).orElse(null), pkg);
+      default -> true;
+    };
   }
 
   private StaticImports() {}

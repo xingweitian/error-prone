@@ -18,15 +18,14 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Streams.stream;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
-import static com.google.errorprone.predicates.TypePredicates.allOf;
-import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
-import static com.google.errorprone.predicates.TypePredicates.isExactType;
-import static com.google.errorprone.predicates.TypePredicates.not;
+import static com.google.errorprone.matchers.ProtobufMatchers.IS_LITE_PROTO;
+import static com.google.errorprone.matchers.ProtobufMatchers.IS_LITE_PROTO_ENUM;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.predicates.TypePredicate;
@@ -35,10 +34,10 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Type;
 import java.util.Optional;
+import javax.inject.Inject;
 
 /** Flags calls to {@code toString} on lite protos. */
 @BugPattern(
-    name = "LiteProtoToString",
     summary =
         "toString() on lite protos will not generate a useful representation of the proto from"
             + " optimized builds. Consider whether using some subset of fields instead would"
@@ -48,28 +47,19 @@ public final class LiteProtoToString extends AbstractToString {
   private static final String LITE_ENUM_MESSAGE =
       "toString() on lite proto enums will generate different representations of the value from"
           + " development and optimized builds. Consider using #getNumber if you only need a"
-          + " serialized representation of the value, or #name if you really need the name. Using"
-          + " #name will prevent the optimizer stripping out the names of elements, however;"
-          + " so do not use if this enum contains strings that should not leak external to Google.";
-
-  private static final TypePredicate IS_LITE_PROTO =
-      allOf(
-          isDescendantOf("com.google.protobuf.MessageLite"),
-          not(isDescendantOf("com.google.protobuf.Message")),
-          not(isExactType("com.google.protobuf.UnknownFieldSet")));
-
-  private static final TypePredicate IS_LITE_ENUM =
-      allOf(
-          isDescendantOf("com.google.protobuf.Internal.EnumLite"),
-          not(isDescendantOf("com.google.protobuf.ProtocolMessageEnum")),
-          not(isDescendantOf("com.google.protobuf.Descriptors.EnumValueDescriptor")),
-          not(isDescendantOf("com.google.protobuf.AbstractMessageLite.InternalOneOfEnum")));
+          + " serialized representation of the value, or #name if you really need the name."
+          + "";
 
   private static final ImmutableSet<String> METHODS_STRIPPED_BY_OPTIMIZER =
       ImmutableSet.<String>builder()
           .add("atVerbose", "atFine", "atFiner", "atFinest", "atDebug", "atConfig", "atInfo")
           .add("v", "d", "i")
           .build();
+
+  @Inject
+  LiteProtoToString(ErrorProneFlags flags) {
+    super(flags);
+  }
 
   @Override
   protected TypePredicate typePredicate() {
@@ -83,7 +73,7 @@ public final class LiteProtoToString extends AbstractToString {
     if (isStrippedLogMessage(state)) {
       return false;
     }
-    return IS_LITE_PROTO.apply(type, state) || IS_LITE_ENUM.apply(type, state);
+    return IS_LITE_PROTO.apply(type, state) || IS_LITE_PROTO_ENUM.apply(type, state);
   }
 
   private static boolean isStrippedLogMessage(VisitorState state) {
@@ -101,16 +91,17 @@ public final class LiteProtoToString extends AbstractToString {
 
   @Override
   protected Optional<String> descriptionMessageForDefaultMatch(Type type, VisitorState state) {
-    return Optional.of(IS_LITE_ENUM.apply(type, state) ? LITE_ENUM_MESSAGE : message());
+    return Optional.of(IS_LITE_PROTO_ENUM.apply(type, state) ? LITE_ENUM_MESSAGE : message());
   }
 
   @Override
-  protected Optional<Fix> implicitToStringFix(ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> implicitToStringFix(ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 
   @Override
-  protected Optional<Fix> toStringFix(Tree parent, ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> toStringFix(
+      Tree toStringCall, ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 }

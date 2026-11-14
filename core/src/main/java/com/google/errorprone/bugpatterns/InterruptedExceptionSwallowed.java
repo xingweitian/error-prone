@@ -20,22 +20,15 @@ import static com.google.common.collect.Iterables.getLast;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.fixes.SuggestedFixes.qualifyType;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
-import static com.google.errorprone.matchers.Matchers.allOf;
-import static com.google.errorprone.matchers.Matchers.hasModifier;
-import static com.google.errorprone.matchers.Matchers.isSameType;
-import static com.google.errorprone.matchers.Matchers.methodHasParameters;
-import static com.google.errorprone.matchers.Matchers.methodHasVisibility;
-import static com.google.errorprone.matchers.Matchers.methodIsNamed;
-import static com.google.errorprone.matchers.Matchers.methodReturns;
-import static com.google.errorprone.matchers.MethodVisibility.Visibility.PUBLIC;
+import static com.google.errorprone.matchers.Matchers.MAIN_METHOD;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
 import static java.lang.Boolean.TRUE;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toCollection;
-import static javax.lang.model.element.Modifier.STATIC;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -45,8 +38,6 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.TryTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.suppliers.Suppliers;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.ASTHelpers.ScanThrownTypes;
 import com.sun.source.tree.BlockTree;
@@ -54,22 +45,27 @@ import com.sun.source.tree.CatchTree;
 import com.sun.source.tree.InstanceOfTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
+import com.sun.source.tree.ThrowTree;
 import com.sun.source.tree.TryTree;
+import com.sun.source.tree.VariableTree;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.TreeScanner;
+import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.UnionClassType;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Checks for cases where an {@link InterruptedException} is caught as part of a catch block
  * catching a supertype, and not specially handled.
  */
 @BugPattern(
-    name = "InterruptedExceptionSwallowed",
     summary =
         "This catch block appears to be catching an explicitly declared InterruptedException as an"
             + " Exception/Throwable and not handling the interruption separately.",
@@ -81,14 +77,6 @@ public final class InterruptedExceptionSwallowed extends BugChecker
       "This method can throw InterruptedException but declares that it throws Exception/Throwable."
           + " This makes it difficult for callers to recognize the need to handle interruption"
           + " properly.";
-
-  private static final Matcher<MethodTree> MAIN_METHOD =
-      allOf(
-          methodHasVisibility(PUBLIC),
-          hasModifier(STATIC),
-          methodReturns(Suppliers.VOID_TYPE),
-          methodIsNamed("main"),
-          methodHasParameters(isSameType(Suppliers.arrayOf(Suppliers.STRING_TYPE))));
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
@@ -138,7 +126,7 @@ public final class InterruptedExceptionSwallowed extends BugChecker
       MethodTree tree, Set<Type> exceptions, VisitorState state) {
     SuggestedFix.Builder fix = SuggestedFix.builder();
     fix.replace(
-        getStartPosition(tree.getThrows().get(0)),
+        getStartPosition(tree.getThrows().getFirst()),
         state.getEndPosition(getLast(tree.getThrows())),
         exceptions.stream().map(t -> qualifyType(state, fix, t)).sorted().collect(joining(", ")));
     return fix.build();
@@ -157,12 +145,38 @@ public final class InterruptedExceptionSwallowed extends BugChecker
         ImmutableSet<Type> thrownExceptions = getThrownExceptions(tree, state);
         if (thrownExceptions.stream().anyMatch(t -> isSubtype(t, interrupted, state))
             && !blockChecksForInterruptedException(catchTree.getBlock(), state)
-            && !isSuppressed(catchTree.getParameter())) {
+            && !(exceptionIsRethrown(catchTree, catchTree.getParameter(), state)
+                && methodDeclaresInterruptedException(state.findEnclosing(MethodTree.class), state))
+            && !isSuppressed(catchTree.getParameter(), state)) {
           return describeMatch(catchTree, createFix(catchTree));
         }
       }
     }
     return NO_MATCH;
+  }
+
+  private boolean exceptionIsRethrown(
+      CatchTree catchTree, VariableTree parameter, VisitorState state) {
+    AtomicBoolean rethrown = new AtomicBoolean();
+    new TreePathScanner<Void, Void>() {
+      @Override
+      public Void visitThrow(ThrowTree throwTree, Void unused) {
+        VarSymbol parameterSymbol = getSymbol(parameter);
+        if (parameterSymbol.equals(getSymbol(throwTree.getExpression()))) {
+          rethrown.set(true);
+        }
+        return super.visitThrow(throwTree, null);
+      }
+    }.scan(new TreePath(state.getPath(), catchTree), null);
+    return rethrown.get();
+  }
+
+  private boolean methodDeclaresInterruptedException(MethodTree enclosing, VisitorState state) {
+    if (enclosing == null) {
+      return false;
+    }
+    return enclosing.getThrows().stream()
+        .anyMatch(t -> isSameType(getType(t), state.getSymtab().interruptedExceptionType, state));
   }
 
   private static SuggestedFix createFix(CatchTree catchTree) {
@@ -174,7 +188,7 @@ public final class InterruptedExceptionSwallowed extends BugChecker
     if (block.isEmpty()) {
       return SuggestedFix.replace(catchTree.getBlock(), String.format("{%s}", fix));
     }
-    return SuggestedFix.prefixWith(block.get(0), fix);
+    return SuggestedFix.prefixWith(block.getFirst(), fix);
   }
 
   private static boolean blockChecksForInterruptedException(BlockTree block, VisitorState state) {

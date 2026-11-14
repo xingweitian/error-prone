@@ -19,27 +19,28 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
-import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
-import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_BUILD_METHOD;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_NEW_BUILDER_METHOD;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_TO_BUILDER_METHOD;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 import static com.google.errorprone.util.SideEffectAnalysis.hasSideEffect;
 
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.bugpatterns.threadsafety.ConstantExpressions;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.predicates.type.DescendantOf;
-import com.google.errorprone.suppliers.Suppliers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
+import javax.inject.Inject;
 
 /** Highlights cases where a proto's build method has its return value ignored. */
 @BugPattern(
-    name = "ProtoBuilderReturnValueIgnored",
     summary =
         "Unnecessary call to proto's #build() method.  If you don't consume the return value of "
             + "#build(), the result is discarded and the only effect is to verify that all "
@@ -48,27 +49,20 @@ import com.sun.source.tree.MethodInvocationTree;
     severity = ERROR)
 public final class ProtoBuilderReturnValueIgnored extends AbstractReturnValueIgnored {
 
-  private static final Matcher<ExpressionTree> BUILDER =
-      instanceMethod()
-          .onDescendantOf("com.google.protobuf.MessageLite.Builder")
-          .namedAnyOf("build", "buildPartial");
-
   public static final Matcher<ExpressionTree> MATCHER =
       allOf(
-          BUILDER,
+          PROTO_BUILD_METHOD,
           // Don't match expressions beginning with a newBuilder call; these should be covered by
           // ModifiedButNotUsed.
           ProtoBuilderReturnValueIgnored::doesNotTerminateInNewBuilder);
 
   private static final Matcher<ExpressionTree> ROOT_INVOCATIONS_TO_IGNORE =
-      anyOf(
-          staticMethod()
-              .onClass(
-                  new DescendantOf(Suppliers.typeFromString("com.google.protobuf.MessageLite")))
-              .namedAnyOf("newBuilder"),
-          instanceMethod()
-              .onDescendantOf("com.google.protobuf.MessageLite")
-              .namedAnyOf("toBuilder"));
+      anyOf(PROTO_NEW_BUILDER_METHOD, PROTO_TO_BUILDER_METHOD);
+
+  @Inject
+  ProtoBuilderReturnValueIgnored(ConstantExpressions constantExpressions) {
+    super(constantExpressions);
+  }
 
   @Override
   public Matcher<? super ExpressionTree> specializedMatcher() {
@@ -117,13 +111,6 @@ public final class ProtoBuilderReturnValueIgnored extends AbstractReturnValueIgn
   }
 
   private static boolean doesNotTerminateInNewBuilder(ExpressionTree tree, VisitorState state) {
-    for (ExpressionTree receiver = getReceiver(tree);
-        receiver instanceof MethodInvocationTree;
-        receiver = getReceiver(receiver)) {
-      if (ROOT_INVOCATIONS_TO_IGNORE.matches(receiver, state)) {
-        return false;
-      }
-    }
-    return true;
+    return streamReceivers(tree).noneMatch(t -> ROOT_INVOCATIONS_TO_IGNORE.matches(t, state));
   }
 }

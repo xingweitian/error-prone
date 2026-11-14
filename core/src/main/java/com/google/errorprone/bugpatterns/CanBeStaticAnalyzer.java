@@ -16,7 +16,9 @@
 
 package com.google.errorprone.bugpatterns;
 
-import com.google.auto.value.AutoValue;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
+
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.util.ASTHelpers;
@@ -37,7 +39,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /** Analyzes trees for references to their enclosing instance. */
-public class CanBeStaticAnalyzer extends TreeScanner {
+public final class CanBeStaticAnalyzer extends TreeScanner {
 
   /** Returns true if the tree references its enclosing class. */
   public static boolean referencesOuter(Tree tree, Symbol owner, VisitorState state) {
@@ -73,33 +75,30 @@ public class CanBeStaticAnalyzer extends TreeScanner {
     if (sym == null) {
       return;
     }
-    if (sym.isStatic()) {
+    if (isStatic(sym)) {
       return;
     }
     switch (sym.getKind()) {
-      case TYPE_PARAMETER:
+      case TYPE_PARAMETER, FIELD -> {
         // declaring a class as non-static just to access a type parameter is silly -
         // why not just re-declare the type parameter instead of capturing it?
         // TODO(cushon): consider making the suggestion anyways, maybe with a fix?
-        // fall through
-      case FIELD:
         if (!isOwnedBy(sym, owner, state.getTypes())) {
           canPossiblyBeStatic = false;
         }
-        break;
-      case METHOD:
+      }
+      case METHOD -> {
         if (!isOwnedBy(sym, owner, state.getTypes())) {
           outerReferences.add((MethodSymbol) sym);
         }
-        break;
-      case CLASS:
+      }
+      case CLASS -> {
         Type enclosing = tree.type.getEnclosingType();
         if (enclosing != null) {
           enclosing.accept(new TypeVariableScanner(), null);
         }
-        break;
-      default:
-        break;
+      }
+      default -> {}
     }
   }
 
@@ -107,8 +106,8 @@ public class CanBeStaticAnalyzer extends TreeScanner {
     if (sym.owner == owner) {
       return true;
     }
-    if (owner instanceof TypeSymbol) {
-      return sym.isMemberOf((TypeSymbol) owner, types);
+    if (owner instanceof TypeSymbol typeSymbol) {
+      return sym.isMemberOf(typeSymbol, types);
     }
     return false;
   }
@@ -185,9 +184,9 @@ public class CanBeStaticAnalyzer extends TreeScanner {
     if (sym == null || !sym.hasOuterInstance()) {
       return false;
     }
-    for (ClassSymbol encl = owner.owner.enclClass();
+    for (ClassSymbol encl = enclosingClass(owner);
         encl != null;
-        encl = encl.owner != null ? encl.owner.enclClass() : null) {
+        encl = encl.owner != null ? enclosingClass(encl) : null) {
       if (sym.isMemberOf(encl, state.getTypes())) {
         return true;
       }
@@ -200,22 +199,17 @@ public class CanBeStaticAnalyzer extends TreeScanner {
     // skip annotations; the keys of key/value pairs look like unqualified method invocations
   }
 
-  /** Stores the result of a can-be-static query. */
-  @AutoValue
-  public abstract static class CanBeStaticResult {
-    /**
-     * Whether the method could *possibly* be static: i.e., this is false if it references an
-     * instance field.
-     */
-    public abstract boolean canPossiblyBeStatic();
-
-    /** Set of instance methods referenced by the method under inspection. */
-    public abstract ImmutableSet<MethodSymbol> methodsReferenced();
-
-    public static CanBeStaticResult of(
-        boolean canPossiblyBeStatic, Set<MethodSymbol> methodsReferenced) {
-      return new AutoValue_CanBeStaticAnalyzer_CanBeStaticResult(
-          canPossiblyBeStatic, ImmutableSet.copyOf(methodsReferenced));
+  /**
+   * Stores the result of a can-be-static query.
+   *
+   * @param canPossiblyBeStatic Whether the method could *possibly* be static: i.e., this is false
+   *     if it references an instance field.
+   * @param methodsReferenced Set of instance methods referenced by the method under inspection.
+   */
+  record CanBeStaticResult(
+      boolean canPossiblyBeStatic, ImmutableSet<MethodSymbol> methodsReferenced) {
+    static CanBeStaticResult of(boolean canPossiblyBeStatic, Set<MethodSymbol> methodsReferenced) {
+      return new CanBeStaticResult(canPossiblyBeStatic, ImmutableSet.copyOf(methodsReferenced));
     }
   }
 }

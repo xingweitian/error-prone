@@ -66,7 +66,8 @@ public class ApiDiffCheckerTest {
   @Target({ANNOTATION_TYPE, CONSTRUCTOR, FIELD, METHOD, TYPE})
   public @interface RequiresNewApiVersion {}
 
-  private final CompilationTestHelper compilationHelper;
+  private final CompilationTestHelper compilationHelper =
+      CompilationTestHelper.newInstance(AnnotationOnlyApiDiffChecker.class, getClass());
 
   /** An {@link ApiDiffChecker} for testing. */
   @BugPattern(name = "SampleChecker", severity = SeverityLevel.ERROR, summary = "")
@@ -88,11 +89,6 @@ public class ApiDiffCheckerTest {
     }
   }
 
-  public ApiDiffCheckerTest() {
-    compilationHelper =
-        CompilationTestHelper.newInstance(AnnotationOnlyApiDiffChecker.class, getClass());
-  }
-
   @Test
   public void newDerivedMethod() throws Exception {
     ApiDiff diff =
@@ -105,16 +101,21 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "Base.java", //
-                        "package lib;",
-                        "public class Base {",
-                        "  public void f() {}",
-                        "}")
+                        "Base.java",
+                        """
+                        package lib;
+
+                        public class Base {
+                          public void f() {}
+                        }
+                        """)
                     .addSourceLines(
-                        "Derived.java", //
-                        "package lib;",
-                        "public class Derived extends Base {",
-                        "}")
+                        "Derived.java",
+                        """
+                        package lib;
+
+                        public class Derived extends Base {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -124,12 +125,16 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "Derived.java", //
-                        "package lib;",
-                        "public class Derived extends Base {",
-                        "  public void f() {}",
-                        "  public void g() {}",
-                        "}")
+                        "Derived.java",
+                        """
+                        package lib;
+
+                        public class Derived extends Base {
+                          public void f() {}
+
+                          public void g() {}
+                        }
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -137,19 +142,22 @@ public class ApiDiffCheckerTest {
         new BaseErrorProneJavaCompiler(
             ScannerSupplier.fromScanner(new ErrorProneScanner(new SampleApiDiffChecker(diff))));
 
-    final CompilationResult result =
+    CompilationResult result =
         new CompilationBuilder(errorProneCompiler, tempFolder.newFolder(), fileManager)
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
                         "Test.java",
-                        "import lib.*;", //
-                        "class Test {",
-                        "  void f() {",
-                        "    new Derived().f();",
-                        "    new Derived().g();",
-                        "  }",
-                        "}")
+                        """
+                        import lib.*;
+
+                        class Test {
+                          void f() {
+                            new Derived().f();
+                            new Derived().g();
+                          }
+                        }
+                        """)
                     .build())
             .setClasspath(Arrays.asList(newJar, originalJar))
             .compile();
@@ -170,10 +178,12 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B {",
-                        "}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -182,16 +192,21 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "interface A {",
-                        "  default void f() {}",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        interface A {
+                          default void f() {}
+                        }
+                        """)
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B implements A {",
-                        "}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B implements A {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -199,18 +214,21 @@ public class ApiDiffCheckerTest {
         new BaseErrorProneJavaCompiler(
             ScannerSupplier.fromScanner(new ErrorProneScanner(new SampleApiDiffChecker(diff))));
 
-    final CompilationResult result =
+    CompilationResult result =
         new CompilationBuilder(errorProneCompiler, tempFolder.newFolder(), fileManager)
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
                         "Test.java",
-                        "import lib.*;", //
-                        "class Test {",
-                        "  void f(B b) {",
-                        "    b.f();",
-                        "  }",
-                        "}")
+                        """
+                        import lib.*;
+
+                        class Test {
+                          void f(B b) {
+                            b.f();
+                          }
+                        }
+                        """)
                     .build())
             .setClasspath(Arrays.asList(newJar, originalJar))
             .compile();
@@ -229,11 +247,14 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B {",
-                        "  public void f() {}",
-                        "}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B {
+                          public void f() {}
+                        }
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -242,15 +263,21 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "interface A {",
-                        "  default void f() {}",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        interface A {
+                          default void f() {}
+                        }
+                        """)
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B implements A {}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B implements A {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -258,18 +285,21 @@ public class ApiDiffCheckerTest {
         new BaseErrorProneJavaCompiler(
             ScannerSupplier.fromScanner(new ErrorProneScanner(new SampleApiDiffChecker(diff))));
 
-    final CompilationResult result =
+    CompilationResult result =
         new CompilationBuilder(errorProneCompiler, tempFolder.newFolder(), fileManager)
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
                         "Test.java",
-                        "import lib.*;", //
-                        "class Test {",
-                        "  void f(B b) {",
-                        "    b.f();",
-                        "  }",
-                        "}")
+                        """
+                        import lib.*;
+
+                        class Test {
+                          void f(B b) {
+                            b.f();
+                          }
+                        }
+                        """)
                     .build())
             .setClasspath(Arrays.asList(newJar, originalJar))
             .compile();
@@ -288,21 +318,28 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "public class A {",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        public class A {}
+                        """)
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B extends A {",
-                        "  public void f() {}",
-                        "}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B extends A {
+                          public void f() {}
+                        }
+                        """)
                     .addSourceLines(
-                        "C.java", //
-                        "package lib;",
-                        "public class C extends B {",
-                        "}")
+                        "C.java",
+                        """
+                        package lib;
+
+                        public class C extends B {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -311,21 +348,28 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "public class A {",
-                        "  public void f() {}",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        public class A {
+                          public void f() {}
+                        }
+                        """)
                     .addSourceLines(
-                        "B.java", //
-                        "package lib;",
-                        "public class B extends A {",
-                        "}")
+                        "B.java",
+                        """
+                        package lib;
+
+                        public class B extends A {}
+                        """)
                     .addSourceLines(
-                        "C.java", //
-                        "package lib;",
-                        "public class C extends B {",
-                        "}")
+                        "C.java",
+                        """
+                        package lib;
+
+                        public class C extends B {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -333,18 +377,21 @@ public class ApiDiffCheckerTest {
         new BaseErrorProneJavaCompiler(
             ScannerSupplier.fromScanner(new ErrorProneScanner(new SampleApiDiffChecker(diff))));
 
-    final CompilationResult result =
+    CompilationResult result =
         new CompilationBuilder(errorProneCompiler, tempFolder.newFolder(), fileManager)
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
                         "Test.java",
-                        "import lib.*;", //
-                        "class Test {",
-                        "  void f(C c) {",
-                        "    c.f();",
-                        "  }",
-                        "}")
+                        """
+                        import lib.*;
+
+                        class Test {
+                          void f(C c) {
+                            c.f();
+                          }
+                        }
+                        """)
                     .build())
             .setClasspath(Arrays.asList(newJar, originalJar))
             .compile();
@@ -368,10 +415,12 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "public class A {",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        public class A {}
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -380,11 +429,14 @@ public class ApiDiffCheckerTest {
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
-                        "A.java", //
-                        "package lib;",
-                        "public class A {",
-                        "  public void f() {}",
-                        "}")
+                        "A.java",
+                        """
+                        package lib;
+
+                        public class A {
+                          public void f() {}
+                        }
+                        """)
                     .build())
             .compileOutputToJarOrDie();
 
@@ -392,18 +444,21 @@ public class ApiDiffCheckerTest {
         new BaseErrorProneJavaCompiler(
             ScannerSupplier.fromScanner(new ErrorProneScanner(new SampleApiDiffChecker(diff))));
 
-    final CompilationResult result =
+    CompilationResult result =
         new CompilationBuilder(errorProneCompiler, tempFolder.newFolder(), fileManager)
             .setSources(
                 new SourceBuilder(tempFolder.newFolder())
                     .addSourceLines(
                         "Test.java",
-                        "import lib.A;", //
-                        "class Test {",
-                        "  void g() {",
-                        "    new A() {}.f();",
-                        "  }",
-                        "}")
+                        """
+                        import lib.A;
+
+                        class Test {
+                          void g() {
+                            new A() {}.f();
+                          }
+                        }
+                        """)
                     .build())
             .setClasspath(Arrays.asList(newJar, originalJar))
             .compile();
@@ -418,17 +473,24 @@ public class ApiDiffCheckerTest {
     compilationHelper
         .addSourceLines(
             "Lib.java",
-            "package my.lib;",
-            "import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;",
-            "@RequiresNewApiVersion",
-            "public final class Lib {}")
+"""
+package my.lib;
+
+import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;
+
+@RequiresNewApiVersion
+public final class Lib {}
+""")
         .addSourceLines(
             "Test.java",
-            "import my.lib.Lib;",
-            "class Test {",
-            "  // BUG: Diagnostic contains: Lib",
-            "  Lib l;",
-            "}")
+            """
+            import my.lib.Lib;
+
+            class Test {
+              // BUG: Diagnostic contains: Lib
+              Lib l;
+            }
+            """)
         .doTest();
   }
 
@@ -437,18 +499,24 @@ public class ApiDiffCheckerTest {
     compilationHelper
         .addSourceLines(
             "Lib.java",
-            "package my.lib;",
-            "import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;",
-            "@RequiresNewApiVersion",
-            "public final class Lib {}")
+"""
+package my.lib;
+
+import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;
+
+@RequiresNewApiVersion
+public final class Lib {}
+""")
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;",
-            "import my.lib.Lib;",
-            "class Test {",
-            "  @RequiresNewApiVersion",
-            "  Lib l;",
-            "}")
+"""
+import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;
+import my.lib.Lib;
+
+class Test {
+  @RequiresNewApiVersion Lib l;
+}
+""")
         .doTest();
   }
 
@@ -457,21 +525,28 @@ public class ApiDiffCheckerTest {
     compilationHelper
         .addSourceLines(
             "Lib.java",
-            "package my.lib;",
-            "import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;",
-            "public final class Lib {",
-            "  @RequiresNewApiVersion",
-            "  public void foo() {}",
-            "}")
+"""
+package my.lib;
+
+import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;
+
+public final class Lib {
+  @RequiresNewApiVersion
+  public void foo() {}
+}
+""")
         .addSourceLines(
             "Test.java",
-            "import my.lib.Lib;",
-            "class Test {",
-            "  void bar() {",
-            "    // BUG: Diagnostic contains: foo",
-            "    new Lib().foo();",
-            "  }",
-            "}")
+            """
+            import my.lib.Lib;
+
+            class Test {
+              void bar() {
+                // BUG: Diagnostic contains: foo
+                new Lib().foo();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -480,21 +555,27 @@ public class ApiDiffCheckerTest {
     compilationHelper
         .addSourceLines(
             "Lib.java",
-            "package my.lib;",
-            "import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;",
-            "public final class Lib {",
-            "  @RequiresNewApiVersion",
-            "  public static final int FOO = 1;",
-            "}")
+"""
+package my.lib;
+
+import com.google.errorprone.bugpatterns.apidiff.ApiDiffCheckerTest.RequiresNewApiVersion;
+
+public final class Lib {
+  @RequiresNewApiVersion public static final int FOO = 1;
+}
+""")
         .addSourceLines(
             "Test.java",
-            "import my.lib.Lib;",
-            "class Test {",
-            "  void bar() {",
-            "    // BUG: Diagnostic contains: FOO",
-            "    System.out.println(Lib.FOO);",
-            "  }",
-            "}")
+            """
+            import my.lib.Lib;
+
+            class Test {
+              void bar() {
+                // BUG: Diagnostic contains: FOO
+                System.out.println(Lib.FOO);
+              }
+            }
+            """)
         .doTest();
   }
 }

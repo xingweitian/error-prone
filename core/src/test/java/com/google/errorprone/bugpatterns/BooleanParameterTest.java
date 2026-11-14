@@ -16,8 +16,6 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
@@ -33,45 +31,61 @@ public class BooleanParameterTest {
     BugCheckerRefactoringTestHelper.newInstance(BooleanParameter.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  Test(boolean foo) {}",
-            "  void f(boolean foo) {}",
-            "  void f(boolean foo, boolean bar) {}",
-            "  void f_boxed(Boolean foo, Boolean bar) {}",
-            "  void g(boolean p, boolean q) {}",
-            "  void h(boolean arg0, boolean arg1) {}",
-            "  {",
-            "    f(/* foo= */ true);",
-            "    f(false); // one arg",
-            "    f(/* foo= */ true, false);",
-            "    f(false, false);",
-            "    f_boxed(false, false);",
-            "    g(false, false); // single-char",
-            "    h(false, false); // synthetic",
-            "    new Test(false);",
-            "  }",
-            "}")
+            """
+            class Test {
+              Test(boolean foo) {}
+
+              void f(boolean foo) {}
+
+              void f(boolean foo, boolean bar) {}
+
+              void f_boxed(Boolean foo, Boolean bar) {}
+
+              void g(boolean p, boolean q) {}
+
+              void h(boolean arg0, boolean arg1) {}
+
+              {
+                f(/* foo= */ true);
+                f(false); // one arg
+                f(/* foo= */ true, false);
+                f(false, false);
+                f_boxed(false, false);
+                g(false, false); // single-char
+                h(false, false); // synthetic
+                new Test(false);
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  Test(boolean foo) {}",
-            "  void f(boolean foo) {}",
-            "  void f(boolean foo, boolean bar) {}",
-            "  void f_boxed(Boolean foo, Boolean bar) {}",
-            "  void g(boolean p, boolean q) {}",
-            "  void h(boolean arg0, boolean arg1) {}",
-            "  {",
-            "    f(/* foo= */ true);",
-            "    f(false); // one arg",
-            "    f(/* foo= */ true, /* bar= */ false);",
-            "    f(/* foo= */ false, /* bar= */ false);",
-            "    f_boxed(/* foo= */ false, /* bar= */ false);",
-            "    g(false, false); // single-char",
-            "    h(false, false); // synthetic",
-            "    new Test(/* foo= */ false);",
-            "  }",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            class Test {
+              Test(boolean foo) {}
+
+              void f(boolean foo) {}
+
+              void f(boolean foo, boolean bar) {}
+
+              void f_boxed(Boolean foo, Boolean bar) {}
+
+              void g(boolean p, boolean q) {}
+
+              void h(boolean arg0, boolean arg1) {}
+
+              {
+                f(/* foo= */ true);
+                f(false); // one arg
+                f(/* foo= */ true, /* bar= */ false);
+                f(/* foo= */ false, /* bar= */ false);
+                f_boxed(/* foo= */ false, /* bar= */ false);
+                g(false, false); // single-char
+                h(false, false); // synthetic
+                new Test(/* foo= */ false);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -79,19 +93,23 @@ public class BooleanParameterTest {
     BugCheckerRefactoringTestHelper.newInstance(BooleanParameter.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  private static class Generic<T> {",
-            "    private void doIt(T first, T second, T third) {}",
-            "  }",
-            "  void f(Object foo, Object bar) {}",
-            "  {",
-            "    Generic<Boolean> myGeneric = new Generic<>();",
-            "    myGeneric.doIt(false, false, false);",
-            "    f(false, false);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static class Generic<T> {
+                private void doIt(T first, T second, T third) {}
+              }
+
+              void f(Object foo, Object bar) {}
+
+              {
+                Generic<Boolean> myGeneric = new Generic<>();
+                myGeneric.doIt(false, false, false);
+                f(false, false);
+              }
+            }
+            """)
         .expectUnchanged()
-        .doTest(TEXT_MATCH);
+        .doTest();
   }
 
   @Test
@@ -99,10 +117,13 @@ public class BooleanParameterTest {
     CompilationTestHelper.newInstance(BooleanParameter.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.util.concurrent.atomic.AtomicBoolean;",
-            "class Test {",
-            "  private static final AtomicBoolean b = new AtomicBoolean(false);",
-            "}")
+            """
+            import java.util.concurrent.atomic.AtomicBoolean;
+
+            class Test {
+              private static final AtomicBoolean b = new AtomicBoolean(false);
+            }
+            """)
         .doTest();
   }
 }

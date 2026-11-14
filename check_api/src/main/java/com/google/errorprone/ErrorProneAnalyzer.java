@@ -19,10 +19,15 @@ package com.google.errorprone;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Throwables.getStackTraceAsString;
 import static com.google.common.base.Verify.verify;
+import static java.util.Comparator.comparing;
 
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.ErrorProneOptions.Severity;
+import com.google.errorprone.RefactoringCollection.RefactoringResult;
 import com.google.errorprone.scanner.ErrorProneScannerTransformer;
 import com.google.errorprone.scanner.ScannerSupplier;
 import com.google.errorprone.util.ASTHelpers;
@@ -39,15 +44,20 @@ import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.Log;
+import com.sun.tools.javac.util.Log.WriterKind;
 import com.sun.tools.javac.util.PropagatedException;
+import java.io.PrintWriter;
+import java.time.Duration;
 import java.util.HashSet;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 import javax.tools.JavaFileObject;
+import org.safere.Pattern;
 
 /** A {@link TaskListener} that runs Error Prone over attributed compilation units. */
 @Trusted
-public class ErrorProneAnalyzer implements TaskListener {
+public final class ErrorProneAnalyzer implements TaskListener {
 
   // The set of trees that have already been scanned.
   private final Set<Tree> seen = new HashSet<>();
@@ -56,6 +66,75 @@ public class ErrorProneAnalyzer implements TaskListener {
   private final ErrorProneOptions errorProneOptions;
   private final Context context;
   private final DescriptionListener.Factory descriptionListenerFactory;
+
+  public static ErrorProneAnalyzer createAnalyzer(
+      ScannerSupplier scannerSupplier,
+      ErrorProneOptions epOptions,
+      Context context,
+      RefactoringCollection[] refactoringCollection) {
+    if (!epOptions.patchingOptions().doRefactor()) {
+      return createByScanningForPlugins(scannerSupplier, epOptions, context);
+    }
+    refactoringCollection[0] = RefactoringCollection.refactor(epOptions.patchingOptions(), context);
+
+    // Refaster refactorer or using builtin checks
+    Supplier<CodeTransformer> codeTransformer =
+        epOptions
+            .patchingOptions()
+            .customRefactorer()
+            .or(
+                Suppliers.memoize(() -> {
+                  ImmutableSet<String> namedCheckers = epOptions.patchingOptions().namedCheckers();
+                  ScannerSupplier toUse =
+                      ErrorPronePlugins.loadPlugins(scannerSupplier, context)
+                          .applyOverrides(epOptions)
+                          .filter(bci -> {
+                            String name = bci.canonicalName();
+                            return epOptions.getSeverityMap().get(name) != Severity.OFF
+                                && (namedCheckers.isEmpty() || namedCheckers.contains(name));
+                          });
+                  return ErrorProneScannerTransformer.create(toUse.get());
+                }));
+
+    return createWithCustomDescriptionListener(
+        codeTransformer, epOptions, context, refactoringCollection[0]);
+  }
+
+  /** A {@link TaskListener} that performs refactorings. */
+  public static class RefactoringTask implements TaskListener {
+
+    private final Context context;
+    private final RefactoringCollection refactoringCollection;
+
+    public RefactoringTask(Context context, RefactoringCollection refactoringCollection) {
+      this.context = context;
+      this.refactoringCollection = refactoringCollection;
+    }
+
+    @Override
+    public void started(TaskEvent event) {}
+
+    @Override
+    public void finished(TaskEvent event) {
+      if (event.getKind() != Kind.GENERATE) {
+        return;
+      }
+      RefactoringResult refactoringResult;
+      try {
+        refactoringResult = refactoringCollection.applyChanges(event.getSourceFile().toUri());
+      } catch (Exception e) {
+        PrintWriter out = Log.instance(context).getWriter(WriterKind.ERROR);
+        out.println(e.getMessage());
+        out.flush();
+        return;
+      }
+      if (refactoringResult.type() == RefactoringCollection.RefactoringResultType.CHANGED) {
+        PrintWriter out = Log.instance(context).getWriter(WriterKind.NOTICE);
+        out.println(refactoringResult.message());
+        out.flush();
+      }
+    }
+  }
 
   public static ErrorProneAnalyzer createByScanningForPlugins(
       ScannerSupplier scannerSupplier, ErrorProneOptions errorProneOptions, Context context) {
@@ -68,31 +147,31 @@ public class ErrorProneAnalyzer implements TaskListener {
 
   private static Supplier<CodeTransformer> scansPlugins(
       ScannerSupplier scannerSupplier, ErrorProneOptions errorProneOptions, Context context) {
-    return Suppliers.memoize(
-        () -> {
-          // we can't load plugins from the processorpath until the filemanager has been
-          // initialized, so do it lazily
-          try {
-            return ErrorProneScannerTransformer.create(
-                ErrorPronePlugins.loadPlugins(scannerSupplier, context)
-                    .applyOverrides(errorProneOptions)
-                    .get());
-          } catch (InvalidCommandLineOptionException e) {
-            throw new PropagatedException(e);
-          }
-        });
+    return Suppliers.memoize(() -> {
+      // we can't load plugins from the processorpath until the filemanager has been
+      // initialized, so do it lazily
+      ErrorProneTimings timings = ErrorProneTimings.instance(context);
+      try (AutoCloseable unused = timings.initializationTimeSpan()) {
+        return ErrorProneScannerTransformer.create(
+            ErrorPronePlugins.loadPlugins(scannerSupplier, context)
+                .applyOverrides(errorProneOptions)
+                .get());
+      } catch (InvalidCommandLineOptionException e) {
+        throw new PropagatedException(e);
+      } catch (Exception e) {
+        // for the timing span, should be impossible
+        throw new AssertionError(e);
+      }
+    });
   }
 
   static ErrorProneAnalyzer createWithCustomDescriptionListener(
-      CodeTransformer codeTransformer,
+      Supplier<CodeTransformer> codeTransformer,
       ErrorProneOptions errorProneOptions,
       Context context,
       DescriptionListener.Factory descriptionListenerFactory) {
     return new ErrorProneAnalyzer(
-        Suppliers.ofInstance(codeTransformer),
-        errorProneOptions,
-        context,
-        descriptionListenerFactory);
+        codeTransformer, errorProneOptions, context, descriptionListenerFactory);
   }
 
   private ErrorProneAnalyzer(
@@ -104,15 +183,48 @@ public class ErrorProneAnalyzer implements TaskListener {
     this.errorProneOptions = checkNotNull(errorProneOptions);
     this.descriptionListenerFactory = checkNotNull(descriptionListenerFactory);
 
-    Context errorProneContext = new SubContext(context);
-    errorProneContext.put(ErrorProneOptions.class, errorProneOptions);
-    this.context = errorProneContext;
+    if (context.get(ErrorProneOptions.class) == null) {
+      context.put(ErrorProneOptions.class, errorProneOptions);
+    }
+    this.context = context;
   }
 
   private int errorProneErrors = 0;
 
+  /** Prints how long each check ran, slowest first. */
+  private void printTimings() {
+    ErrorProneTimings timings = ErrorProneTimings.instance(context);
+    ImmutableMap<String, Duration> checkDurations = timings.timings();
+    if (checkDurations.isEmpty()) {
+      return;
+    }
+    Duration total = checkDurations.values().stream().reduce(Duration.ZERO, Duration::plus);
+    PrintWriter out = Log.instance(context).getWriter(WriterKind.NOTICE);
+    out.printf(
+        Locale.ROOT,
+        "Error Prone ran %d checks in %d ms, and spent %d ms initializing%n",
+        checkDurations.size(),
+        total.toMillis(),
+        timings.initializationTime().toMillis());
+    checkDurations.entrySet().stream()
+        .sorted(comparing((Map.Entry<String, Duration> e) -> e.getValue()).reversed())
+        .forEach(e ->
+            out.printf(
+                Locale.ROOT,
+                "  %8d ms  %5.1f%%  %s%n",
+                e.getValue().toMillis(),
+                total.isZero() ? 0.0 : 100.0 * e.getValue().toNanos() / total.toNanos(),
+                e.getKey()));
+    out.flush();
+  }
+
   @Override
   public void finished(TaskEvent taskEvent) {
+    if (taskEvent.getKind() == Kind.COMPILATION) {
+      if (errorProneOptions.printTimings()) {
+        printTimings();
+      }
+    }
     if (taskEvent.getKind() != Kind.ANALYZE) {
       return;
     }
@@ -131,7 +243,7 @@ public class ErrorProneAnalyzer implements TaskListener {
         descriptionListenerFactory.getDescriptionListener(log, compilation);
     DescriptionListener countingDescriptionListener =
         d -> {
-          if (d.severity == SeverityLevel.ERROR) {
+          if (d.severity() == SeverityLevel.ERROR) {
             errorProneErrors++;
           }
           descriptionListener.onDescribed(d);
@@ -141,7 +253,7 @@ public class ErrorProneAnalyzer implements TaskListener {
       if (shouldExcludeSourceFile(compilation)) {
         return;
       }
-      if (path.getLeaf().getKind() == Tree.Kind.COMPILATION_UNIT) {
+      if (path.getLeaf() instanceof CompilationUnitTree) {
         // We only get TaskEvents for compilation units if they contain no package declarations
         // (e.g. package-info.java files).  In this case it's safe to analyze the
         // CompilationUnitTree immediately.
@@ -168,20 +280,9 @@ public class ErrorProneAnalyzer implements TaskListener {
       // symbol's supertypes. If javac didn't need to check the symbol's assignability
       // then a normal compilation would have succeeded, and no diagnostics will have been
       // reported yet, but we don't want to crash javac.
-      log.error("proc.cant.access", e.sym, getDetailValue(e), getStackTraceAsString(e));
+      log.error("proc.cant.access", e.sym, e.getDetailValue(), getStackTraceAsString(e));
     } finally {
       log.useSource(originalSource);
-    }
-  }
-
-  private static Object getDetailValue(CompletionFailure completionFailure) {
-    try {
-      // The return type of getDetailValue() changed from Object to JCDiagnostic in JDK 10,
-      // but the rest of the signature is unchanged between the two versions,
-      // see https://bugs.openjdk.java.net/browse/JDK-817032,
-      return CompletionFailure.class.getMethod("getDetailValue").invoke(completionFailure);
-    } catch (ReflectiveOperationException e) {
-      throw new LinkageError(e.getMessage(), e);
     }
   }
 
@@ -197,19 +298,20 @@ public class ErrorProneAnalyzer implements TaskListener {
     OUTER:
     for (Tree decl : tree.getTypeDecls()) {
       switch (decl.getKind()) {
-        case EMPTY_STATEMENT:
+        case EMPTY_STATEMENT -> {
           // ignore ";" at the top level, which counts as an empty type decl
           continue OUTER;
-        case IMPORT:
+        }
+        case IMPORT -> {
           // The spec disallows mixing imports and empty top-level declarations (";"), but
           // javac has a bug that causes it to accept empty declarations interspersed with imports:
-          // http://mail.openjdk.java.net/pipermail/compiler-dev/2013-August/006968.html
+          // https://mail.openjdk.java.net/pipermail/compiler-dev/2013-August/006968.html
           //
           // Any import declarations after the first semi are incorrectly added to the list
           // of type declarations, so we have to skip over them here.
           continue OUTER;
-        default:
-          break;
+        }
+        default -> {}
       }
       if (!seen.contains(decl)) {
         return false;

@@ -40,7 +40,6 @@ import com.sun.source.tree.MethodInvocationTree;
  * @author kak@google.com (Kurt Alfred Kluever)
  */
 @BugPattern(
-    name = "ZoneIdOfZ",
     summary = "Use ZoneOffset.UTC instead of ZoneId.of(\"Z\").",
     explanation =
         "Avoid the magic constant (ZoneId.of(\"Z\")) in favor of a more descriptive API: "
@@ -57,7 +56,7 @@ public final class ZoneIdOfZ extends BugChecker implements MethodInvocationTreeM
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (ZONE_ID_OF.matches(tree, state)) {
-      String zone = constValue(tree.getArguments().get(0), String.class);
+      String zone = constValue(tree.getArguments().getFirst(), String.class);
       if (zone != null && zone.equals("Z")) {
         SuggestedFix.Builder fix = SuggestedFix.builder().addImport(ZONE_OFFSET);
         fix.replace(tree, String.format("%s.UTC", qualifyType(state, fix, ZONE_OFFSET)));

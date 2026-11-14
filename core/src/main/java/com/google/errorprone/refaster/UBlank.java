@@ -18,30 +18,25 @@ package com.google.errorprone.refaster;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ContiguousSet;
 import com.google.common.collect.DiscreteDomain;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Range;
-import com.google.errorprone.refaster.UStatement.UnifierWithUnconsumedStatements;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.util.ListBuffer;
-import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 /** Equivalent to a no-arg block placeholder invocation. */
-@AutoValue
-abstract class UBlank implements UStatement {
+record UBlank(UUID unique) implements UStatement {
   static UBlank create() {
-    return new AutoValue_UBlank(UUID.randomUUID());
+    return new UBlank(UUID.randomUUID());
   }
-
-  abstract UUID unique();
 
   Key key() {
     return new Key(unique());
@@ -82,13 +77,11 @@ abstract class UBlank implements UStatement {
   }
 
   @Override
-  public Choice<UnifierWithUnconsumedStatements> apply(
-      final UnifierWithUnconsumedStatements state) {
+  public Choice<UnifierWithUnconsumedStatements> apply(UnifierWithUnconsumedStatements state) {
     int goodIndex = 0;
     while (goodIndex < state.unconsumedStatements().size()) {
       StatementTree stmt = state.unconsumedStatements().get(goodIndex);
-      // If the statement refers to bound variables or doesn't always exit, stop consuming
-      // statements.
+      // If the statement refers to bound variables or might exit, stop consuming statements.
       if (firstNonNull(FORBIDDEN_REFERENCE_SCANNER.scan(stmt, state.unifier()), false)
           || ControlFlowVisitor.INSTANCE.visitStatement(stmt)
               != ControlFlowVisitor.Result.NEVER_EXITS) {
@@ -97,24 +90,23 @@ abstract class UBlank implements UStatement {
         goodIndex++;
       }
     }
-    Collection<Integer> breakPoints =
+    ImmutableSortedSet<Integer> breakPoints =
         ContiguousSet.create(Range.closed(0, goodIndex), DiscreteDomain.integers());
     return Choice.from(breakPoints)
-        .transform(
-            (Integer k) -> {
-              Unifier unifier = state.unifier().fork();
-              unifier.putBinding(key(), state.unconsumedStatements().subList(0, k));
-              List<? extends StatementTree> remaining =
-                  state.unconsumedStatements().subList(k, state.unconsumedStatements().size());
-              return UnifierWithUnconsumedStatements.create(unifier, remaining);
-            });
+        .map((Integer k) -> {
+          Unifier unifier = state.unifier().fork();
+          unifier.putBinding(key(), state.unconsumedStatements().subList(0, k));
+          ImmutableList<? extends StatementTree> remaining =
+              state.unconsumedStatements().subList(k, state.unconsumedStatements().size());
+          return UnifierWithUnconsumedStatements.create(unifier, remaining);
+        });
   }
 
   @Override
   public com.sun.tools.javac.util.List<JCStatement> inlineStatements(Inliner inliner) {
     ListBuffer<JCStatement> buffer = new ListBuffer<>();
     for (StatementTree stmt :
-        inliner.getOptionalBinding(key()).or(ImmutableList.<StatementTree>of())) {
+        inliner.getOptionalBinding(key()).orElse(ImmutableList.<StatementTree>of())) {
       buffer.add((JCStatement) stmt);
     }
     return buffer.toList();

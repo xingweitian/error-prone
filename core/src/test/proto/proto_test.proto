@@ -28,6 +28,14 @@ message TestProtoMessage {
   optional TestFieldProtoMessage message = 1;
   repeated TestFieldProtoMessage multi_field = 2;
   optional int32 test_field_named_count = 3;
+  optional bool boolean_field = 4;
+  map<int32, int32> weight = 5;
+  /* Named ending in "builder" to check the Java builder API */
+  optional TestFieldProtoMessage foo_builder = 6;
+
+  optional string string_field = 7;
+
+  optional TestEnumWithUnrecognizedValue enum_field = 8;
 
   extensions 100 to 199;
 }
@@ -37,7 +45,21 @@ message TestOneOfMessage {
     string foo = 1;
     string bar = 2;
     string baz = 3;
+    TestEnum enum_field = 6;
   }
+  oneof AnotherOneOf {
+    string quux = 4;
+    string frobber = 5;
+  }
+}
+
+message TestProtoWithConfusingNames {
+  optional TestEnum foo_field = 1;
+  optional int32 foo_field_value = 2;
+
+  // Fields that both collide, and are named in camelcase.
+  optional TestEnum barField = 3;
+  optional int32 barFieldValue = 4;
 }
 
 message TestMessageContainingOneOfMessage {
@@ -47,4 +69,11 @@ message TestMessageContainingOneOfMessage {
 enum TestEnum {
   UNSPECIFIED = 0;
   TEST_ENUM_VAL = 1;
+}
+
+enum TestEnumWithUnrecognizedValue {
+  TEST_ENUM_UNKNOWN = 0;
+  A = 1;
+  B = 2;
+  UNRECOGNIZED = 3;
 }

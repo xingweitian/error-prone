@@ -16,6 +16,10 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.util.ASTHelpers.enclosingPackage;
+import static com.google.errorprone.util.ASTHelpers.getEnclosedElements;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static java.lang.String.format;
 import static java.util.stream.Collectors.toCollection;
 
 import com.google.common.collect.ImmutableSet;
@@ -23,7 +27,6 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.code.Symbol;
@@ -44,7 +47,6 @@ import javax.lang.model.type.TypeKind;
  * @author mariasam@google.com (Maria Sam)
  */
 @BugPattern(
-    name = "HidingField",
     summary = "Hiding fields of superclasses may cause confusion and errors",
     severity = WARNING,
     altNames = {"hiding", "OvershadowingSubclassFields"})
@@ -59,18 +61,17 @@ public class HidingField extends BugChecker implements ClassTreeMatcher {
         classTree.getMembers().stream()
             .filter(mem -> mem instanceof VariableTree)
             .map(mem -> (VariableTree) mem)
-            .filter(
-                mem ->
-                    !isSuppressed(ASTHelpers.getSymbol(mem))
-                        && !isIgnoredType(mem)
-                        && !isStatic(mem))
+            .filter(mem ->
+                !isSuppressed(getSymbol(mem), visitorState)
+                    && !isIgnoredType(mem)
+                    && !isStatic(mem))
             .collect(toCollection(ArrayList::new));
 
-    ClassSymbol classSymbol = ASTHelpers.getSymbol(classTree);
+    ClassSymbol classSymbol = getSymbol(classTree);
 
     while (!classSymbol.getSuperclass().getKind().equals(TypeKind.NONE)) {
       TypeSymbol parentSymbol = classSymbol.getSuperclass().asElement();
-      List<Symbol> parentElements = parentSymbol.getEnclosedElements();
+      List<Symbol> parentElements = getEnclosedElements(parentSymbol);
 
       Map<Name, VarSymbol> parentMembers =
           parentElements.stream()
@@ -113,9 +114,10 @@ public class HidingField extends BugChecker implements ClassTreeMatcher {
         Description.Builder matchDesc = buildDescription(origVariable);
 
         matchDesc.setMessage(
-            "Hiding fields of superclasses may cause confusion and errors. "
-                + "This field is hiding a field of the same name in superclass: "
-                + parentClassName);
+            format(
+                "Hiding fields of superclasses may cause confusion and errors. "
+                    + "This field is hiding %s.%s.",
+                parentClassName, origVariable.getName()));
 
         visitorState.reportMatch(matchDesc.build());
         origVariableIterator.remove();
@@ -124,13 +126,7 @@ public class HidingField extends BugChecker implements ClassTreeMatcher {
   }
 
   private static boolean isIgnoredType(VariableTree variableTree) {
-    VarSymbol varSymbol = ASTHelpers.getSymbol(variableTree);
-
-    if (varSymbol != null) { // varSymbol is null when variable is primitive type
-      return IGNORED_CLASSES.contains(varSymbol.getQualifiedName().toString());
-    }
-
-    return false;
+    return IGNORED_CLASSES.contains(getSymbol(variableTree).getQualifiedName().toString());
   }
 
   private static boolean isStatic(VariableTree varTree) {
@@ -143,7 +139,7 @@ public class HidingField extends BugChecker implements ClassTreeMatcher {
         && !parentVariable.getModifiers().contains(Modifier.PROTECTED)
         && !parentVariable.getModifiers().contains(Modifier.PUBLIC)) { // package-private variable
 
-      if (!parentVariable.packge().equals(ASTHelpers.getSymbol(currClass).packge())) {
+      if (!enclosingPackage(parentVariable).equals(enclosingPackage(getSymbol(currClass)))) {
         return true;
       }
     }

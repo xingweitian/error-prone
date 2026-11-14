@@ -16,24 +16,28 @@
 
 package com.google.errorprone.fixes;
 
+import static com.google.common.collect.Streams.stream;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.fixes.SuggestedFix.emptyFix;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.isSameType;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import static org.junit.Assume.assumeTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.errorprone.BaseErrorProneJavaCompiler;
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.CompilationTestHelper;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
+import com.google.errorprone.bugpatterns.BugChecker.AnnotationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.LiteralTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
@@ -44,11 +48,15 @@ import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.bugpatterns.RemoveUnusedImports;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.scanner.ScannerSupplier;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
-import com.google.errorprone.util.RuntimeVersion;
 import com.sun.source.doctree.LinkTree;
+import com.sun.source.tree.AnnotationTree;
+import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.MethodInvocationTree;
@@ -60,20 +68,32 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.DocTreePath;
 import com.sun.source.util.DocTreePathScanner;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.tree.DCTree;
+import com.sun.tools.javac.tree.DCTree.DCDocComment;
+import com.sun.tools.javac.tree.DocCommentTable;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.util.Context;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.lang.annotation.Retention;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.function.Function;
 import javax.lang.model.element.Modifier;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaFileObject;
+import javax.tools.StandardLocation;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 @RunWith(JUnit4.class)
 public class SuggestedFixesTest {
 
@@ -92,9 +112,9 @@ public class SuggestedFixesTest {
   }
 
   /** Test checker that adds or removes modifiers. */
-  @BugPattern(name = "EditModifiers", summary = "Edits modifiers", severity = ERROR)
-  public static class EditModifiersChecker extends BugChecker
-      implements VariableTreeMatcher, MethodTreeMatcher {
+  @BugPattern(summary = "Edits modifiers", severity = ERROR)
+  public static final class EditModifiersChecker extends BugChecker
+      implements ClassTreeMatcher, VariableTreeMatcher, MethodTreeMatcher {
 
     static final ImmutableMap<String, Modifier> MODIFIERS_BY_NAME = createModifiersByName();
 
@@ -103,7 +123,7 @@ public class SuggestedFixesTest {
       for (Modifier mod : Modifier.values()) {
         builder.put(mod.toString(), mod);
       }
-      return builder.build();
+      return builder.buildOrThrow();
     }
 
     @Override
@@ -116,26 +136,35 @@ public class SuggestedFixesTest {
       return editModifiers(tree, state);
     }
 
+    @Override
+    public Description matchClass(ClassTree tree, VisitorState state) {
+      return editModifiers(tree, state);
+    }
+
     private Description editModifiers(Tree tree, VisitorState state) {
       EditModifiers editModifiers =
-          ASTHelpers.getAnnotation(
-              ASTHelpers.findEnclosingNode(state.getPath(), ClassTree.class), EditModifiers.class);
+          stream(state.getPath())
+              .skip(1)
+              .map(t ->
+                  t instanceof ClassTree ct
+                      ? ASTHelpers.getAnnotation(ct, EditModifiers.class)
+                      : null)
+              .filter(x -> x != null)
+              .findFirst()
+              .orElse(null);
+      if (editModifiers == null) {
+        return NO_MATCH;
+      }
       SuggestedFix.Builder fix = SuggestedFix.builder();
       Modifier[] mods =
           Arrays.stream(editModifiers.value())
               .map(v -> Verify.verifyNotNull(MODIFIERS_BY_NAME.get(v), v))
               .toArray(Modifier[]::new);
       switch (editModifiers.kind()) {
-        case ADD:
-          fix.merge(SuggestedFixes.addModifiers(tree, state, mods).orElse(null));
-          break;
-        case REMOVE:
-          fix.merge(SuggestedFixes.removeModifiers(tree, state, mods).orElse(null));
-          break;
-        default:
-          throw new AssertionError(editModifiers.kind());
+        case ADD -> fix.merge(SuggestedFixes.addModifiers(tree, state, mods).orElse(null));
+        case REMOVE -> fix.merge(SuggestedFixes.removeModifiers(tree, state, mods).orElse(null));
       }
-      return describeMatch(tree, fix.build());
+      return fix.isEmpty() ? NO_MATCH : describeMatch(tree, fix.build());
     }
   }
 
@@ -143,28 +172,34 @@ public class SuggestedFixesTest {
   public void addAtBeginningOfLine() {
     BugCheckerRefactoringTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addInputLines(
-            "in/Test.java",
-            "import javax.annotation.Nullable;",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "@EditModifiers(value=\"final\", kind=EditModifiers.EditKind.ADD)",
-            "class Test {",
-            "  @Nullable",
-            "  int foo() {",
-            "    return 10;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+            import javax.annotation.Nullable;
+
+            @EditModifiers(value = "final", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              @Nullable
+              int foo() {
+                return 10;
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "import javax.annotation.Nullable;",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "@EditModifiers(value=\"final\", kind=EditModifiers.EditKind.ADD)",
-            "class Test {",
-            "  @Nullable",
-            "  final int foo() {",
-            "    return 10;",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+            import javax.annotation.Nullable;
+
+            @EditModifiers(value = "final", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              @Nullable
+              final int foo() {
+                return 10;
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -172,21 +207,80 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "import javax.annotation.Nullable;",
-            "@EditModifiers(value=\"final\", kind=EditModifiers.EditKind.ADD)",
-            "class Test {",
-            "  // BUG: Diagnostic contains: final Object one",
-            "  Object one;",
-            "  // BUG: Diagnostic contains: @Nullable final Object two",
-            "  @Nullable Object two;",
-            "  // BUG: Diagnostic contains: @Nullable public final Object three",
-            "  @Nullable public Object three;",
-            "  // BUG: Diagnostic contains: public final Object four",
-            "  public Object four;",
-            "  // BUG: Diagnostic contains: public final @Nullable Object five",
-            "  public @Nullable Object five;",
-            "}")
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+            import javax.annotation.Nullable;
+
+            @EditModifiers(value = "final", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              // BUG: Diagnostic contains: final Object one
+              Object one;
+              // BUG: Diagnostic contains: @Nullable final Object two
+              @Nullable Object two;
+              // BUG: Diagnostic contains: @Nullable public final Object three
+              @Nullable public Object three;
+              // BUG: Diagnostic contains: public final Object four
+              public Object four;
+              // BUG: Diagnostic contains: public final @Nullable Object five
+              public @Nullable Object five;
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void addModifiers_nonSealed() {
+    CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(value = "non-sealed", kind = EditModifiers.EditKind.ADD)
+            sealed interface Test {
+              // BUG: Diagnostic contains: non-sealed final class One
+              final class One extends Object {}
+
+              public non-sealed class Two implements Test {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void addModifiers_nonSealedClass() {
+    CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(value = "public", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              // BUG: Diagnostic contains: public sealed interface A
+              sealed interface A {}
+
+              // BUG: Diagnostic contains: public non-sealed class B
+              non-sealed class B implements A {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void removeModifiers_nonSealed() {
+    CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(value = "non-sealed", kind = EditModifiers.EditKind.REMOVE)
+            sealed interface Test {
+              // BUG: Diagnostic contains: public class One
+              public non-sealed class One implements Test {}
+            }
+            """)
         .doTest();
   }
 
@@ -195,17 +289,17 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "import javax.annotation.Nullable;",
-            "@EditModifiers(value=\"final\", kind=EditModifiers.EditKind.ADD)",
-            "class Test {",
-            "  // BUG: Diagnostic contains:"
-                + " private @Deprecated /*comment*/ final volatile Object one;",
-            "  private @Deprecated /*comment*/ volatile Object one;",
-            "  // BUG: Diagnostic contains:"
-                + " private @Deprecated /*comment*/ static final Object two = null;",
-            "  private @Deprecated /*comment*/ static Object two = null;",
-            "}")
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(value = "final", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              // BUG: Diagnostic contains: private @Deprecated /*comment*/ final volatile Object one;
+              private @Deprecated /*comment*/ volatile Object one;
+              // BUG: Diagnostic contains: private @Deprecated /*comment*/ static final Object two = null;
+              private @Deprecated /*comment*/ static Object two = null;
+            }
+            """)
         .doTest();
   }
 
@@ -214,13 +308,15 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "import javax.annotation.Nullable;",
-            "@EditModifiers(value=\"public\", kind=EditModifiers.EditKind.ADD)",
-            "class Test {",
-            "  // BUG: Diagnostic contains: public static final transient Object one",
-            "  static final transient Object one = null;",
-            "}")
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(value = "public", kind = EditModifiers.EditKind.ADD)
+            class Test {
+              // BUG: Diagnostic contains: public static final transient Object one
+              static final transient Object one = null;
+            }
+            """)
         .doTest();
   }
 
@@ -229,19 +325,22 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "import javax.annotation.Nullable;",
-            "@EditModifiers(value=\"final\", kind=EditModifiers.EditKind.REMOVE)",
-            "class Test {",
-            "  // BUG: Diagnostic contains: Object one",
-            "  final Object one = null;",
-            "  // BUG: Diagnostic contains: @Nullable Object two",
-            "  @Nullable final Object two = null;",
-            "  // BUG: Diagnostic contains: @Nullable public Object three",
-            "  @Nullable public final Object three = null;",
-            "  // BUG: Diagnostic contains: public Object four",
-            "  public final Object four = null;",
-            "}")
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+            import javax.annotation.Nullable;
+
+            @EditModifiers(value = "final", kind = EditModifiers.EditKind.REMOVE)
+            class Test {
+              // BUG: Diagnostic contains: Object one
+              final Object one = null;
+              // BUG: Diagnostic contains: @Nullable Object two
+              @Nullable final Object two = null;
+              // BUG: Diagnostic contains: @Nullable public Object three
+              @Nullable public final Object three = null;
+              // BUG: Diagnostic contains: public Object four
+              public final Object four = null;
+            }
+            """)
         .doTest();
   }
 
@@ -250,18 +349,22 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(EditModifiersChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            String.format("import %s;", EditModifiers.class.getCanonicalName()),
-            "import javax.annotation.Nullable;",
-            "@EditModifiers(value={\"final\", \"static\"}, kind=EditModifiers.EditKind.REMOVE)",
-            "class Test {",
-            "  // BUG: Diagnostic contains: private Object one = null;",
-            "  private static final Object one = null;",
-            "}")
+            """
+            import com.google.errorprone.fixes.SuggestedFixesTest.EditModifiers;
+
+            @EditModifiers(
+                value = {"final", "static"},
+                kind = EditModifiers.EditKind.REMOVE)
+            class Test {
+              // BUG: Diagnostic contains: private Object one = null;
+              private static final Object one = null;
+            }
+            """)
         .doTest();
   }
 
   /** Test checker that casts returned expression. */
-  @BugPattern(name = "CastReturn", severity = ERROR, summary = "Adds casts to returned expressions")
+  @BugPattern(severity = ERROR, summary = "Adds casts to returned expressions")
   public static class CastReturn extends BugChecker implements ReturnTreeMatcher {
 
     @Override
@@ -280,7 +383,7 @@ public class SuggestedFixesTest {
   }
 
   /** Test checker that casts returned expression. */
-  @BugPattern(name = "CastReturn", severity = ERROR, summary = "Adds casts to returned expressions")
+  @BugPattern(severity = ERROR, summary = "Adds casts to returned expressions")
   public static class CastReturnFullType extends BugChecker implements ReturnTreeMatcher {
 
     @Override
@@ -299,16 +402,18 @@ public class SuggestedFixesTest {
   }
 
   @Test
-  public void qualifiedName_Object() {
+  public void qualifiedName_object() {
     CompilationTestHelper.newInstance(CastReturn.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  Object f() {",
-            "    // BUG: Diagnostic contains: return (Object) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              Object f() {
+                // BUG: Diagnostic contains: return (Object) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -317,13 +422,16 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturn.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.util.Map.Entry;",
-            "class Test {",
-            "  java.util.Map.Entry<String, Integer> f() {",
-            "    // BUG: Diagnostic contains: return (Entry) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import java.util.Map.Entry;
+
+            class Test {
+              java.util.Map.Entry<String, Integer> f() {
+                // BUG: Diagnostic contains: return (Entry) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -332,12 +440,14 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturn.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  java.util.Map.Entry<String, Integer> f() {",
-            "    // BUG: Diagnostic contains: return (Map.Entry) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              java.util.Map.Entry<String, Integer> f() {
+                // BUG: Diagnostic contains: return (Map.Entry) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -346,26 +456,30 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturn.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test<T> {",
-            "  T f() {",
-            "    // BUG: Diagnostic contains: return (T) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test<T> {
+              T f() {
+                // BUG: Diagnostic contains: return (T) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void fullQualifiedName_Object() {
+  public void fullQualifiedName_object() {
     CompilationTestHelper.newInstance(CastReturnFullType.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  Object f() {",
-            "    // BUG: Diagnostic contains: return (Object) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              Object f() {
+                // BUG: Diagnostic contains: return (Object) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -374,13 +488,16 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturnFullType.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.util.Map.Entry;",
-            "class Test {",
-            "  java.util.Map.Entry<String, Integer> f() {",
-            "    // BUG: Diagnostic contains: return (Entry<String,Integer>) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import java.util.Map.Entry;
+
+            class Test {
+              java.util.Map.Entry<String, Integer> f() {
+                // BUG: Diagnostic contains: return (Entry<String, Integer>) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -389,12 +506,14 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturnFullType.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  java.util.Map.Entry<String, Integer> f() {",
-            "    // BUG: Diagnostic contains: return (Map.Entry<String,Integer>) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              java.util.Map.Entry<String, Integer> f() {
+                // BUG: Diagnostic contains: return (Map.Entry<String, Integer>) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -403,21 +522,25 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(CastReturnFullType.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test<T> {",
-            "  T f() {",
-            "    // BUG: Diagnostic contains: return (T) null;",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test<T> {
+              T f() {
+                // BUG: Diagnostic contains: return (T) null;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
+  private static final Supplier<Type> SOMEANNOTATION = typeFromString("some.pkg.SomeAnnotation");
+
   /** A test check that adds an annotation to all return types. */
-  @BugPattern(name = "AddAnnotation", summary = "Add an annotation", severity = ERROR)
+  @BugPattern(summary = "Add an annotation", severity = ERROR)
   public static class AddAnnotation extends BugChecker implements BugChecker.MethodTreeMatcher {
     @Override
     public Description matchMethod(MethodTree tree, VisitorState state) {
-      Type type = state.getTypeFromString("some.pkg.SomeAnnotation");
+      Type type = SOMEANNOTATION.get(state);
       SuggestedFix.Builder builder = SuggestedFix.builder();
       String qualifiedName = SuggestedFixes.qualifyType(state, builder, type);
       return describeMatch(
@@ -430,8 +553,11 @@ public class SuggestedFixesTest {
       return BugCheckerRefactoringTestHelper.newInstance(AddAnnotation.class, clazz)
           .addInputLines(
               "in/some/pkg/SomeAnnotation.java",
-              "package some.pkg;",
-              "public @interface SomeAnnotation {}")
+              """
+              package some.pkg;
+
+              public @interface SomeAnnotation {}
+              """)
           .expectUnchanged();
     }
   }
@@ -441,18 +567,31 @@ public class SuggestedFixesTest {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
             "in/AddAnnotation.java",
-            "import some.pkg.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void nullable = null;",
-            "  Void foo() { return null; }",
-            "}")
+            """
+            import some.pkg.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation Void nullable = null;
+
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "import some.pkg.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void nullable = null;",
-            "  @SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            import some.pkg.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation Void nullable = null;
+
+              @SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -460,31 +599,57 @@ public class SuggestedFixesTest {
   public void qualifyType_importType() {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
-            "in/AddAnnotation.java", "class AddAnnotation {", "  Void foo() { return null; }", "}")
+            "in/AddAnnotation.java",
+            """
+            class AddAnnotation {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "import some.pkg.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            import some.pkg.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void qualifyType_someOtherNullable() {
     AddAnnotation.testHelper(getClass())
-        .addInputLines("in/SomeAnnotation.java", "@interface SomeAnnotation {}")
+        .addInputLines(
+            "in/SomeAnnotation.java", //
+            "@interface SomeAnnotation {}")
         .expectUnchanged()
         .addInputLines(
             "in/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            class AddAnnotation {
+              @SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  @SomeAnnotation @some.pkg.SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            class AddAnnotation {
+              @SomeAnnotation
+              @some.pkg.SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -493,16 +658,27 @@ public class SuggestedFixesTest {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
             "in/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  Void foo() { return null; }",
-            "  @interface SomeAnnotation {}",
-            "}")
+            """
+            class AddAnnotation {
+              Void foo() {
+                return null;
+              }
+
+              @interface SomeAnnotation {}
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  @some.pkg.SomeAnnotation Void foo() { return null; }",
-            "  @interface SomeAnnotation {}",
-            "}")
+            """
+            class AddAnnotation {
+              @some.pkg.SomeAnnotation
+              Void foo() {
+                return null;
+              }
+
+              @interface SomeAnnotation {}
+            }
+            """)
         .doTest();
   }
 
@@ -511,23 +687,42 @@ public class SuggestedFixesTest {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
             "in/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  Void foo() { return null; }",
-            "  static class Nested {",
-            "    Void bar() { return null; }",
-            "    @interface SomeAnnotation {}",
-            "  }",
-            "}")
+            """
+            class AddAnnotation {
+              Void foo() {
+                return null;
+              }
+
+              static class Nested {
+                Void bar() {
+                  return null;
+                }
+
+                @interface SomeAnnotation {}
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "import some.pkg.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void foo() { return null; }",
-            "  static class Nested {",
-            "    @some.pkg.SomeAnnotation Void bar() { return null; }",
-            "    @interface SomeAnnotation {}",
-            "  }",
-            "}")
+            """
+            import some.pkg.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation
+              Void foo() {
+                return null;
+              }
+
+              static class Nested {
+                @some.pkg.SomeAnnotation
+                Void bar() {
+                  return null;
+                }
+
+                @interface SomeAnnotation {}
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -535,20 +730,38 @@ public class SuggestedFixesTest {
   public void qualifyType_someOtherNullableSomeOtherPackage() {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
-            "in/SomeAnnotation.java", "package foo.bar;", "public @interface SomeAnnotation {}")
+            "in/SomeAnnotation.java",
+            """
+            package foo.bar;
+
+            public @interface SomeAnnotation {}
+            """)
         .expectUnchanged()
         .addInputLines(
             "in/AddAnnotation.java",
-            "import foo.bar.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            import foo.bar.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "import foo.bar.SomeAnnotation;",
-            "class AddAnnotation {",
-            "  @SomeAnnotation @some.pkg.SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            import foo.bar.SomeAnnotation;
+
+            class AddAnnotation {
+              @SomeAnnotation
+              @some.pkg.SomeAnnotation
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -557,22 +770,27 @@ public class SuggestedFixesTest {
     AddAnnotation.testHelper(getClass())
         .addInputLines(
             "in/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  <SomeAnnotation> Void foo() { return null; }",
-            "}")
+            """
+            class AddAnnotation {
+              <SomeAnnotation> Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/AddAnnotation.java",
-            "class AddAnnotation {",
-            "  <SomeAnnotation> @some.pkg.SomeAnnotation Void foo() { return null; }",
-            "}")
+            """
+            class AddAnnotation {
+              <SomeAnnotation> @some.pkg.SomeAnnotation Void foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A test check that replaces all methods' return types with a given type. */
-  @BugPattern(
-      name = "ReplaceReturnType",
-      summary = "Change the method return type",
-      severity = ERROR)
+  @BugPattern(summary = "Change the method return type", severity = ERROR)
   public static class ReplaceReturnType extends BugChecker implements BugChecker.MethodTreeMatcher {
     private final String newReturnType;
 
@@ -600,11 +818,33 @@ public class SuggestedFixesTest {
     qualifyDeeplyNestedType(new ReplaceReturnType("pkg.Outer.Inner.Innermost"));
   }
 
+  @Test
+  public void qualifyType_javaLang_notImported() {
+    BugCheckerRefactoringTestHelper.newInstance(
+            new ReplaceReturnType("java.lang.String"), getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              String foo() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
   /** A test check that replaces all methods' return types with a given type. */
-  @BugPattern(
-      name = "ReplaceReturnTypeString",
-      summary = "Change the method return type",
-      severity = ERROR)
+  @BugPattern(summary = "Change the method return type", severity = ERROR)
   public static class ReplaceReturnTypeString extends BugChecker
       implements BugChecker.MethodTreeMatcher {
     private final String newReturnType;
@@ -632,34 +872,154 @@ public class SuggestedFixesTest {
     qualifyDeeplyNestedType(new ReplaceReturnTypeString("pkg.Outer.Inner.Innermost"));
   }
 
+  /** A test check that replaces all methods' return types with a given {@link ClassName}. */
+  @BugPattern(summary = "Change the method return type", severity = ERROR)
+  public static class ReplaceReturnTypeClassName extends BugChecker
+      implements BugChecker.MethodTreeMatcher {
+    private final ClassName newReturnType;
+
+    public ReplaceReturnTypeClassName(ClassName newReturnType) {
+      this.newReturnType = newReturnType;
+    }
+
+    @Override
+    public Description matchMethod(MethodTree tree, VisitorState state) {
+      SuggestedFix.Builder builder = SuggestedFix.builder();
+      String qualifiedName = SuggestedFixes.qualifyType(state, builder, newReturnType);
+      return describeMatch(
+          tree.getReturnType(), builder.replace(tree.getReturnType(), qualifiedName).build());
+    }
+  }
+
+  /** Test checker for {@link #qualifyTypeClassName_dollarPrefixedLoadedType}. */
+  @BugPattern(summary = "Change the method return type", severity = ERROR)
+  public static final class ReplaceReturnTypeDollarPrefixed extends ReplaceReturnTypeClassName {
+    public ReplaceReturnTypeDollarPrefixed() {
+      super(ClassName.of("com.example.$AutoValue_Foo"));
+    }
+  }
+
+  /** Test checker for {@link #qualifyTypeClassName_unloadedNestedType}. */
+  @BugPattern(summary = "Change the method return type", severity = ERROR)
+  public static final class ReplaceReturnTypeUnloadedNested extends ReplaceReturnTypeClassName {
+    public ReplaceReturnTypeUnloadedNested() {
+      super(ClassName.of("com.example.Unloaded.Nested"));
+    }
+  }
+
+  @Test
+  public void qualifyTypeClassName_nestedType() {
+    qualifyNestedType(new ReplaceReturnTypeClassName(ClassName.of("pkg.Outer.Inner")));
+  }
+
+  @Test
+  public void qualifyTypeClassName_deeplyNestedType() {
+    qualifyDeeplyNestedType(
+        new ReplaceReturnTypeClassName(ClassName.of("pkg.Outer.Inner.Innermost")));
+  }
+
+  @Test
+  public void qualifyTypeClassName_dollarPrefixedLoadedType() {
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceReturnTypeDollarPrefixed.class, getClass())
+        .addInputLines(
+            "com/example/$AutoValue_Foo.java",
+            """
+            package com.example;
+
+            public class $AutoValue_Foo {}
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.example.$AutoValue_Foo;
+
+            class Test {
+              $AutoValue_Foo foo() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void qualifyTypeClassName_unloadedNestedType() {
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceReturnTypeUnloadedNested.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.example.Unloaded;
+
+            class Test {
+              Unloaded.Nested foo() {
+                return null;
+              }
+            }
+            """)
+        .allowBreakingChanges()
+        .doTest();
+  }
+
   @Test
   public void qualifiedName_canImportInnerClass() {
     BugCheckerRefactoringTestHelper.newInstance(new ReplaceReturnTypeString("foo.A.B"), getClass())
         .addInputLines(
-            "foo/A.java", //
-            "package foo;",
-            "public class A {",
-            "  public static class B {}",
-            "}")
+            "foo/A.java",
+            """
+            package foo;
+
+            public class A {
+              public static class B {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
-            "bar/A.java", //
-            "package bar;",
-            "public class A extends foo.A {}")
+            "bar/A.java",
+            """
+            package bar;
+
+            public class A extends foo.A {}
+            """)
         .expectUnchanged()
         .addInputLines(
-            "bar/Test.java", //
-            "package bar;",
-            "public interface Test {",
-            "  A.B foo();",
-            "}")
+            "bar/Test.java",
+            """
+            package bar;
+
+            public interface Test {
+              A.B foo();
+            }
+            """)
         .addOutputLines(
-            "bar/Test.java", //
-            "package bar;",
-            "import foo.A.B;",
-            "public interface Test {",
-            "  B foo();",
-            "}")
+            "bar/Test.java",
+            """
+            package bar;
+
+            import foo.A.B;
+
+            public interface Test {
+              B foo();
+            }
+            """)
         .doTest();
   }
 
@@ -667,34 +1027,49 @@ public class SuggestedFixesTest {
   public void qualifiedName_outerAndInnerClassClash_fullyQualifies() {
     BugCheckerRefactoringTestHelper.newInstance(new ReplaceReturnTypeString("foo.A.B"), getClass())
         .addInputLines(
-            "foo/A.java", //
-            "package foo;",
-            "public class A {",
-            "  public static class B {}",
-            "}")
+            "foo/A.java",
+            """
+            package foo;
+
+            public class A {
+              public static class B {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
-            "bar/A.java", //
-            "package bar;",
-            "public class A extends foo.A {}")
+            "bar/A.java",
+            """
+            package bar;
+
+            public class A extends foo.A {}
+            """)
         .expectUnchanged()
         .addInputLines(
-            "bar/B.java", //
-            "package bar;",
-            "public class B {}")
+            "bar/B.java",
+            """
+            package bar;
+
+            public class B {}
+            """)
         .expectUnchanged()
         .addInputLines(
-            "bar/Test.java", //
-            "package bar;",
-            "public interface Test {",
-            "  A.B foo();",
-            "}")
+            "bar/Test.java",
+            """
+            package bar;
+
+            public interface Test {
+              A.B foo();
+            }
+            """)
         .addOutputLines(
-            "bar/Test.java", //
-            "package bar;",
-            "public interface Test {",
-            "  foo.A.B foo();",
-            "}")
+            "bar/Test.java",
+            """
+            package bar;
+
+            public interface Test {
+              foo.A.B foo();
+            }
+            """)
         .doTest();
   }
 
@@ -702,18 +1077,24 @@ public class SuggestedFixesTest {
   public void qualifiedName_noPackageName_noImportNeeded() {
     BugCheckerRefactoringTestHelper.newInstance(new ReplaceReturnTypeString("A.B"), getClass())
         .addInputLines(
-            "A.java", //
-            "public interface A {",
-            "  public static class B {}",
-            "  B foo();",
-            "  B bar();",
-            "}")
+            "A.java",
+            """
+            public interface A {
+              public static class B {}
+
+              B foo();
+
+              B bar();
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
-            "Test.java", //
-            "public interface Test {",
-            "  A.B foo();",
-            "}")
+            "Test.java",
+            """
+            public interface Test {
+              A.B foo();
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -722,24 +1103,36 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(bugChecker, getClass())
         .addInputLines(
             "in/pkg/Outer.java",
-            "package pkg;",
-            "public class Outer {",
-            "  public class Inner {",
-            "    public class Innermost {}",
-            "  }",
-            "}")
+            """
+            package pkg;
+
+            public class Outer {
+              public class Inner {
+                public class Innermost {}
+              }
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "in/ReplaceReturnType.java",
-            "class ReplaceReturnType {",
-            "  Void foo() { return null; }",
-            "}")
+            """
+            class ReplaceReturnType {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/ReplaceReturnType.java",
-            "import pkg.Outer;",
-            "class ReplaceReturnType {",
-            "  Outer.Inner.Innermost foo() { return null; }",
-            "}")
+            """
+            import pkg.Outer;
+
+            class ReplaceReturnType {
+              Outer.Inner.Innermost foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -747,30 +1140,39 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(bugChecker, getClass())
         .addInputLines(
             "in/pkg/Outer.java",
-            "package pkg;",
-            "public class Outer {",
-            "  public class Inner {}",
-            "}")
+            """
+            package pkg;
+
+            public class Outer {
+              public class Inner {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "in/ReplaceReturnType.java",
-            "class ReplaceReturnType {",
-            "  Void foo() { return null; }",
-            "}")
+            """
+            class ReplaceReturnType {
+              Void foo() {
+                return null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/ReplaceReturnType.java",
-            "import pkg.Outer;",
-            "class ReplaceReturnType {",
-            "  Outer.Inner foo() { return null; }",
-            "}")
+            """
+            import pkg.Outer;
+
+            class ReplaceReturnType {
+              Outer.Inner foo() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A test check that replaces all checkNotNulls with verifyNotNull. */
-  @BugPattern(
-      name = "ReplaceMethodInvocations",
-      summary = "Replaces checkNotNull with verifyNotNull.",
-      severity = ERROR)
+  @BugPattern(summary = "Replaces checkNotNull with verifyNotNull.", severity = ERROR)
   public static class ReplaceMethodInvocations extends BugChecker
       implements BugChecker.MethodInvocationTreeMatcher {
     private static final Matcher<ExpressionTree> CHECK_NOT_NULL =
@@ -796,26 +1198,57 @@ public class SuggestedFixesTest {
     }
   }
 
+  @BugPattern(severity = ERROR, summary = "Replaces checkNotNull with pkg.Base.verifyNotNull")
+  public static class ReplaceMethodInvocationsWithBase extends BugChecker
+      implements BugChecker.MethodInvocationTreeMatcher {
+    private static final Matcher<ExpressionTree> CHECK_NOT_NULL =
+        staticMethod().onClass("com.google.common.base.Preconditions").named("checkNotNull");
+
+    @Override
+    public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
+      if (!CHECK_NOT_NULL.matches(tree, state)) {
+        return NO_MATCH;
+      }
+      SuggestedFix.Builder builder = SuggestedFix.builder();
+      String qualifiedName =
+          SuggestedFixes.qualifyStaticImport("pkg.Base.verifyNotNull", builder, state);
+      return describeMatch(
+          tree,
+          builder
+              .replace(
+                  tree,
+                  String.format(
+                      "%s(%s)", qualifiedName, state.getSourceForNode(tree.getArguments().get(0))))
+              .build());
+    }
+  }
+
   @Test
   public void qualifyStaticImport_addsStaticImportAndUsesUnqualifiedName() {
     BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocations.class, getClass())
         .addInputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    checkNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            class Test {
+              void test() {
+                checkNotNull(1);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import static com.google.common.base.Verify.verifyNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    verifyNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+            import static com.google.common.base.Verify.verifyNotNull;
+
+            class Test {
+              void test() {
+                verifyNotNull(1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -824,24 +1257,30 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocations.class, getClass())
         .addInputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import static com.google.common.base.Verify.verifyNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    verifyNotNull(2);",
-            "    checkNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+            import static com.google.common.base.Verify.verifyNotNull;
+
+            class Test {
+              void test() {
+                verifyNotNull(2);
+                checkNotNull(1);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import static com.google.common.base.Verify.verifyNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    verifyNotNull(2);",
-            "    verifyNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+            import static com.google.common.base.Verify.verifyNotNull;
+
+            class Test {
+              void test() {
+                verifyNotNull(2);
+                verifyNotNull(1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -850,32 +1289,127 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocations.class, getClass())
         .addInputLines(
             "pkg/Lib.java",
-            "package pkg;",
-            "public class Lib {",
-            "  public static void verifyNotNull(int a) {}",
-            " }")
+            """
+            package pkg;
+
+            public class Lib {
+              public static void verifyNotNull(int a) {}
+            }
+            """)
         .expectUnchanged()
         .addInputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import static pkg.Lib.verifyNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    verifyNotNull(2);",
-            "    checkNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+            import static pkg.Lib.verifyNotNull;
+
+            class Test {
+              void test() {
+                verifyNotNull(2);
+                checkNotNull(1);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import static pkg.Lib.verifyNotNull;",
-            "import com.google.common.base.Verify;",
-            "class Test {",
-            "  void test() {",
-            "    verifyNotNull(2);",
-            "    Verify.verifyNotNull(1);",
-            "  }",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+            import static pkg.Lib.verifyNotNull;
+
+            import com.google.common.base.Verify;
+
+            class Test {
+              void test() {
+                verifyNotNull(2);
+                Verify.verifyNotNull(1);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void qualifyStaticImport_whenAlreadyInScope_doesNotAddStaticImport() {
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocationsWithBase.class, getClass())
+        .addInputLines(
+            "Base.java",
+            """
+            package pkg;
+
+            public class Base {
+              public static void verifyNotNull(Object o) {}
+            }
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            import pkg.Base;
+
+            class Test extends Base {
+              void test() {
+                checkNotNull(1);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            import pkg.Base;
+
+            class Test extends Base {
+              void test() {
+                verifyNotNull(1);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void qualifyStaticImport_whenDifferentMethodWithSameNameInScope_usesQualifiedName() {
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocations.class, getClass())
+        .addInputLines(
+            "Base.java",
+            """
+            package pkg;
+
+            public class Base {
+              public static void verifyNotNull(int a) {}
+            }
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            import pkg.Base;
+
+            class Test extends Base {
+              void test() {
+                checkNotNull(1);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            import com.google.common.base.Verify;
+            import pkg.Base;
+
+            class Test extends Base {
+              void test() {
+                Verify.verifyNotNull(1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -884,41 +1418,48 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(ReplaceMethodInvocations.class, getClass())
         .addInputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "class Test {",
-            "  void test() {",
-            "    checkNotNull(1);",
-            "  }",
-            "  void verifyNotNull(int a) {}",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            class Test {
+              void test() {
+                checkNotNull(1);
+              }
+
+              void verifyNotNull(int a) {}
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import static com.google.common.base.Preconditions.checkNotNull;",
-            "import com.google.common.base.Verify;",
-            "class Test {",
-            "  void test() {",
-            "    Verify.verifyNotNull(1);",
-            "  }",
-            "  void verifyNotNull(int a) {}",
-            "}")
+            """
+            import static com.google.common.base.Preconditions.checkNotNull;
+
+            import com.google.common.base.Verify;
+
+            class Test {
+              void test() {
+                Verify.verifyNotNull(1);
+              }
+
+              void verifyNotNull(int a) {}
+            }
+            """)
         .doTest();
   }
 
   /** A test check that qualifies javadoc link. */
-  @BugPattern(
-      name = "JavadocQualifier",
-      summary = "all javadoc links should be qualified",
-      severity = ERROR)
+  @BugPattern(summary = "all javadoc links should be qualified", severity = ERROR)
   public static class JavadocQualifier extends BugChecker implements BugChecker.ClassTreeMatcher {
     @Override
-    public Description matchClass(ClassTree tree, final VisitorState state) {
-      final DCTree.DCDocComment comment =
-          ((JCTree.JCCompilationUnit) state.getPath().getCompilationUnit())
-              .docComments.getCommentTree((JCTree) tree);
+    public Description matchClass(ClassTree tree, VisitorState state) {
+      DCTree.DCDocComment comment =
+          getCommentTree(
+              ((JCTree.JCCompilationUnit) state.getPath().getCompilationUnit()).docComments,
+              (JCTree) tree);
       if (comment == null) {
         return Description.NO_MATCH;
       }
-      final SuggestedFix.Builder fix = SuggestedFix.builder();
+      SuggestedFix.Builder fix = SuggestedFix.builder();
       new DocTreePathScanner<Void, Void>() {
         @Override
         public Void visitLink(LinkTree node, Void unused) {
@@ -934,31 +1475,47 @@ public class SuggestedFixesTest {
     }
   }
 
+  private static DCDocComment getCommentTree(DocCommentTable docCommentTable, JCTree tree) {
+    try {
+      return (DCDocComment)
+          DocCommentTable.class
+              .getMethod("getCommentTree", JCTree.class)
+              .invoke(docCommentTable, tree);
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError(e.getMessage(), e);
+    }
+  }
+
   @Test
   public void qualifyJavadocTest() {
     BugCheckerRefactoringTestHelper.newInstance(JavadocQualifier.class, getClass())
         .addInputLines(
-            "in/Test.java", //
-            "import java.util.List;",
-            "import java.util.Map;",
-            "/** foo {@link List} bar {@link Map#containsKey(Object)} baz {@link #foo} */",
-            "class Test {",
-            "  void foo() {}",
-            "}")
+            "Test.java",
+            """
+            import java.util.List;
+            import java.util.Map;
+
+            /** foo {@link List} bar {@link Map#containsKey(Object)} baz {@link #foo} */
+            class Test {
+              void foo() {}
+            }
+            """)
         .addOutputLines(
-            "out/Test.java", //
-            "import java.util.List;",
-            "import java.util.Map;",
-            "/** foo {@link java.util.List} bar {@link java.util.Map#containsKey(Object)} baz"
-                + " {@link Test#foo} */",
-            "class Test {",
-            "  void foo() {}",
-            "}")
-        .doTest(TEXT_MATCH);
+            "Test.java",
+"""
+import java.util.List;
+import java.util.Map;
+
+/** foo {@link java.util.List} bar {@link java.util.Map#containsKey(Object)} baz {@link Test#foo} */
+class Test {
+  void foo() {}
+}
+""")
+        .doTest();
   }
 
   /** A {@link BugChecker} for testing. */
-  @BugPattern(name = "SuppressMe", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static final class SuppressMe extends BugChecker
       implements LiteralTreeMatcher, VariableTreeMatcher {
     @Override
@@ -986,55 +1543,117 @@ public class SuggestedFixesTest {
   }
 
   @Test
-  @org.junit.Ignore("There appears to be an issue parsing lambda comments")
-  public void testSuppressWarningsFix() {
+  public void suppressWarningsFix() {
     BugCheckerRefactoringTestHelper refactorTestHelper =
         BugCheckerRefactoringTestHelper.newInstance(SuppressMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  static final int BEST_NUMBER = 42;",
-            "  static { int i = 42; }",
-            "  @SuppressWarnings(\"one\")",
-            "  public void doIt() {",
-            "    System.out.println(\"\" + 42);",
-            "    new Runnable() {",
-            "      {System.out.println(\"\" + 42);}",
-            "      @Override public void run() {}",
-            "    };",
-            "  }",
-            "  public void bar() {",
-            "    java.util.function.Predicate<String> p = x -> x.isEmpty();",
-            "    java.util.function.Predicate<Integer> isEven = ",
-            "        (Integer x) -> x % 2 == 0;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              static final int BEST_NUMBER = 42;
+
+              static {
+                int i = 42;
+              }
+
+              @SuppressWarnings("one")
+              public void doIt() {
+                System.out.println("" + 42);
+                new Runnable() {
+                  {
+                    System.out.println("" + 42);
+                  }
+
+                  @Override
+                  public void run() {}
+                };
+              }
+
+              public void bar() {
+                java.util.function.Predicate<String> p = x -> x.isEmpty();
+                java.util.function.Predicate<Integer> isEven = (Integer x) -> x % 2 == 0;
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings(\"SuppressMe\") static final int BEST_NUMBER = 42;",
-            "  static { @SuppressWarnings(\"SuppressMe\") int i = 42; }",
-            "  @SuppressWarnings({\"one\", \"SuppressMe\"})",
-            "  public void doIt() {",
-            "    System.out.println(\"\" + 42);",
-            "    new Runnable() {",
-            "      {System.out.println(\"\" + 42);}",
-            "      @Override public void run() {}",
-            "    };",
-            "  }",
-            "  public void bar() {",
-            "    @SuppressWarnings(\"AParameter\")",
-            "    java.util.function.Predicate<String> p = x -> x.isEmpty();",
-            "    java.util.function.Predicate<Integer> isEven = ",
-            "       (@SuppressWarnings(\"AParameter\") Integer x) -> x % 2 == 0;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings("SuppressMe")
+              static final int BEST_NUMBER = 42;
+
+              static {
+                @SuppressWarnings("SuppressMe")
+                int i = 42;
+              }
+
+              @SuppressWarnings({"one", "SuppressMe"})
+              public void doIt() {
+                System.out.println("" + 42);
+                new Runnable() {
+                  {
+                    System.out.println("" + 42);
+                  }
+
+                  @Override
+                  public void run() {}
+                };
+              }
+
+              public void bar() {
+                @SuppressWarnings("AParameter")
+                java.util.function.Predicate<String> p = x -> x.isEmpty();
+                java.util.function.Predicate<Integer> isEven =
+                    (@SuppressWarnings("AParameter")
+                        Integer x) -> x % 2 == 0;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void customSuppressWarningsFix() {
+    BugCheckerRefactoringTestHelper refactorTestHelper =
+        BugCheckerRefactoringTestHelper.newInstance(SuppressMe.class, getClass());
+    refactorTestHelper
+        .addInputLines(
+            "SuppressWarnings.java",
+            """
+            package com.example;
+
+            public @interface SuppressWarnings {
+              String[] value();
+            }
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              @com.example.SuppressWarnings("one")
+              public void doIt() {
+                System.out.println("" + 42);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings("SuppressMe")
+              @com.example.SuppressWarnings("one")
+              public void doIt() {
+                System.out.println("" + 42);
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A {@link BugChecker} for testing. */
-  @BugPattern(name = "SuppressMeWithComment", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static final class SuppressMeWithComment extends BugChecker implements LiteralTreeMatcher {
     private final String lineComment;
 
@@ -1050,59 +1669,75 @@ public class SuggestedFixesTest {
   }
 
   @Test
-  public void testSuppressWarningsWithCommentFix() {
+  public void suppressWarningsWithCommentFix() {
     BugCheckerRefactoringTestHelper refactorTestHelper =
         BugCheckerRefactoringTestHelper.newInstance(
             new SuppressMeWithComment("b/XXXX: fix me!"), getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  int BEST_NUMBER = 42;",
-            "  @SuppressWarnings(\"x\") int BEST = 42;",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              int BEST_NUMBER = 42;
+
+              @SuppressWarnings("x")
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  // b/XXXX: fix me!",
-            "  @SuppressWarnings(\"SuppressMe\") int BEST_NUMBER = 42;",
-            "  // b/XXXX: fix me!",
-            "  @SuppressWarnings({\"x\", \"SuppressMe\"}) int BEST = 42;",
-            "}")
-        .doTest(BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              // b/XXXX: fix me!
+              @SuppressWarnings("SuppressMe")
+              int BEST_NUMBER = 42;
+
+              // b/XXXX: fix me!
+              @SuppressWarnings({"x", "SuppressMe"})
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testSuppressWarningsWithCommentFix_existingComment() {
+  public void suppressWarningsWithCommentFix_existingComment() {
     BugCheckerRefactoringTestHelper refactorTestHelper =
         BugCheckerRefactoringTestHelper.newInstance(
             new SuppressMeWithComment("b/XXXX: fix me!"), getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  // This comment was here already.",
-            "  int BEST_NUMBER = 42;",
-            "",
-            "  // As was this one.",
-            "  @SuppressWarnings(\"x\") int BEST = 42;",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              // This comment was here already.
+              int BEST_NUMBER = 42;
+
+              // As was this one.
+              @SuppressWarnings("x")
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  // This comment was here already.",
-            "  // b/XXXX: fix me!",
-            "  @SuppressWarnings(\"SuppressMe\") int BEST_NUMBER = 42;",
-            "",
-            "  // As was this one.",
-            "  // b/XXXX: fix me!",
-            "  @SuppressWarnings({\"x\", \"SuppressMe\"}) int BEST = 42;",
-            "}")
-        .doTest(BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              // This comment was here already.
+              // b/XXXX: fix me!
+              @SuppressWarnings("SuppressMe")
+              int BEST_NUMBER = 42;
+
+              // As was this one.
+              // b/XXXX: fix me!
+              @SuppressWarnings({"x", "SuppressMe"})
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testSuppressWarningsWithCommentFix_commentHasToBeLineWrapped() {
+  public void suppressWarningsWithCommentFix_commentHasToBeLineWrapped() {
     BugCheckerRefactoringTestHelper refactorTestHelper =
         BugCheckerRefactoringTestHelper.newInstance(
             new SuppressMeWithComment(
@@ -1110,20 +1745,28 @@ public class SuggestedFixesTest {
                     + "sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."),
             getClass());
     refactorTestHelper
-        .addInputLines("in/Test.java", "public class Test {", "  int BEST = 42;", "}")
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  // Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor "
-                + "incididunt ut",
-            "  // labore et dolore magna aliqua.",
-            "  @SuppressWarnings(\"SuppressMe\") int BEST = 42;",
-            "}")
-        .doTest(BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH);
+            "Test.java",
+"""
+public class Test {
+  // Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut
+  // labore et dolore magna aliqua.
+  @SuppressWarnings("SuppressMe")
+  int BEST = 42;
+}
+""")
+        .doTest();
   }
 
   /** A {@link BugChecker} for testing. */
-  @BugPattern(name = "RemoveSuppressFromMe", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static final class RemoveSuppressFromMe extends BugChecker implements LiteralTreeMatcher {
 
     @Override
@@ -1140,12 +1783,22 @@ public class SuggestedFixesTest {
         BugCheckerRefactoringTestHelper.newInstance(RemoveSuppressFromMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings(\"RemoveMe\") int BEST = 42;",
-            "}")
-        .addOutputLines("out/Test.java", "public class Test {", "  int BEST = 42;", "}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings("RemoveMe")
+              int BEST = 42;
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            public class Test {
+
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -1154,16 +1807,22 @@ public class SuggestedFixesTest {
         BugCheckerRefactoringTestHelper.newInstance(RemoveSuppressFromMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings({\"RemoveMe\", \"KeepMe\"}) int BEST = 42;",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings({"RemoveMe", "KeepMe"})
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings(\"KeepMe\") int BEST = 42;",
-            "}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings("KeepMe")
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -1172,16 +1831,22 @@ public class SuggestedFixesTest {
         BugCheckerRefactoringTestHelper.newInstance(RemoveSuppressFromMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings({\"RemoveMe\", \"KeepMe1\", \"KeepMe2\"}) int BEST = 42;",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings({"RemoveMe", "KeepMe1", "KeepMe2"})
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings({\"KeepMe1\", \"KeepMe2\"}) int BEST = 42;",
-            "}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings({"KeepMe1", "KeepMe2"})
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -1190,12 +1855,22 @@ public class SuggestedFixesTest {
         BugCheckerRefactoringTestHelper.newInstance(RemoveSuppressFromMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings({\"RemoveMe\"}) int BEST = 42;",
-            "}")
-        .addOutputLines("out/Test.java", "public class Test {", "  int BEST = 42;", "}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings({"RemoveMe"})
+              int BEST = 42;
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            public class Test {
+
+              int BEST = 42;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -1204,20 +1879,67 @@ public class SuggestedFixesTest {
         BugCheckerRefactoringTestHelper.newInstance(RemoveSuppressFromMe.class, getClass());
     refactorTestHelper
         .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings(value={\"RemoveMe\", \"KeepMe\"}) int BEST = 42;",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings(value = {"RemoveMe", "KeepMe"})
+              int BEST = 42;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  @SuppressWarnings(value=\"KeepMe\") int BEST = 42;",
-            "}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            public class Test {
+              @SuppressWarnings(value = "KeepMe")
+              int BEST = 42;
+            }
+            """)
+        .doTest();
+  }
+
+  /** A {@link BugChecker} for testing. */
+  @BugPattern(summary = "", severity = ERROR)
+  public static final class UpdateDoNotCallArgument extends BugChecker
+      implements AnnotationTreeMatcher {
+    @Override
+    public Description matchAnnotation(AnnotationTree tree, VisitorState state) {
+      SuggestedFix.Builder fixBuilder =
+          SuggestedFixes.updateAnnotationArgumentValues(
+              tree, state, "value", ImmutableList.of("\"Danger\""));
+      return describeMatch(tree, fixBuilder.build());
+    }
+  }
+
+  @Test
+  public void updateAnnotationArgumentValues_noArguments() {
+    BugCheckerRefactoringTestHelper refactorTestHelper =
+        BugCheckerRefactoringTestHelper.newInstance(UpdateDoNotCallArgument.class, getClass());
+    refactorTestHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import com.google.errorprone.annotations.DoNotCall;
+
+            public class Test {
+              @DoNotCall
+              void m() {}
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.google.errorprone.annotations.DoNotCall;
+
+            public class Test {
+              @DoNotCall("Danger")
+              void m() {}
+            }
+            """)
+        .doTest();
   }
 
   /** A test bugchecker that deletes any field whose removal doesn't break the compilation. */
-  @BugPattern(name = "CompilesWithFixChecker", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static class CompilesWithFixChecker extends BugChecker implements VariableTreeMatcher {
     @Override
     public Description matchVariable(VariableTree tree, VisitorState state) {
@@ -1232,52 +1954,61 @@ public class SuggestedFixesTest {
   public void compilesWithFixTest() {
     BugCheckerRefactoringTestHelper.newInstance(CompilesWithFixChecker.class, getClass())
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void f() {",
-            "    int x = 0;",
-            "    int y = 1;",
-            "    System.err.println(y);",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int x = 0;
+                int y = 1;
+                System.err.println(y);
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void f() {",
-            "    int y = 1;",
-            "    System.err.println(y);",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void f() {
+
+                int y = 1;
+                System.err.println(y);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void compilesWithFix_releaseFlag() {
-    assumeTrue(RuntimeVersion.isAtLeast9());
     BugCheckerRefactoringTestHelper.newInstance(CompilesWithFixChecker.class, getClass())
         .setArgs("--release", "9")
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void f() {",
-            "    int x = 0;",
-            "    int y = 1;",
-            "    System.err.println(y);",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int x = 0;
+                int y = 1;
+                System.err.println(y);
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void f() {",
-            "    int y = 1;",
-            "    System.err.println(y);",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void f() {
+
+                int y = 1;
+                System.err.println(y);
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A test bugchecker that deletes an exception from throws. */
-  @BugPattern(name = "RemovesExceptionChecker", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static class RemovesExceptionsChecker extends BugChecker implements MethodTreeMatcher {
 
     private final int index;
@@ -1302,31 +2033,35 @@ public class SuggestedFixesTest {
   public void deleteExceptionsRemoveFirstCheckerTest() {
     BugCheckerRefactoringTestHelper.newInstance(new RemovesExceptionsChecker(0), getClass())
         .addInputLines(
-            "in/Test.java",
-            "import java.io.IOException;",
-            "class Test {",
-            "  void e() {",
-            "  }",
-            "  void f() throws Exception {",
-            "  }",
-            "  void g() throws RuntimeException, Exception {",
-            "  }",
-            "  void h() throws RuntimeException, Exception, IOException {",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.io.IOException;
+
+            class Test {
+              void e() {}
+
+              void f() throws Exception {}
+
+              void g() throws RuntimeException, Exception {}
+
+              void h() throws RuntimeException, Exception, IOException {}
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "import java.io.IOException;",
-            "class Test {",
-            "  void e() {",
-            "  }",
-            "  void f() {",
-            "  }",
-            "  void g() throws Exception {",
-            "  }",
-            "  void h() throws Exception, IOException {",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.io.IOException;
+
+            class Test {
+              void e() {}
+
+              void f() {}
+
+              void g() throws Exception {}
+
+              void h() throws Exception, IOException {}
+            }
+            """)
         .doTest();
   }
 
@@ -1334,31 +2069,35 @@ public class SuggestedFixesTest {
   public void deleteExceptionsRemoveSecondCheckerTest() {
     BugCheckerRefactoringTestHelper.newInstance(new RemovesExceptionsChecker(1), getClass())
         .addInputLines(
-            "in/Test.java",
-            "import java.io.IOException;",
-            "class Test {",
-            "  void e() {",
-            "  }",
-            "  void f() throws Exception {",
-            "  }",
-            "  void g() throws RuntimeException, Exception {",
-            "  }",
-            "  void h() throws RuntimeException, Exception, IOException {",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.io.IOException;
+
+            class Test {
+              void e() {}
+
+              void f() throws Exception {}
+
+              void g() throws RuntimeException, Exception {}
+
+              void h() throws RuntimeException, Exception, IOException {}
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "import java.io.IOException;",
-            "class Test {",
-            "  void e() {",
-            "  }",
-            "  void f() throws Exception {",
-            "  }",
-            "  void g() throws RuntimeException {",
-            "  }",
-            "  void h() throws RuntimeException, IOException {",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.io.IOException;
+
+            class Test {
+              void e() {}
+
+              void f() throws Exception {}
+
+              void g() throws RuntimeException {}
+
+              void h() throws RuntimeException, IOException {}
+            }
+            """)
         .doTest();
   }
 
@@ -1367,14 +2106,17 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(RemoveUnusedImports.class, getClass())
         .addSourceLines(
             "in/com/example/package-info.java",
-            "package com.example;",
-            "// BUG: Diagnostic contains: Did you mean to remove this line?",
-            "import java.util.Map;")
+            """
+            package com.example;
+
+            // BUG: Diagnostic contains: Did you mean to remove this line?
+            import java.util.Map;
+            """)
         .doTest();
   }
 
   /** Test checker that renames variables. */
-  @BugPattern(name = "RenamesVariableChecker", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static class RenamesVariableChecker extends BugChecker implements VariableTreeMatcher {
 
     private final String toReplace;
@@ -1401,27 +2143,31 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Integer.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    Integer replace = 0;",
-            "    Integer b = replace;",
-            "    if (true) {",
-            "      Integer c = replace;",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                Integer replace = 0;
+                Integer b = replace;
+                if (true) {
+                  Integer c = replace;
+                }
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    Integer renamed = 0;",
-            "    Integer b = renamed;",
-            "    if (true) {",
-            "      Integer c = renamed;",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                Integer renamed = 0;
+                Integer b = renamed;
+                if (true) {
+                  Integer c = renamed;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1430,29 +2176,33 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Integer.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    if (true) {",
-            "      Integer replace = 0;",
-            "      Integer c = replace;",
-            "    }",
-            "    Object replace = null;",
-            "    Object c = replace;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                if (true) {
+                  Integer replace = 0;
+                  Integer c = replace;
+                }
+                Object replace = null;
+                Object c = replace;
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    if (true) {",
-            "      Integer renamed = 0;",
-            "      Integer c = renamed;",
-            "    }",
-            "    Object replace = null;",
-            "    Object c = replace;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                if (true) {
+                  Integer renamed = 0;
+                  Integer c = renamed;
+                }
+                Object replace = null;
+                Object c = replace;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1461,19 +2211,23 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Integer.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void m(Integer replace) {",
-            "    Integer b = replace;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m(Integer replace) {
+                Integer b = replace;
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void m(Integer renamed) {",
-            "    Integer b = renamed;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m(Integer renamed) {
+                Integer b = renamed;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1482,27 +2236,33 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", AutoCloseable.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "abstract class Test {",
-            "  abstract AutoCloseable open();",
-            "  void m() {",
-            "    try (AutoCloseable replace = open()) {",
-            "      Object o = replace;",
-            "    } catch (Exception e) {",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            abstract class Test {
+              abstract AutoCloseable open();
+
+              void m() {
+                try (AutoCloseable replace = open()) {
+                  Object o = replace;
+                } catch (Exception e) {
+                }
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "abstract class Test {",
-            "  abstract AutoCloseable open();",
-            "  void m() {",
-            "    try (AutoCloseable renamed = open()) {",
-            "      Object o = renamed;",
-            "    } catch (Exception e) {",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            abstract class Test {
+              abstract AutoCloseable open();
+
+              void m() {
+                try (AutoCloseable renamed = open()) {
+                  Object o = renamed;
+                } catch (Exception e) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1511,17 +2271,23 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Integer.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "import java.util.function.Function;",
-            "class Test {",
-            "  Function<Integer, Integer> f = (Integer replace) -> replace;",
-            "}")
+            "Test.java",
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Integer, Integer> f = (Integer replace) -> replace;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "import java.util.function.Function;",
-            "class Test {",
-            "  Function<Integer, Integer> f = (Integer renamed) -> renamed;",
-            "}")
+            "Test.java",
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Integer, Integer> f = (Integer renamed) -> renamed;
+            }
+            """)
         .doTest();
   }
 
@@ -1530,17 +2296,23 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Integer.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "import java.util.function.Function;",
-            "class Test {",
-            "  Function<Integer, Integer> f = (replace) -> replace;",
-            "}")
+            "Test.java",
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Integer, Integer> f = (replace) -> replace;
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "import java.util.function.Function;",
-            "class Test {",
-            "  Function<Integer, Integer> f = (renamed) -> renamed;",
-            "}")
+            "Test.java",
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Integer, Integer> f = (renamed) -> renamed;
+            }
+            """)
         .doTest();
   }
 
@@ -1549,56 +2321,64 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(
             new RenamesVariableChecker("replace", "renamed", Throwable.class), getClass())
         .addInputLines(
-            "in/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    try {",
-            "    } catch (Throwable replace) {",
-            "      replace.toString();",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                try {
+                } catch (Throwable replace) {
+                  replace.toString();
+                }
+              }
+            }
+            """)
         .addOutputLines(
-            "out/Test.java",
-            "class Test {",
-            "  void m() {",
-            "    try {",
-            "    } catch (Throwable renamed) {",
-            "      renamed.toString();",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              void m() {
+                try {
+                } catch (Throwable renamed) {
+                  renamed.toString();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   /** Test checker that removes and adds modifiers in the same fix. */
-  @BugPattern(name = "RemoveAddModifier", summary = "", severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static class RemoveAddModifier extends BugChecker implements ClassTreeMatcher {
 
     @Override
     public Description matchClass(ClassTree tree, VisitorState state) {
       return describeMatch(
           tree,
-          SuggestedFix.builder()
-              .merge(SuggestedFixes.removeModifiers(tree, state, Modifier.PUBLIC).orElse(null))
-              .merge(SuggestedFixes.addModifiers(tree, state, Modifier.ABSTRACT).orElse(null))
-              .build());
+          SuggestedFix.merge(
+              SuggestedFixes.removeModifiers(tree, state, Modifier.PUBLIC).orElse(emptyFix()),
+              SuggestedFixes.addModifiers(tree, state, Modifier.ABSTRACT).orElse(emptyFix())));
     }
   }
 
   @Test
   public void removeAddModifier_rangesCompatible() {
     BugCheckerRefactoringTestHelper.newInstance(RemoveAddModifier.class, getClass())
-        .addInputLines("in/Test.java", "public class Test {}")
-        .addOutputLines("out/Test.java", "abstract class Test {}")
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {}
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            abstract class Test {}
+            """)
         .doTest();
   }
 
   /** A bugchecker for testing suggested fixes. */
-  @BugPattern(
-      name = "PrefixAddImportCheck",
-      summary = "A bugchecker for testing suggested fixes.",
-      severity = ERROR)
+  @BugPattern(summary = "A bugchecker for testing suggested fixes.", severity = ERROR)
   public static class PrefixAddImportCheck extends BugChecker implements ClassTreeMatcher {
     @Override
     public Description matchClass(ClassTree tree, VisitorState state) {
@@ -1615,15 +2395,22 @@ public class SuggestedFixesTest {
   public void prefixAddImport() throws IOException {
     BugCheckerRefactoringTestHelper.newInstance(PrefixAddImportCheck.class, getClass())
         .addInputLines(
-            "in/Test.java", //
-            "package p;",
-            "class Test {}")
+            "Test.java",
+            """
+            package p;
+
+            class Test {}
+            """)
         .addOutputLines(
-            "out/Test.java", //
-            "package p;",
-            "import java.util.List;",
-            "@Deprecated",
-            "class Test {}")
+            "Test.java",
+            """
+            package p;
+
+            import java.util.List;
+
+            @Deprecated
+            class Test {}
+            """)
         .doTest();
   }
 
@@ -1636,7 +2423,7 @@ public class SuggestedFixesTest {
   }
 
   /** A {@link BugChecker} for testing. */
-  @BugPattern(name = "RenameMethodChecker", summary = "RenameMethodChecker", severity = ERROR)
+  @BugPattern(summary = "RenameMethodChecker", severity = ERROR)
   public static class RenameMethodChecker extends BugChecker
       implements MethodInvocationTreeMatcher {
     @Override
@@ -1650,37 +2437,93 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(RenameMethodChecker.class, getClass())
         .addInputLines(
             "Test.java",
-            "import java.util.Collections;",
-            "class Test {",
-            "  int singletonList = 1;",
-            "  Object foo = Collections.<Integer /* foo */>singletonList(singletonList);",
-            "  Object bar = Collections.<Integer>/* foo */singletonList(singletonList);",
-            "  Object baz = Collections.<Integer>  singletonList  (singletonList);",
-            "  class emptyList {}",
-            "  Object quux = Collections.<emptyList>singletonList(null);",
-            "}")
+            """
+            import java.util.Collections;
+
+            class Test {
+              int singletonList = 1;
+              Object foo = Collections.<Integer /* foo */>singletonList(singletonList);
+              Object bar = Collections.<Integer> /* foo */singletonList(singletonList);
+              Object baz = Collections.<Integer>singletonList(singletonList);
+
+              class emptyList {}
+
+              Object quux = Collections.<emptyList>singletonList(null);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.Collections;",
-            "class Test {",
-            "  int singletonList = 1;",
-            "  Object foo = Collections.<Integer /* foo */>singleton(singletonList);",
-            "  Object bar = Collections.<Integer>/* foo */singleton(singletonList);",
-            "  Object baz = Collections.<Integer>  singleton  (singletonList);",
-            "  class emptyList {}",
-            "  Object quux = Collections.<emptyList>singleton(null);",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            import java.util.Collections;
+
+            class Test {
+              int singletonList = 1;
+              Object foo = Collections.<Integer /* foo */>singleton(singletonList);
+              Object bar = Collections.<Integer> /* foo */singleton(singletonList);
+              Object baz = Collections.<Integer>singleton(singletonList);
+
+              class emptyList {}
+
+              Object quux = Collections.<emptyList>singleton(null);
+            }
+            """)
+        .doTest();
+  }
+
+  /** A {@link BugChecker} for testing. */
+  @BugPattern(summary = "RenameClassChecker", severity = ERROR)
+  public static class RenameClassChecker extends BugChecker implements ClassTreeMatcher {
+    @Override
+    public Description matchClass(ClassTree tree, VisitorState state) {
+      return describeMatch(tree, SuggestedFixes.renameClassWithUses(tree, "Foo", state));
+    }
+  }
+
+  @Test
+  public void renameClass() {
+    BugCheckerRefactoringTestHelper.newInstance(RenameClassChecker.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              Test get() {
+                return null;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Foo {
+              Foo get() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void renameClass_selfReferential() {
+    BugCheckerRefactoringTestHelper.newInstance(RenameClassChecker.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test<T extends Test<T>> {}
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Foo<T extends Foo<T>> {}
+            """)
+        .doTest();
   }
 
   /**
    * Test checker that raises a diagnostic with the result of {@link SuggestedFixes#qualifyType} on
    * new instances.
    */
-  @BugPattern(
-      name = "QualifyTypeLocalClassChecker",
-      summary = "QualifyTypeLocalClassChecker",
-      severity = ERROR)
+  @BugPattern(summary = "QualifyTypeLocalClassChecker", severity = ERROR)
   public static class QualifyTypeLocalClassChecker extends BugChecker
       implements NewClassTreeMatcher {
 
@@ -1698,46 +2541,50 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(QualifyTypeLocalClassChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.util.function.Supplier;",
-            "class Test {",
-            "  static {",
-            "    class InStaticInitializer {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InStaticInitializer",
-            "    new InStaticInitializer();",
-            "  }",
-            "",
-            "  {",
-            "    class InInstanceInitializer {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InInstanceInitializer",
-            "    new InInstanceInitializer();",
-            "  }",
-            "",
-            "  Test() { // in constructor",
-            "    class InConstructor {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InConstructor",
-            "    new InConstructor();",
-            "  }",
-            "",
-            "  static Object staticMethod() {",
-            "    class InStaticMethod {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InStaticMethod",
-            "    return new InStaticMethod();",
-            "  }",
-            "",
-            "  Object instanceMethod() {",
-            "    class InInstanceMethod {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InInstanceMethod",
-            "    return new InInstanceMethod();",
-            "  }",
-            "",
-            "  void lambda() {",
-            "    Supplier<Object> consumer = () -> {",
-            "      class InLambda {}",
-            "      // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InLambda",
-            "      return new InLambda();",
-            "    };",
-            "  }",
-            "}")
+            """
+            import java.util.function.Supplier;
+
+            class Test {
+              static {
+                class InStaticInitializer {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InStaticInitializer
+                new InStaticInitializer();
+              }
+
+              {
+                class InInstanceInitializer {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InInstanceInitializer
+                new InInstanceInitializer();
+              }
+
+              Test() { // in constructor
+                class InConstructor {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InConstructor
+                new InConstructor();
+              }
+
+              static Object staticMethod() {
+                class InStaticMethod {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InStaticMethod
+                return new InStaticMethod();
+              }
+
+              Object instanceMethod() {
+                class InInstanceMethod {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InInstanceMethod
+                return new InInstanceMethod();
+              }
+
+              void lambda() {
+                Supplier<Object> consumer =
+                    () -> {
+                      class InLambda {}
+                      // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] InLambda
+                      return new InLambda();
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1746,55 +2593,56 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(QualifyTypeLocalClassChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "import java.util.function.Supplier;",
-            "class Test {",
-            "  // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "  static Object staticField = new Object() {};",
-            "",
-            "  // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "  Object instanceField = new Object() {};",
-            "",
-            "  static {",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "    new Object() {};",
-            "  }",
-            "",
-            "  {",
-            "    class InInstanceInitializer {}",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "    new Object() {};",
-            "  }",
-            "",
-            "  Test() { // in constructor",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "    new Object() {};",
-            "  }",
-            "",
-            "  static Object staticMethod() {",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "    return new Object() {};",
-            "  }",
-            "",
-            "  Object instanceMethod() {",
-            "    // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "    return new Object() {};",
-            "  }",
-            "",
-            "  void lambda() {",
-            "    Supplier<Object> consumer = () -> {",
-            "      // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object",
-            "      return new Object() {};",
-            "    };",
-            "  }",
-            "}")
+            """
+            import java.util.function.Supplier;
+
+            class Test {
+              // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+              static Object staticField = new Object() {};
+
+              // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+              Object instanceField = new Object() {};
+
+              static {
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                new Object() {};
+              }
+
+              {
+                class InInstanceInitializer {}
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                new Object() {};
+              }
+
+              Test() { // in constructor
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                new Object() {};
+              }
+
+              static Object staticMethod() {
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                return new Object() {};
+              }
+
+              Object instanceMethod() {
+                // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                return new Object() {};
+              }
+
+              void lambda() {
+                Supplier<Object> consumer =
+                    () -> {
+                      // BUG: Diagnostic contains: [QualifyTypeLocalClassChecker] Object
+                      return new Object() {};
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
   /** Test checker that adds @SuppressWarnings when compilation succeeds in the current unit. */
-  @BugPattern(
-      name = "AddSuppressWarningsIfCompilationSucceedsOnlyInSameCompilationUnit",
-      summary = "",
-      severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static final class AddSuppressWarningsIfCompilationSucceedsOnlyInSameCompilationUnit
       extends BugChecker implements ClassTreeMatcher {
     @Override
@@ -1806,22 +2654,23 @@ public class SuggestedFixesTest {
 
   @Test
   public void compilesWithFix_onlyInSameCompilationUnit() {
-    String[] unrelatedFile = {
-      "class ClassContainingRawType {",
-      // This unsuppressed raw type would prevent compilation.
-      "  java.util.List list;",
-      "}",
-    };
-
+    String unrelatedFile =
+        """
+        class ClassContainingRawType {
+          // This unsuppressed raw type would prevent compilation.
+          java.util.List list;
+        }
+        """;
     // This compilation will succeed because we only consider the compilation errors in the first
     // class.
     CompilationTestHelper.newInstance(
             AddSuppressWarningsIfCompilationSucceedsOnlyInSameCompilationUnit.class, getClass())
         .addSourceLines(
-            "OnlyInSameCompilationUnit.java", //
-            "// BUG: Diagnostic contains: foobar",
-            "class OnlyInSameCompilationUnit {",
-            "}")
+            "OnlyInSameCompilationUnit.java",
+            """
+            // BUG: Diagnostic contains: foobar
+            class OnlyInSameCompilationUnit {}
+            """)
         .addSourceLines("ClassContainingRawType.java", unrelatedFile)
         .doTest();
 
@@ -1829,20 +2678,19 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(
             AddSuppressWarningsIfCompilationSucceedsOnlyInSameCompilationUnit.class, getClass())
         .addSourceLines(
-            "OnlyInSameCompilationUnit.java", //
-            "class OnlyInSameCompilationUnit {",
-            // This unsuppressed raw type prevents compilation.
-            "  java.util.List list;",
-            "}")
+            "OnlyInSameCompilationUnit.java",
+            """
+            class OnlyInSameCompilationUnit {
+              // This unsuppressed raw type prevents compilation.
+              java.util.List list;
+            }
+            """)
         .addSourceLines("ClassContainingRawType.java", unrelatedFile)
         .doTest();
   }
 
   /** Test checker that adds @SuppressWarnings when compilation succeeds in all units. */
-  @BugPattern(
-      name = "AddSuppressWarningsIfCompilationSucceedsInAllCompilationUnits",
-      summary = "",
-      severity = ERROR)
+  @BugPattern(summary = "", severity = ERROR)
   public static final class AddSuppressWarningsIfCompilationSucceedsInAllCompilationUnits
       extends BugChecker implements ClassTreeMatcher {
     @Override
@@ -1858,16 +2706,59 @@ public class SuggestedFixesTest {
     CompilationTestHelper.newInstance(
             AddSuppressWarningsIfCompilationSucceedsInAllCompilationUnits.class, getClass())
         .addSourceLines(
-            "InAllCompilationUnits.java", //
-            "class InAllCompilationUnits {",
-            "}")
+            "InAllCompilationUnits.java",
+            """
+            class InAllCompilationUnits {}
+            """)
         .addSourceLines(
-            "ClassContainingRawType.java", //
-            "class ClassContainingRawType {",
-            // This unsuppressed raw type prevents re-compilation, so the other class is unchanged.
-            "  java.util.List list;",
-            "}")
+            "ClassContainingRawType.java",
+            """
+            class ClassContainingRawType {
+              // This unsuppressed raw type prevents re-compilation, so the other class is unchanged.
+              java.util.List list;
+            }
+            """)
         .doTest();
+  }
+
+  @Test
+  public void compilesWithFix_modularCompilation() throws Exception {
+    Path tempDir = Files.createTempDirectory("test-modular");
+    Path testFile = tempDir.resolve("Test.java");
+    Files.writeString(
+        testFile,
+        """
+        package foo;
+        class Test { int x = 0; }
+        """);
+    Path moduleInfo = tempDir.resolve("module-info.java");
+    Files.writeString(
+        moduleInfo,
+        """
+        module foo {}
+        """);
+    try (JavacFileManager fm = new JavacFileManager(new Context(), false, UTF_8)) {
+      fm.setLocationFromPaths(StandardLocation.SOURCE_PATH, ImmutableList.of(tempDir));
+      BaseErrorProneJavaCompiler compiler =
+          new BaseErrorProneJavaCompiler(
+              ScannerSupplier.fromBugCheckerClasses(CompilesWithFixChecker.class));
+      DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+      boolean success =
+          compiler
+              .getTask(
+                  new StringWriter(),
+                  fm,
+                  diagnostics,
+                  ImmutableList.of(),
+                  ImmutableList.of(),
+                  fm.getJavaFileObjects(moduleInfo, testFile))
+              .call();
+      assertThat(success).isFalse();
+      assertThat(
+              diagnostics.getDiagnostics().stream()
+                  .anyMatch(d -> d.getMessage(null).contains("[CompilesWithFixChecker]")))
+          .isTrue();
+    }
   }
 
   private static Description addSuppressWarningsIfCompilationSucceeds(
@@ -1876,13 +2767,12 @@ public class SuggestedFixesTest {
       boolean onlyInSameCompilationUnit,
       Function<? super Fix, Description> toDescriptionFn) {
     return Optional.of(SuggestedFix.prefixWith(tree, "@SuppressWarnings(\"foobar\") "))
-        .filter(
-            fix ->
-                SuggestedFixes.compilesWithFix(
-                    fix,
-                    state,
-                    ImmutableList.of("-Xlint:unchecked,rawtypes", "-Werror"),
-                    onlyInSameCompilationUnit))
+        .filter(fix ->
+            SuggestedFixes.compilesWithFix(
+                fix,
+                state,
+                ImmutableList.of("-Xlint:unchecked,rawtypes", "-Werror"),
+                onlyInSameCompilationUnit))
         .map(toDescriptionFn)
         .orElse(NO_MATCH);
   }
@@ -1907,24 +2797,66 @@ public class SuggestedFixesTest {
     BugCheckerRefactoringTestHelper.newInstance(CastTreeToIntChecker.class, getClass())
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  public int one() { return 1; }",
-            "  public int negateOne() { return ~1; }",
-            "  public int castOne() { return (short) 1; }",
-            "  public int onePlusOne() { return 1 + 1; }",
-            "  public int simpleAssignment() { int a = 0; return a = 1; }",
-            "  public int compoundAssignment() { int a = 0; return a += 1; }",
-            "}")
+            """
+            class Test {
+              public int one() {
+                return 1;
+              }
+
+              public int negateOne() {
+                return ~1;
+              }
+
+              public int castOne() {
+                return (short) 1;
+              }
+
+              public int onePlusOne() {
+                return 1 + 1;
+              }
+
+              public int simpleAssignment() {
+                int a = 0;
+                return a = 1;
+              }
+
+              public int compoundAssignment() {
+                int a = 0;
+                return a += 1;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  public int one() { return (int) 1; }",
-            "  public int negateOne() { return (int) ~1; }",
-            "  public int castOne() { return (int) (short) 1; }",
-            "  public int onePlusOne() { return (int) (1 + 1); }",
-            "  public int simpleAssignment() { int a = 0; return (int) (a = 1); }",
-            "  public int compoundAssignment() { int a = 0; return (int) (a += 1); }",
-            "}")
+            """
+            class Test {
+              public int one() {
+                return (int) 1;
+              }
+
+              public int negateOne() {
+                return (int) ~1;
+              }
+
+              public int castOne() {
+                return (int) (short) 1;
+              }
+
+              public int onePlusOne() {
+                return (int) (1 + 1);
+              }
+
+              public int simpleAssignment() {
+                int a = 0;
+                return (int) (a = 1);
+              }
+
+              public int compoundAssignment() {
+                int a = 0;
+                return (int) (a += 1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -1956,5 +2888,198 @@ public class SuggestedFixesTest {
     assertThat(fix.getImportsToAdd())
         .containsExactly("import static " + firstImport, "import static " + secondImport)
         .inOrder();
+  }
+
+  @Test
+  public void removeElement() {
+    BugCheckerRefactoringTestHelper.newInstance(RemoveAnnotationElement.class, getClass())
+        .addInputLines(
+            "Anno.java",
+            """
+            @interface Anno {
+              int a() default 0;
+
+              int b() default 0;
+            }
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              @Anno(a = 1)
+              class A {}
+
+              @Anno(a = 1, b = 2)
+              class B {}
+
+              @Anno(b = 1, a = 2)
+              class C {}
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              @Anno()
+              class A {}
+
+              @Anno(b = 2)
+              class B {}
+
+              @Anno(b = 1)
+              class C {}
+            }
+            """)
+        .doTest();
+  }
+
+  /** Bugpattern for testing. */
+  @BugPattern(name = "RemoveAnnotationElement", summary = "", severity = ERROR)
+  public static final class RemoveAnnotationElement extends BugChecker
+      implements AnnotationTreeMatcher {
+    @Override
+    public Description matchAnnotation(AnnotationTree tree, VisitorState state) {
+      return tree.getArguments().stream()
+          .filter(t ->
+              ((IdentifierTree) ((AssignmentTree) t).getVariable()).getName().contentEquals("a"))
+          .findFirst()
+          .map(t -> describeMatch(t, SuggestedFixes.removeElement(t, tree.getArguments(), state)))
+          .orElse(NO_MATCH);
+    }
+  }
+
+  /** A test check that replaces var with explicit types. */
+  @BugPattern(summary = "Replace var with a type", severity = ERROR)
+  public static class ReplaceVarWithType extends BugChecker
+      implements BugChecker.VariableTreeMatcher {
+
+    @Override
+    public Description matchVariable(VariableTree tree, VisitorState state) {
+      SuggestedFix.Builder fix = SuggestedFix.builder();
+      String replacement = SuggestedFixes.qualifyType(state, fix, ASTHelpers.getType(tree));
+      SuggestedFixes.replaceVariableType(tree, replacement, state).ifPresent(fix::merge);
+      return describeMatch(tree, fix.build());
+    }
+  }
+
+  @Test
+  public void replaceVarWithType() {
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceVarWithType.class, getClass())
+        .addInputLines(
+            "Lib.java",
+            """
+            import java.util.Collection;
+            import java.util.Map;
+
+            abstract class Lib {
+              abstract Map<String, ? extends Collection<?>> getA();
+            }
+            """)
+        .expectUnchanged()
+        .addInputLines(
+            "Test.java",
+            """
+            abstract class Test extends Lib {
+              void f() {
+                var a = getA();
+                var b = 2;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import java.util.Collection;
+            import java.util.Map;
+
+            abstract class Test extends Lib {
+              void f() {
+                Map<String, ? extends Collection<?>> a = getA();
+                int b = 2;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  /** A test check that tests variableNamer with extraScope. */
+  @BugPattern(summary = "Test variable namer with extra scope", severity = ERROR)
+  public static class VariableNamerChecker extends BugChecker implements MethodTreeMatcher {
+    @Override
+    public Description matchMethod(MethodTree tree, VisitorState state) {
+      if (tree.getBody() == null || tree.getBody().getStatements().isEmpty()) {
+        return NO_MATCH;
+      }
+      SuggestedFixes.VariableNamer namer =
+          SuggestedFixes.variableNamer(state, tree.getBody().getStatements());
+      String name = namer.avoidShadowing("x");
+      return describeMatch(
+          tree,
+          SuggestedFix.prefixWith(
+              tree.getBody().getStatements().get(0), "int " + name + " = 0;\n"));
+    }
+  }
+
+  @Test
+  public void variableNamerWithExtraScope() {
+    BugCheckerRefactoringTestHelper.newInstance(VariableNamerChecker.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int a = 1;
+                int x = 2;
+                class Local {
+                  int x1 = 3;
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int x2 = 0;
+                int a = 1;
+                int x = 2;
+                class Local {
+                  int x1 = 3;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void variableNamerWithExtraScope_localClassClash() {
+    BugCheckerRefactoringTestHelper.newInstance(VariableNamerChecker.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int a = 1;
+                int x = 2;
+                class x2 {}
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              void f() {
+                int x3 = 0;
+                int a = 1;
+                int x = 2;
+                class x2 {}
+              }
+            }
+            """)
+        .doTest();
   }
 }

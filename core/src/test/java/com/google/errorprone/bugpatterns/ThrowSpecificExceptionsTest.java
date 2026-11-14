@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -26,18 +27,48 @@ import org.junit.runners.JUnit4;
 public final class ThrowSpecificExceptionsTest {
   private final CompilationTestHelper helper =
       CompilationTestHelper.newInstance(ThrowSpecificExceptions.class, getClass());
+  private final BugCheckerRefactoringTestHelper refactoringHelper =
+      BugCheckerRefactoringTestHelper.newInstance(ThrowSpecificExceptions.class, getClass());
 
   @Test
   public void positive() {
     helper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: new VerifyException",
-            "    throw new RuntimeException();",
-            "  }",
-            "}")
+            """
+            public class Test {
+              void test() {
+                // BUG: Diagnostic contains: new VerifyException
+                throw new RuntimeException();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void refactoring() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              void test() {
+                throw new RuntimeException();
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.google.common.base.VerifyException;
+
+            public class Test {
+              void test() {
+                throw new VerifyException();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -46,11 +77,13 @@ public final class ThrowSpecificExceptionsTest {
     helper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  void test() {",
-            "    throw new RuntimeException() {};",
-            "  }",
-            "}")
+            """
+            public class Test {
+              void test() {
+                throw new RuntimeException() {};
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -59,11 +92,13 @@ public final class ThrowSpecificExceptionsTest {
     helper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  void test() {",
-            "    throw new IllegalStateException();",
-            "  }",
-            "}")
+            """
+            public class Test {
+              void test() {
+                throw new IllegalStateException();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -72,11 +107,13 @@ public final class ThrowSpecificExceptionsTest {
     helper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  StackTraceElement[] getStackTrace() {",
-            "    return new Throwable().getStackTrace();",
-            "  }",
-            "}")
+            """
+            public class Test {
+              StackTraceElement[] getStackTrace() {
+                return new Throwable().getStackTrace();
+              }
+            }
+            """)
         .doTest();
   }
 }

@@ -14,6 +14,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 
 import com.google.errorprone.BugPattern;
@@ -27,13 +28,13 @@ import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Convert;
 import javax.lang.model.type.TypeKind;
 
-/** @author lowasser@google.com (Louis Wasserman) */
+/**
+ * @author lowasser@google.com (Louis Wasserman)
+ */
 @BugPattern(
-    name = "StringBuilderInitWithChar",
     severity = ERROR,
     summary = "StringBuilder does not have a char constructor; this invokes the int constructor.")
 public class StringBuilderInitWithChar extends BugChecker implements NewClassTreeMatcher {
@@ -42,7 +43,7 @@ public class StringBuilderInitWithChar extends BugChecker implements NewClassTre
     if (ASTHelpers.isSameType(
             state.getSymtab().stringBuilderType, ASTHelpers.getType(tree.getIdentifier()), state)
         && tree.getArguments().size() == 1) {
-      ExpressionTree argument = tree.getArguments().get(0);
+      ExpressionTree argument = getOnlyElement(tree.getArguments());
       Type type = ASTHelpers.getType(argument);
       if (type.getKind() == TypeKind.CHAR) {
         if (argument.getKind() == Kind.CHAR_LITERAL) {
@@ -54,8 +55,7 @@ public class StringBuilderInitWithChar extends BugChecker implements NewClassTre
           return describeMatch(
               tree,
               SuggestedFix.replace(
-                  tree,
-                  "new StringBuilder().append(" + state.getSourceForNode((JCTree) argument) + ")"));
+                  tree, "new StringBuilder().append(" + state.getSourceForNode(argument) + ")"));
         }
       }
     }

@@ -1,6 +1,6 @@
 Guice bindings are keyed by a pair of (optional Annotation, Type).
 
-In most cirumstances, one doesn't need the annotation, as there's really just
+In most circumstances, one doesn't need the annotation, as there's really just
 one active implementation:
 
 ```java
@@ -36,5 +36,5 @@ bind(Integer.class).toInstance(80);
 To avoid confusion in these circumstances, please use a Qualifier annotation
 when binding simple value types.
 
-[`@Qualifier`]: http://docs.oracle.com/javaee/6/api/javax/inject/Qualifier.html
+[`@Qualifier`]: https://docs.oracle.com/javaee/6/api/javax/inject/Qualifier.html
 [`@BindingAnnotation`]: https://github.com/google/guice/wiki/BindingAnnotations

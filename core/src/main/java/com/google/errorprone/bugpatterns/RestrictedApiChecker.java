@@ -17,25 +17,28 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
-import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.ASTHelpers.streamSuperMethods;
+import static com.google.errorprone.util.AnnotationNames.RESTRICTED_API_ANNOTATION;
+import static com.google.errorprone.util.MoreAnnotations.getTypes;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.RestrictedApi;
 import com.google.errorprone.bugpatterns.BugChecker.AnnotationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MemberReferenceTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
+import com.google.errorprone.bugpatterns.restrictedapi.Restriction;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
-import com.google.errorprone.util.MoreAnnotations;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ExpressionTree;
@@ -44,24 +47,21 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
-import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.model.AnnotationProxyMaker;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
-import javax.annotation.Nullable;
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.type.TypeMirror;
+import org.jspecify.annotations.Nullable;
 
 /** Check for non-allowlisted callers to RestrictedApiChecker. */
 @BugPattern(
-    name = "RestrictedApiChecker",
+    name = "RestrictedApi",
     summary = "Check for non-allowlisted callers to RestrictedApiChecker.",
     severity = SeverityLevel.ERROR)
 public class RestrictedApiChecker extends BugChecker
@@ -71,13 +71,6 @@ public class RestrictedApiChecker extends BugChecker
         MemberReferenceTreeMatcher {
 
   /**
-   * The name to use when reporting findings. It's important that this DOES NOT match {@link
-   * #canonicalName()}, because otherwise changing the severity won't work.
-   */
-  // TODO(b/151087021): rationalize this.
-  private static final String CHECK_NAME = "RestrictedApi";
-
-  /**
    * Validates a {@code @RestrictedApi} annotation and that the declared restriction makes sense.
    *
    * <p>The other match functions in this class check the <em>usages</em> of a restricted API.
@@ -85,14 +78,18 @@ public class RestrictedApiChecker extends BugChecker
   @Override
   public Description matchAnnotation(AnnotationTree tree, VisitorState state) {
     // TODO(bangert): Validate all the fields
-    if (!getSymbol(tree).getQualifiedName().contentEquals(RestrictedApi.class.getName())) {
+    if (!getSymbol(tree).equals(RESTRICTED_API_ANNOTATION.symbol(state))) {
       return NO_MATCH;
     }
     // TODO(bangert): make a more elegant API to get the annotation within an annotation tree.
     // Maybe find the declared object and get annotations on that...
-    Attribute.Compound restrictedApi = (Attribute.Compound) ASTHelpers.getAnnotationMirror(tree);
+    AnnotationMirror restrictedApi = ASTHelpers.getAnnotationMirror(tree);
     if (restrictedApi == null) {
       return NO_MATCH;
+    }
+    Optional<String> pathError = Restriction.validateAnnotation(restrictedApi, getSymbol(tree));
+    if (pathError.isPresent()) {
+      return buildDescription(tree).setMessage(pathError.get()).build();
     }
     return NO_MATCH;
   }
@@ -102,7 +99,7 @@ public class RestrictedApiChecker extends BugChecker
 
   private static Tree getAnnotationArgumentTree(AnnotationTree tree, String name) {
     return tree.getArguments().stream()
-        .filter(arg -> arg.getKind().equals(Tree.Kind.ASSIGNMENT))
+        .filter(arg -> arg instanceof AssignmentTree)
         .map(arg -> (AssignmentTree) arg)
         .filter(arg -> isVariableTreeWithName(arg, name))
         .map(AssignmentTree::getExpression)
@@ -112,8 +109,8 @@ public class RestrictedApiChecker extends BugChecker
 
   private static boolean isVariableTreeWithName(AssignmentTree tree, String name) {
     ExpressionTree variable = tree.getVariable();
-    return variable instanceof IdentifierTree
-        && ((IdentifierTree) variable).getName().contentEquals(name);
+    return variable instanceof IdentifierTree identifierTree
+        && identifierTree.getName().contentEquals(name);
   }
 
   @Override
@@ -129,7 +126,7 @@ public class RestrictedApiChecker extends BugChecker
   /**
    * Returns the constructor type for the supplied constructor symbol of an anonymous class object
    * that can be matched with a corresponding constructor in its direct superclass. If the anonymous
-   * object creation expression is qualified, i.e, is of the form {@code enclosingExpression.new
+   * object creation expression is qualified, i.e., is of the form {@code enclosingExpression.new
    * identifier (arguments)} the constructor type includes an implicit first parameter with type
    * matching enclosingExpression. In such a case a matching constructor type is created by dropping
    * this implicit parameter.
@@ -151,7 +148,7 @@ public class RestrictedApiChecker extends BugChecker
       return true;
     }
     List<? extends ExpressionTree> arguments = tree.getArguments();
-    return !arguments.isEmpty() && ((JCTree) arguments.get(0)).hasTag(JCTree.Tag.NULLCHK);
+    return !arguments.isEmpty() && ((JCTree) arguments.getFirst()).hasTag(JCTree.Tag.NULLCHK);
   }
 
   private static MethodSymbol superclassConstructorSymbol(NewClassTree tree, VisitorState state) {
@@ -165,12 +162,11 @@ public class RestrictedApiChecker extends BugChecker
         getOnlyElement(
             superclass
                 .members()
-                .getSymbols(
-                    member ->
-                        member.isConstructor()
-                            && types.hasSameArgs(
-                                member.asMemberOf(anonymousClassType, types).asType(),
-                                matchingConstructorType)));
+                .getSymbols(member ->
+                    member.isConstructor()
+                        && types.hasSameArgs(
+                            member.asMemberOf(anonymousClassType, types).asType(),
+                            matchingConstructorType)));
   }
 
   @Override
@@ -184,100 +180,79 @@ public class RestrictedApiChecker extends BugChecker
 
   private Description checkMethodUse(
       MethodSymbol method, ExpressionTree where, VisitorState state) {
-    Attribute.Compound annotation = getRestrictedApiAnnotation(method, state);
+    AnnotationMirror annotation = getRestrictedApiAnnotation(method, state);
     if (annotation != null) {
       return checkRestriction(annotation, where, state);
     }
 
     // Try each super method for @RestrictedApi
-    Optional<MethodSymbol> superWithRestrictedApi =
-        ASTHelpers.findSuperMethods(method, state.getTypes()).stream()
-            .filter((t) -> ASTHelpers.hasAnnotation(t, RestrictedApi.class, state))
-            .findFirst();
-    if (!superWithRestrictedApi.isPresent()) {
-      return NO_MATCH;
-    }
-    return checkRestriction(
-        getRestrictedApiAnnotation(superWithRestrictedApi.get(), state), where, state);
+    return streamSuperMethods(method, state.getTypes())
+        .filter(t -> hasAnnotation(t, RESTRICTED_API_ANNOTATION, state))
+        .findFirst()
+        .map(superWithRestrictedApi ->
+            checkRestriction(
+                getRestrictedApiAnnotation(superWithRestrictedApi, state), where, state))
+        .orElse(NO_MATCH);
   }
 
-  @Nullable
-  private static Attribute.Compound getRestrictedApiAnnotation(Symbol sym, VisitorState state) {
+  private static @Nullable AnnotationMirror getRestrictedApiAnnotation(
+      Symbol sym, VisitorState state) {
     if (sym == null) {
       return null;
     }
-    return sym.attribute(state.getSymbolFromString(RestrictedApi.class.getName()));
+    return sym.attribute(RESTRICTED_API_ANNOTATION.symbol(state));
   }
 
   private Description checkRestriction(
-      @Nullable Attribute.Compound attribute, Tree where, VisitorState state) {
+      @Nullable AnnotationMirror attribute, Tree where, VisitorState state) {
     if (attribute == null) {
       return NO_MATCH;
     }
-    RestrictedApi restriction =
-        AnnotationProxyMaker.generateAnnotation(attribute, RestrictedApi.class);
+    Restriction restriction = Restriction.from(attribute).orElse(null);
     if (restriction == null) {
       return NO_MATCH;
     }
-    if (!restriction.allowedOnPath().isEmpty()) {
-      JCCompilationUnit compilationUnit = (JCCompilationUnit) state.getPath().getCompilationUnit();
-      String path = compilationUnit.getSourceFile().toUri().toString();
-      if (Pattern.matches(restriction.allowedOnPath(), path)) {
-        return NO_MATCH;
-      }
+    if (restriction.isPathOrTestonlyExempt(where, state)) {
+      return NO_MATCH;
     }
     boolean warn = Matchers.enclosingNode(shouldAllowWithWarning(attribute)).matches(where, state);
-
-    boolean allow = Matchers.enclosingNode(shouldAllow(attribute)).matches(where, state);
+    boolean allow = restriction.isAllowlisted(where, state);
     if (warn && allow) {
       // TODO(bangert): Clarify this message if possible.
-      return buildDescription(where)
-          .setMessage(
-              "The Restricted API ("
-                  + restriction.explanation()
-                  + ") call here is both allowlisted-as-warning and "
-                  + "silently allowlisted. "
-                  + "Please remove one of the conflicting suppression annotations.")
-          .build();
+      var descriptionBuilder =
+          buildDescription(where)
+              .setMessage(
+                  "The Restricted API ("
+                      + restriction.explanation()
+                      + ") call here is both allowlisted-as-warning and "
+                      + "silently allowlisted. "
+                      + "Please remove one of the conflicting suppression annotations.");
+
+      if (!restriction.link().isEmpty()) {
+        descriptionBuilder.setLinkUrl(restriction.link());
+      }
+      return descriptionBuilder.build();
     }
     if (allow) {
       return NO_MATCH;
     }
     SeverityLevel level = warn ? SeverityLevel.WARNING : SeverityLevel.ERROR;
-
     Description.Builder description =
-        Description.builder(
-            where, CHECK_NAME, restriction.link(), level, restriction.explanation());
+        buildDescription(where).setMessage(restriction.explanation()).overrideSeverity(level);
+    if (!restriction.link().isEmpty()) {
+      description.setLinkUrl(restriction.link());
+    }
     return description.build();
   }
 
   // TODO(bangert): Memoize these if necessary.
-  private static Matcher<Tree> shouldAllow(Attribute.Compound api) {
-    Optional<Attribute> allowlistAnnotations =
-        MoreAnnotations.getValue(api, "allowlistAnnotations");
+  private static Matcher<Tree> shouldAllowWithWarning(AnnotationMirror api) {
+    ImmutableList<TypeMirror> allowlistWithWarningAnnotations =
+        getTypes(api, "allowlistWithWarningAnnotations");
     // TODO(b/178905039): remove handling of legacy names
-    if (!allowlistAnnotations.isPresent()) {
-      allowlistAnnotations = MoreAnnotations.getValue(api, "whitelistAnnotations");
+    if (allowlistWithWarningAnnotations.isEmpty()) {
+      allowlistWithWarningAnnotations = getTypes(api, "whitelistWithWarningAnnotations");
     }
-    return Matchers.hasAnyAnnotation(
-        allowlistAnnotations
-            .map(MoreAnnotations::asTypes)
-            .orElse(Stream.empty())
-            .collect(toImmutableList()));
-  }
-
-  private static Matcher<Tree> shouldAllowWithWarning(Attribute.Compound api) {
-    Optional<Attribute> allowlistWithWarningAnnotations =
-        MoreAnnotations.getValue(api, "allowlistWithWarningAnnotations");
-    // TODO(b/178905039): remove handling of legacy names
-    if (!allowlistWithWarningAnnotations.isPresent()) {
-      allowlistWithWarningAnnotations =
-          MoreAnnotations.getValue(api, "whitelistWithWarningAnnotations");
-    }
-    return Matchers.hasAnyAnnotation(
-        allowlistWithWarningAnnotations
-            .map(MoreAnnotations::asTypes)
-            .orElse(Stream.empty())
-            .collect(toImmutableList()));
+    return Matchers.hasAnyAnnotation(allowlistWithWarningAnnotations);
   }
 }

@@ -23,7 +23,7 @@ import com.google.common.collect.ImmutableList;
 import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCMemberReference;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code UTree} representation of a {@code MemberReferenceTree}
@@ -57,9 +57,9 @@ abstract class UMemberReference extends UExpression implements MemberReferenceTr
   @Override
   public Choice<Unifier> visitMemberReference(MemberReferenceTree node, Unifier unifier) {
     return Choice.condition(getMode() == node.getMode(), unifier)
-        .thenChoose(unifications(getQualifierExpression(), node.getQualifierExpression()))
-        .thenChoose(unifications(getName(), node.getName()))
-        .thenChoose(unifications(getTypeArguments(), node.getTypeArguments()));
+        .flatMap(unifications(getQualifierExpression(), node.getQualifierExpression()))
+        .flatMap(unifications(getName(), node.getName()))
+        .flatMap(unifications(getTypeArguments(), node.getTypeArguments()));
   }
 
   @Override
@@ -83,6 +83,5 @@ abstract class UMemberReference extends UExpression implements MemberReferenceTr
   public abstract StringName getName();
 
   @Override
-  @Nullable
-  public abstract ImmutableList<UExpression> getTypeArguments();
+  public abstract @Nullable ImmutableList<UExpression> getTypeArguments();
 }

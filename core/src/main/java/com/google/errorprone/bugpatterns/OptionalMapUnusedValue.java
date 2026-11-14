@@ -35,7 +35,6 @@ import com.sun.source.tree.Tree.Kind;
 
 /** Replaces {@code Optional.map} with {@code Optional.ifPresent} if the value is unused. */
 @BugPattern(
-    name = "OptionalMapUnusedValue",
     summary = "Optional.ifPresent is preferred over Optional.map when the return value is unused",
     severity = ERROR)
 public final class OptionalMapUnusedValue extends BugChecker
@@ -64,8 +63,7 @@ public final class OptionalMapUnusedValue extends BugChecker
   // TODO(b/170476239): Cover all the cases in which the argument is void-compatible, see
   // JLS 15.12.2.1
   private static boolean isVoidCompatibleLambda(ExpressionTree tree, VisitorState state) {
-    if (tree instanceof LambdaExpressionTree) {
-      LambdaExpressionTree lambdaTree = (LambdaExpressionTree) tree;
+    if (tree instanceof LambdaExpressionTree lambdaTree) {
       if (lambdaTree.getBodyKind().equals(LambdaExpressionTree.BodyKind.EXPRESSION)) {
         return kindIs(Kind.METHOD_INVOCATION).matches(lambdaTree.getBody(), state);
       }

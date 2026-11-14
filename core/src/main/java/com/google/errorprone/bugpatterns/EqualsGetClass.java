@@ -63,8 +63,9 @@ import javax.lang.model.element.Modifier;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "EqualsGetClass",
-    summary = "Prefer instanceof to getClass when implementing Object#equals.",
+    summary =
+        "Prefer instanceof to getClass when implementing Object#equals. Note that this may be a"
+            + " behaviour change.",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
 public final class EqualsGetClass extends BugChecker implements MethodInvocationTreeMatcher {
@@ -88,7 +89,7 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
       return Description.NO_MATCH;
     }
     ClassSymbol classSymbol = getSymbol(classTree);
-    if (classSymbol == null || classSymbol.isAnonymous()) {
+    if (classSymbol.isAnonymous()) {
       return Description.NO_MATCH;
     }
     MethodTree methodTree = (MethodTree) methodTreePath.getLeaf();
@@ -98,10 +99,7 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
     VariableTree parameter = getOnlyElement(methodTree.getParameters());
     ExpressionTree receiver = getReceiver(tree);
     VarSymbol symbol = getSymbol(parameter);
-    if (symbol == null
-        || receiver == null
-        || receiver.getKind() != Kind.IDENTIFIER
-        || !symbol.equals(getSymbol(receiver))) {
+    if (!(receiver instanceof IdentifierTree) || !symbol.equals(getSymbol(receiver))) {
       return Description.NO_MATCH;
     }
     EqualsFixer fixer = new EqualsFixer(symbol, getSymbol(classTree), state);
@@ -109,10 +107,10 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
     return describeMatch(methodTree, fixer.getFix());
   }
 
-  private static class EqualsFixer extends TreePathScanner<Void, Void> {
+  private static final class EqualsFixer extends TreePathScanner<Void, Void> {
 
     private static final Matcher<ExpressionTree> GET_CLASS =
-        instanceMethod().onDescendantOf("java.lang.Object").named("getClass").withParameters();
+        instanceMethod().onDescendantOf("java.lang.Object").named("getClass").withNoParameters();
 
     private static final Matcher<ExpressionTree> THIS_CLASS =
         anyOf(
@@ -125,10 +123,10 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
         return true;
       }
       while (!(receiver instanceof IdentifierTree)) {
-        if (receiver instanceof ParenthesizedTree) {
-          receiver = ((ParenthesizedTree) receiver).getExpression();
-        } else if (receiver instanceof TypeCastTree) {
-          receiver = ((TypeCastTree) receiver).getExpression();
+        if (receiver instanceof ParenthesizedTree parenthesizedTree) {
+          receiver = parenthesizedTree.getExpression();
+        } else if (receiver instanceof TypeCastTree typeCastTree) {
+          receiver = typeCastTree.getExpression();
         } else {
           return false;
         }
@@ -138,12 +136,8 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
     }
 
     private static boolean matchesClass(ExpressionTree tree) {
-      Symbol symbol = getSymbol(tree);
-      if (!(symbol instanceof VarSymbol)) {
-        return false;
-      }
-      VarSymbol varSymbol = (VarSymbol) symbol;
-      return varSymbol.getSimpleName().contentEquals("class");
+      return getSymbol(tree) instanceof VarSymbol varSymbol
+          && varSymbol.getSimpleName().contentEquals("class");
     }
 
     private final Symbol parameter;
@@ -247,8 +241,7 @@ public final class EqualsGetClass extends BugChecker implements MethodInvocation
         enclosingPath = enclosingPath.getParentPath();
       }
       Tree enclosing = enclosingPath.getLeaf();
-      if (enclosing instanceof IfTree) {
-        IfTree ifTree = (IfTree) enclosing;
+      if (enclosing instanceof IfTree ifTree) {
         if (ifTree.getElseStatement() == null) {
           fix.replace(ifTree, "");
         } else {

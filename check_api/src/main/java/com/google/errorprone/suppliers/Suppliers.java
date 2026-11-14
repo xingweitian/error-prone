@@ -18,9 +18,9 @@ package com.google.errorprone.suppliers;
 
 import static java.util.Objects.requireNonNull;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
@@ -29,8 +29,11 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
+import org.jspecify.annotations.Nullable;
 
-/** @author alexeagle@google.com (Alex Eagle) */
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
 public final class Suppliers {
 
   /**
@@ -42,17 +45,13 @@ public final class Suppliers {
    * @param expressionSupplier a supplier of the expression which has a generic type
    * @param n the position of the generic argument
    */
-  public static Supplier<Type> genericTypeOf(
-      final Supplier<ExpressionTree> expressionSupplier, final int n) {
-    return new Supplier<Type>() {
-      @Override
-      public Type get(VisitorState state) {
-        JCExpression jcExpression = (JCExpression) expressionSupplier.get(state);
-        if (jcExpression.type.getTypeArguments().size() <= n) {
-          return state.getSymtab().objectType;
-        }
-        return jcExpression.type.getTypeArguments().get(n);
+  public static Supplier<Type> genericTypeOf(Supplier<ExpressionTree> expressionSupplier, int n) {
+    return state -> {
+      JCExpression jcExpression = (JCExpression) expressionSupplier.get(state);
+      if (jcExpression.type.getTypeArguments().size() <= n) {
+        return state.getSymtab().objectType;
       }
+      return jcExpression.type.getTypeArguments().get(n);
     };
   }
 
@@ -64,16 +63,13 @@ public final class Suppliers {
    * @param typeSupplier a supplier of the expression which has a generic type
    * @param n the position of the generic argument
    */
-  public static Supplier<Type> genericTypeOfType(final Supplier<Type> typeSupplier, final int n) {
-    return new Supplier<Type>() {
-      @Override
-      public Type get(VisitorState state) {
-        Type type = typeSupplier.get(state);
-        if (type.getTypeArguments().size() <= n) {
-          return state.getSymtab().objectType;
-        }
-        return type.getTypeArguments().get(n);
+  public static Supplier<Type> genericTypeOfType(Supplier<Type> typeSupplier, int n) {
+    return state -> {
+      Type type = typeSupplier.get(state);
+      if (type.getTypeArguments().size() <= n) {
+        return state.getSymtab().objectType;
       }
+      return type.getTypeArguments().get(n);
     };
   }
 
@@ -83,13 +79,9 @@ public final class Suppliers {
    * getC()} method invocation, then this supplier gives the expression {@code a.getB()}.
    */
   public static Supplier<Type> receiverType() {
-    return new Supplier<Type>() {
-      @Override
-      public Type get(VisitorState state) {
-        MethodInvocationTree methodInvocation = (MethodInvocationTree) state.getPath().getLeaf();
-        return ASTHelpers.getReceiverType(methodInvocation.getMethodSelect());
-      }
-    };
+    return state ->
+        ASTHelpers.getReceiverType(
+            ((MethodInvocationTree) state.getPath().getLeaf()).getMethodSelect());
   }
 
   /**
@@ -98,193 +90,105 @@ public final class Suppliers {
    * getC()} method invocation, then this supplier gives the expression {@code a.getB()}.
    */
   public static Supplier<ExpressionTree> receiverInstance() {
-    return new Supplier<ExpressionTree>() {
-      @Override
-      public ExpressionTree get(VisitorState state) {
-        MethodInvocationTree method = (MethodInvocationTree) state.getPath().getLeaf();
-        return ((JCFieldAccess) method.getMethodSelect()).getExpression();
-      }
-    };
+    return state ->
+        ((JCFieldAccess) ((MethodInvocationTree) state.getPath().getLeaf()).getMethodSelect())
+            .getExpression();
   }
 
   /**
    * Given the string representation of a type, supplies the corresponding type.
    *
+   * <p>Prefer {@link ClassName#of(String)} for class and interface types.
+   *
    * @param typeString a string representation of a type, e.g., "java.util.List"
    */
-  public static Supplier<Type> typeFromString(final String typeString) {
+  public static Supplier<Type> typeFromString(String typeString) {
     requireNonNull(typeString);
     return VisitorState.memoize(state -> state.getTypeFromString(typeString));
   }
 
-  /** Given the class representation of a type, supplies the corresponding type. */
+  /**
+   * Given the class representation of a type, supplies the corresponding type.
+   *
+   * <p>Prefer {@link ClassName#of(String)} for class and interface types.
+   */
   public static Supplier<Type> typeFromClass(Class<?> inputClass) {
     return typeFromString(inputClass.getName());
   }
 
   public static final Supplier<Type> JAVA_LANG_VOID_TYPE = typeFromClass(Void.class);
 
-  public static final Supplier<Type> VOID_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().voidType;
-        }
-      };
+  public static final Supplier<Type> VOID_TYPE = state -> state.getSymtab().voidType;
 
-  public static final Supplier<Type> JAVA_LANG_BOOLEAN_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getTypeFromString("java.lang.Boolean");
-        }
-      };
+  public static final Supplier<Type> JAVA_LANG_BOOLEAN_TYPE = typeFromString("java.lang.Boolean");
 
-  public static final Supplier<Type> JAVA_LANG_INTEGER_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getTypeFromString("java.lang.Integer");
-        }
-      };
+  public static final Supplier<Type> JAVA_LANG_INTEGER_TYPE = typeFromString("java.lang.Integer");
 
-  public static final Supplier<Type> JAVA_LANG_LONG_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getTypeFromString("java.lang.Long");
-        }
-      };
+  public static final Supplier<Type> JAVA_LANG_LONG_TYPE = typeFromString("java.lang.Long");
 
-  public static final Supplier<Type> STRING_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().stringType;
-        }
-      };
+  public static final Supplier<Type> STRING_TYPE = state -> state.getSymtab().stringType;
 
-  public static final Supplier<Type> BOOLEAN_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().booleanType;
-        }
-      };
+  public static final Supplier<Type> BOOLEAN_TYPE = state -> state.getSymtab().booleanType;
 
-  public static final Supplier<Type> BYTE_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().byteType;
-        }
-      };
+  public static final Supplier<Type> BYTE_TYPE = state -> state.getSymtab().byteType;
 
-  public static final Supplier<Type> INT_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().intType;
-        }
-      };
+  public static final Supplier<Type> SHORT_TYPE = state -> state.getSymtab().shortType;
 
-  public static final Supplier<Type> LONG_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().longType;
-        }
-      };
+  public static final Supplier<Type> INT_TYPE = state -> state.getSymtab().intType;
 
-  public static final Supplier<Type> DOUBLE_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().doubleType;
-        }
-      };
+  public static final Supplier<Type> LONG_TYPE = state -> state.getSymtab().longType;
 
-  public static final Supplier<Type> CHAR_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().charType;
-        }
-      };
+  public static final Supplier<Type> FLOAT_TYPE = state -> state.getSymtab().floatType;
 
-  public static final Supplier<Type> OBJECT_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().objectType;
-        }
-      };
+  public static final Supplier<Type> DOUBLE_TYPE = state -> state.getSymtab().doubleType;
 
-  public static final Supplier<Type> EXCEPTION_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().exceptionType;
-        }
-      };
+  public static final Supplier<Type> CHAR_TYPE = state -> state.getSymtab().charType;
 
-  public static final Supplier<Type> THROWABLE_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().throwableType;
-        }
-      };
+  public static final Supplier<Type> OBJECT_TYPE = state -> state.getSymtab().objectType;
 
-  public static final Supplier<Type> ANNOTATION_TYPE =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return state.getSymtab().annotationType;
-        }
-      };
+  public static final Supplier<Type> CLASS_TYPE = state -> state.getSymtab().classType;
+
+  public static final Supplier<Type> EXCEPTION_TYPE = state -> state.getSymtab().exceptionType;
+
+  public static final Supplier<Type> THROWABLE_TYPE = state -> state.getSymtab().throwableType;
+
+  public static final Supplier<Type> ANNOTATION_TYPE = state -> state.getSymtab().annotationType;
 
   /**
    * Supplies what was given. Useful for adapting to methods that require a supplier.
    *
    * @param toSupply the item to supply
    */
-  public static <T> Supplier<T> identitySupplier(final T toSupply) {
-    return new Supplier<T>() {
-      @Override
-      public T get(VisitorState state) {
-        return toSupply;
-      }
-    };
+  public static <T> Supplier<T> identitySupplier(T toSupply) {
+    return state -> toSupply;
   }
 
   public static final Supplier<Type> ENCLOSING_CLASS =
-      new Supplier<Type>() {
-        @Override
-        public Type get(VisitorState state) {
-          return ASTHelpers.getType(state.findEnclosing(ClassTree.class));
-        }
-      };
+      state -> ASTHelpers.getType(state.findEnclosing(ClassTree.class));
 
-  public static Supplier<Type> arrayOf(final Supplier<Type> elementType) {
-    return new Supplier<Type>() {
-      @Override
-      public Type get(VisitorState state) {
-        return new Type.ArrayType(elementType.get(state), state.getSymtab().arraysType.tsym);
-      }
-    };
+  public static Supplier<Type> arrayOf(Supplier<Type> elementType) {
+    return state -> new Type.ArrayType(elementType.get(state), state.getSymtab().arraysType.tsym);
   }
 
+  /**
+   * Supplies the array type {@code elementType[]}, or {@code null} if {@code elementType} is not
+   * available in the current compilation.
+   */
+  public static Supplier<@Nullable Type> arrayOf(ClassName elementType) {
+    requireNonNull(elementType);
+    return VisitorState.memoize(state -> {
+      Type elem = elementType.type(state);
+      return elem == null ? null : state.arrayTypeForType(elem);
+    });
+  }
+
+  public static final Supplier<Type> OBJECT_TYPE_ARRAY =
+      arrayOf(state -> state.getSymtab().objectType);
+
   public static ImmutableList<Supplier<Type>> fromStrings(Iterable<String> types) {
-    return ImmutableList.copyOf(
-        Iterables.transform(
-            types,
-            new Function<String, Supplier<Type>>() {
-              @Override
-              public Supplier<Type> apply(String input) {
-                return Suppliers.typeFromString(input);
-              }
-            }));
+    return Streams.stream(types)
+        .map(Suppliers::typeFromString)
+        .collect(ImmutableList.toImmutableList());
   }
 
   private Suppliers() {}

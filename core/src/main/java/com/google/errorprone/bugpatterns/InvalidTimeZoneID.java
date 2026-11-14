@@ -30,11 +30,12 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import java.util.TimeZone;
-import java.util.regex.Pattern;
+import org.safere.Pattern;
 
-/** @author awturner@google.com (Andy Turner) */
+/**
+ * @author awturner@google.com (Andy Turner)
+ */
 @BugPattern(
-    name = "InvalidTimeZoneID",
     summary =
         "Invalid time zone identifier. TimeZone.getTimeZone(String) will silently return GMT"
             + " instead of the time zone you intended.",
@@ -59,16 +60,16 @@ public class InvalidTimeZoneID extends BugChecker implements MethodInvocationTre
       Pattern.compile("GMT[+\\-]" + HOURS_PATTERN + ":?" + MINUTES_PATTERN);
 
   @Override
-  public Description matchMethodInvocation(MethodInvocationTree tree, final VisitorState state) {
+  public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!METHOD_MATCHER.matches(tree, state)) {
       return Description.NO_MATCH;
     }
-    String value = (String) ASTHelpers.constValue(tree.getArguments().get(0));
+    String value = (String) ASTHelpers.constValue(tree.getArguments().getFirst());
     if (value == null) {
       // Value isn't a compile-time constant, so we can't know if it's unsafe.
       return Description.NO_MATCH;
     }
-    if (isValidID(value)) {
+    if (isValidId(value)) {
       // Value is supported on this JVM.
       return Description.NO_MATCH;
     }
@@ -79,16 +80,16 @@ public class InvalidTimeZoneID extends BugChecker implements MethodInvocationTre
     // Try to see if it's just been mistyped with spaces instead of underscores - if so, offer this
     // as a potential fix.
     String spacesToUnderscores = value.replace(' ', '_');
-    if (isValidID(spacesToUnderscores)) {
+    if (isValidId(spacesToUnderscores)) {
       builder.addFix(
           SuggestedFix.replace(
-              tree.getArguments().get(0), String.format("\"%s\"", spacesToUnderscores)));
+              tree.getArguments().getFirst(), String.format("\"%s\"", spacesToUnderscores)));
     }
 
     return builder.build();
   }
 
-  private static boolean isValidID(String value) {
+  private static boolean isValidId(String value) {
     if (AVAILABLE_IDS.contains(value)) {
       // Value is in TimeZone.getAvailableIDs(), so it's supported on this JVM.
       return true;

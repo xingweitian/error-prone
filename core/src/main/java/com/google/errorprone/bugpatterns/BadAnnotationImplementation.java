@@ -22,28 +22,21 @@ import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.isSubtypeOf;
 import static com.google.errorprone.matchers.Matchers.kindIs;
 import static com.google.errorprone.suppliers.Suppliers.ANNOTATION_TYPE;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.overridesObjectEquals;
+import static com.google.errorprone.util.ASTHelpers.overridesObjectHashCode;
 import static com.sun.source.tree.Tree.Kind.CLASS;
 import static com.sun.source.tree.Tree.Kind.ENUM;
 
-import com.google.common.base.Predicate;
-import com.google.common.base.Verify;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.Tree.Kind;
-import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Scope;
-import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.util.Name;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import java.lang.annotation.Annotation;
-import javax.annotation.Nullable;
 
 /**
  * Checker that ensures implementations of {@link Annotation} override equals and hashCode.
@@ -51,7 +44,6 @@ import javax.annotation.Nullable;
  * meet the contract specified by the {@link Annotation} interface.
  */
 @BugPattern(
-    name = "BadAnnotationImplementation",
     summary =
         "Classes that implement Annotation must override equals and hashCode. Consider "
             + "using AutoAnnotation instead of implementing Annotation by hand.",
@@ -62,7 +54,7 @@ public class BadAnnotationImplementation extends BugChecker implements ClassTree
       allOf(anyOf(kindIs(CLASS), kindIs(ENUM)), isSubtypeOf(ANNOTATION_TYPE));
 
   @Override
-  public Description matchClass(ClassTree classTree, final VisitorState state) {
+  public Description matchClass(ClassTree classTree, VisitorState state) {
     if (!CLASS_TREE_MATCHER.matches(classTree, state)) {
       return Description.NO_MATCH;
     }
@@ -77,67 +69,11 @@ public class BadAnnotationImplementation extends BugChecker implements ClassTree
           .build();
     }
 
-    // Otherwise walk up type hierarchy looking for equals and hashcode methods
-    MethodSymbol equals = null;
-    MethodSymbol hashCode = null;
-    final Types types = state.getTypes();
-    Name equalsName = state.getName("equals");
-    Predicate<MethodSymbol> equalsPredicate =
-        new Predicate<MethodSymbol>() {
-          @Override
-          public boolean apply(MethodSymbol methodSymbol) {
-            return !methodSymbol.isStatic()
-                && ((methodSymbol.flags() & Flags.SYNTHETIC) == 0)
-                && ((methodSymbol.flags() & Flags.ABSTRACT) == 0)
-                && methodSymbol.getParameters().size() == 1
-                && types.isSameType(
-                    methodSymbol.getParameters().get(0).type, state.getSymtab().objectType);
-          }
-        };
-    Name hashCodeName = state.getName("hashCode");
-    Predicate<MethodSymbol> hashCodePredicate =
-        new Predicate<MethodSymbol>() {
-          @Override
-          public boolean apply(MethodSymbol methodSymbol) {
-            return !methodSymbol.isStatic()
-                && ((methodSymbol.flags() & Flags.SYNTHETIC) == 0)
-                && ((methodSymbol.flags() & Flags.ABSTRACT) == 0)
-                && methodSymbol.getParameters().isEmpty();
-          }
-        };
-
-    for (Type sup : types.closure(ASTHelpers.getSymbol(classTree).type)) {
-      if (equals == null) {
-        equals = getMatchingMethod(sup, equalsName, equalsPredicate);
-      }
-      if (hashCode == null) {
-        hashCode = getMatchingMethod(sup, hashCodeName, hashCodePredicate);
-      }
-    }
-    Verify.verifyNotNull(equals);
-    Verify.verifyNotNull(hashCode);
-
-    Symbol objectSymbol = state.getSymtab().objectType.tsym;
-    if (equals.owner.equals(objectSymbol) || hashCode.owner.equals(objectSymbol)) {
+    ClassSymbol symbol = getSymbol(classTree);
+    if (!overridesObjectEquals(symbol, state) || !overridesObjectHashCode(symbol, state)) {
       return describeMatch(classTree);
     }
 
     return Description.NO_MATCH;
-  }
-
-  @Nullable
-  private static MethodSymbol getMatchingMethod(
-      Type type, Name name, Predicate<MethodSymbol> predicate) {
-    Scope scope = type.tsym.members();
-    for (Symbol sym : scope.getSymbolsByName(name)) {
-      if (!(sym instanceof MethodSymbol)) {
-        continue;
-      }
-      MethodSymbol methodSymbol = (MethodSymbol) sym;
-      if (predicate.apply(methodSymbol)) {
-        return methodSymbol;
-      }
-    }
-    return null;
   }
 }

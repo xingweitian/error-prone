@@ -16,12 +16,10 @@
 
 package com.google.errorprone.bugpatterns.javadoc;
 
-import static org.junit.Assume.assumeFalse;
+import static com.google.common.truth.TruthJUnit.assume;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -38,23 +36,29 @@ public final class UnescapedEntityTest {
   public void positive() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "/** List<Foo>, Map<Foo, Bar> */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** List<Foo>, Map<Foo, Bar> */
+            interface Test {}
+            """)
         .addOutputLines(
-            "Test.java", //
-            "/** {@code List<Foo>}, {@code Map<Foo, Bar>} */",
-            "interface Test {}")
-        .doTest(TestMode.AST_MATCH);
+            "Test.java",
+            """
+            /** {@code List<Foo>}, {@code Map<Foo, Bar>} */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void negative() {
     helper
         .addSourceLines(
-            "Test.java", //
-            "/** {@code List<Foo>, Map<Foo, Bar>} */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** {@code List<Foo>, Map<Foo, Bar>} */
+            interface Test {}
+            """)
         .doTest();
   }
 
@@ -62,11 +66,13 @@ public final class UnescapedEntityTest {
   public void unescapedEntities_off() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "/** Foo & bar < */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** Foo & bar < */
+            interface Test {}
+            """)
         .expectUnchanged()
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
   }
 
   @Test
@@ -74,117 +80,138 @@ public final class UnescapedEntityTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "/**",
-            "  * <pre>Foo</pre>",
-            "  * <pre>Use an ImmutableMap<String,Object> please</pre>",
-            "  * <pre>bar</pre>",
-            "  */",
-            "interface Test {}")
+            """
+            /**
+             * <pre>Foo</pre>
+             *
+             * <pre>Use an ImmutableMap<String,Object> please</pre>
+             *
+             * <pre>bar</pre>
+             */
+            interface Test {}
+            """)
         .addOutputLines(
             "Test.java",
-            "/**",
-            "  * <pre>Foo</pre>",
-            "  * <pre>{@code Use an ImmutableMap<String,Object> please}</pre>",
-            "  * <pre>bar</pre>",
-            "  */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            /**
+             * <pre>Foo</pre>
+             *
+             * <pre>{@code Use an ImmutableMap<String,Object> please}</pre>
+             *
+             * <pre>bar</pre>
+             */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void withinPre_singleChar() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "/**",
-            "  * <pre>n < 3</pre>",
-            "  */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** <pre>n < 3</pre> */
+            interface Test {}
+            """)
         .addOutputLines(
-            "Test.java", //
-            "/**",
-            "  * <pre>{@code n < 3}</pre>",
-            "  */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            /** <pre>{@code n < 3}</pre> */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void withinPre_alreadyEscaped() {
-    assumeFalse(RuntimeVersion.isAtLeast15()); // https://bugs.openjdk.java.net/browse/JDK-8241780
+    assume()
+        .that(Runtime.version().feature())
+        .isLessThan(15); // https://bugs.openjdk.java.net/browse/JDK-8241780
     refactoring
         .addInputLines(
             "Test.java",
-            "/**",
-            "  * <pre>Use an ImmutableMap<String, Object> not a Map&lt;String, Object&gt;</pre>",
-            "  */",
-            "interface Test {}")
+            """
+            /** <pre>Use an ImmutableMap<String, Object> not a Map&lt;String, Object&gt;</pre> */
+            interface Test {}
+            """)
         .addOutputLines(
             "Test.java",
-            "/**",
-            "  * <pre>Use an ImmutableMap&lt;String, Object&gt; not a"
-                + " Map&lt;String, Object&gt;</pre>",
-            "  */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            /** <pre>Use an ImmutableMap&lt;String, Object&gt; not a Map&lt;String, Object&gt;</pre> */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void withinPre_hasAnnotations() {
-    assumeFalse(RuntimeVersion.isAtLeast15()); // https://bugs.openjdk.java.net/browse/JDK-8241780
+    assume()
+        .that(Runtime.version().feature())
+        .isLessThan(15); // https://bugs.openjdk.java.net/browse/JDK-8241780
     refactoring
         .addInputLines(
             "Test.java",
-            "/**",
-            "  * Foo",
-            "  *",
-            "  * <pre>",
-            "  *   @Override",
-            "  *   ImmutableMap<String, Object>",
-            "  * </pre>",
-            "  */",
-            "interface Test {}")
+            """
+            /**
+             * Foo
+             *
+             * <pre>
+             *   @Override
+             *   ImmutableMap<String, Object>
+             * </pre>
+             */
+            interface Test {}
+            """)
         .addOutputLines(
             "Test.java",
-            "/**",
-            "  * Foo",
-            "  *",
-            "  * <pre>",
-            "  *   @Override",
-            "  *   ImmutableMap&lt;String, Object&gt;",
-            "  * </pre>",
-            "  */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            /**
+             * Foo
+             *
+             * <pre>
+             *   @Override
+             *   ImmutableMap&lt;String, Object&gt;
+             * </pre>
+             */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void escapesWithoutAddingCodeBlock_withinPreBlockWithAnnotation() {
-    assumeFalse(RuntimeVersion.isAtLeast15()); // https://bugs.openjdk.java.net/browse/JDK-8241780
+    assume()
+        .that(Runtime.version().feature())
+        .isLessThan(15); // https://bugs.openjdk.java.net/browse/JDK-8241780
     refactoring
         .addInputLines(
             "Test.java",
-            "/**",
-            "  * Foo",
-            "  *",
-            "  * <pre>",
-            "  *  {@literal @}Override",
-            "  *   ImmutableMap<String, Object>",
-            "  * </pre>",
-            "  */",
-            "interface Test {}")
+            """
+            /**
+             * Foo
+             *
+             * <pre>
+             *  {@literal @}Override
+             *   ImmutableMap<String, Object>
+             * </pre>
+             */
+            interface Test {}
+            """)
         .addOutputLines(
             "Test.java",
-            "/**",
-            "  * Foo",
-            "  *",
-            "  * <pre>",
-            "  *  {@literal @}Override",
-            "  *   ImmutableMap&lt;String, Object&gt;",
-            "  * </pre>",
-            "  */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            /**
+             * Foo
+             *
+             * <pre>
+             *  {@literal @}Override
+             *   ImmutableMap&lt;String, Object&gt;
+             * </pre>
+             */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
@@ -192,16 +219,18 @@ public final class UnescapedEntityTest {
     helper
         .addSourceLines(
             "Test.java",
-            "/**",
-            "  * Foo",
-            "  *",
-            "  * <pre>",
-            "  *  {@literal @}Override",
-            "  // BUG: Diagnostic contains: UnescapedEntity",
-            "  *   ImmutableMap<String, Object>",
-            "  * </pre>",
-            "  */",
-            "interface Test {}")
+            """
+            /**
+             * Foo
+             *
+             * <pre>
+             *  {@literal @}Override
+             * // BUG: Diagnostic contains: UnescapedEntity
+             *   ImmutableMap<String, Object>
+             * </pre>
+             */
+            interface Test {}
+            """)
         .doTest();
   }
 
@@ -209,9 +238,11 @@ public final class UnescapedEntityTest {
   public void withinLink() {
     helper
         .addSourceLines(
-            "Test.java", //
-            "/** {@link List<Foo>} */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** {@link List<Foo>} */
+            interface Test {}
+            """)
         .doTest();
   }
 
@@ -219,12 +250,17 @@ public final class UnescapedEntityTest {
   public void withinSee() {
     helper
         .addSourceLines(
-            "Test.java", //
-            "import java.util.List;",
-            "interface Test {",
-            "  /** @see #foo(List<Integer>) */",
-            "  void foo(List<Integer> foos);",
-            "}")
+            "Test.java",
+            """
+            import java.util.List;
+
+            interface Test {
+              /**
+               * @see #foo(List<Integer>)
+               */
+              void foo(List<Integer> foos);
+            }
+            """)
         .doTest();
   }
 
@@ -232,12 +268,63 @@ public final class UnescapedEntityTest {
   public void badSee() {
     helper
         .addSourceLines(
-            "Test.java", //
-            "import java.util.List;",
-            "interface Test {",
-            "  /** @see <a href=\"http://google.com\">google</a> */",
-            "  void foo(List<Integer> foos);",
-            "}")
+            "Test.java",
+            """
+            import java.util.List;
+
+            interface Test {
+              /**
+               * @see <a href="https://google.com">google</a>
+               */
+              void foo(List<Integer> foos);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void withinSnippet() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * {@snippet :
+             *    List<Foo>, Map<Foo, Bar>
+             *  }
+             */
+            interface Test {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void withinSnippet_missingColon_positives() {
+    // A missing colon means it's not interpreted as a proper @snippet tag, so the normal
+    // refactoring applies.
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /**
+             * {@snippet
+             *    no colon
+             *    List<Foo>, Map<Foo, Bar>
+             *  }
+             */
+            interface Test {}
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            /**
+             * {@snippet
+             *    no colon
+             *    {@code List<Foo>}, {@code Map<Foo, Bar>}
+             *  }
+             */
+            interface Test {}
+            """)
         .doTest();
   }
 
@@ -245,27 +332,217 @@ public final class UnescapedEntityTest {
   public void extraClosingTag() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "/** <pre>Foo List<Foo> bar</pre></pre> */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /**
+             * <pre>Foo List<Foo> bar</pre>
+             *
+             * </pre>
+             */
+            interface Test {}
+            """)
         .addOutputLines(
-            "Test.java", //
-            "/** <pre>{@code Foo List<Foo> bar}</pre></pre> */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            /**
+             * <pre>{@code Foo List<Foo> bar}</pre>
+             *
+             * </pre>
+             */
+            interface Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void nestedGenericType_properlyEscaped() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "/** List<List<Integer>> */",
-            "interface Test {}")
+            "Test.java",
+            """
+            /** List<List<Integer>> */
+            interface Test {}
+            """)
         .addOutputLines(
-            "Test.java", //
-            "/** {@code List<List<Integer>>} */",
-            "interface Test {}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            /** {@code List<List<Integer>>} */
+            interface Test {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadoc() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// A command-line flag that parses arguments into a byte size represented as a `Flag<Long>`.
+            interface Test {}
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocCodeBlock() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// ```java
+            /// List<String> list;
+            /// ```
+            interface Test {}
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocUnmatchedBacktick() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// List<String> ` unmatched
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should suggest wrapping in backticks:
+        // /// `List<String>` ` unmatched
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocTildeCodeBlock() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// ~~~java
+            /// List<String> list;
+            /// ~~~
+            interface Test {}
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocRawHtml() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// <code>List<String></code>
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should suggest wrapping in {@code}:
+        // /// <code>{@code List<String>}</code>
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocSingleTildeNotCode() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// ~List<String>~
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should suggest wrapping in backticks:
+        // /// ~`List<String>`~
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocMultipleCodeSpans() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// `List<String>` and `Map<String, Integer>`
+            interface Test {}
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocMixedCodeSpanAndRawGeneric() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// `List<String>` but raw Map<String, Integer>
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should suggest wrapping in backticks:
+        // /// `List<String>` but raw `Map<String, Integer>`
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocEscapedBacktick() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// A literal backtick \\` and raw List<String> \\` more
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should suggest wrapping in backticks:
+        // /// A literal backtick \\` and raw `List<String>` \\` more
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void nestedHtmlTagsInCodeHtml() {
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /** <code>List<String> <b>bold</b></code> */
+            interface Test {}
+            """)
+        // TODO(b/530215233): This should be expectUnchanged() because we shouldn't wrap
+        // nested HTML tags in {@code} which would escape them.
+        .addOutputLines(
+            "Test.java",
+            """
+            /** <code>{@code List<String> <b>bold</b>}</code> */
+            interface Test {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void markdownJavadocNestedHtmlTagsInCodeHtml() {
+    assume().that(Runtime.version().feature()).isAtLeast(23); // Markdown Javadoc is JDK 23+
+    refactoring
+        .addInputLines(
+            "Test.java",
+            """
+            /// <code>List<String> <b>bold</b></code>
+            interface Test {}
+            """)
+        .expectUnchanged()
+        .doTest();
   }
 }

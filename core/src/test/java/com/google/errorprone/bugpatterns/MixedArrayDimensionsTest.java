@@ -16,8 +16,6 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
@@ -33,21 +31,25 @@ public class MixedArrayDimensionsTest {
     BugCheckerRefactoringTestHelper.newInstance(MixedArrayDimensions.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "abstract class Test {",
-            "  int a [] = null;",
-            "  int [] b [][];",
-            "  int [][] c [] = null;",
-            "  int [][] d [][];",
-            "}")
+            """
+            abstract class Test {
+              int a[] = null;
+              int[] b[][];
+              int[][] c[] = null;
+              int[][] d[][];
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "abstract class Test {",
-            "  int[] a  = null;",
-            "  int [][][] b ;",
-            "  int [][][] c  = null;",
-            "  int [][][][] d ;",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            abstract class Test {
+              int[] a = null;
+              int[][][] b;
+              int[][][] c = null;
+              int[][][][] d;
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -55,21 +57,39 @@ public class MixedArrayDimensionsTest {
     BugCheckerRefactoringTestHelper.newInstance(MixedArrayDimensions.class, getClass())
         .addInputLines(
             "in/Test.java",
-            "abstract class Test {",
-            "  int f() [] { return null; }",
-            "  abstract int[] g() [];",
-            "  int[] h() [][] { return null; }",
-            "  abstract int[][] i() [][];",
-            "}")
+            """
+            abstract class Test {
+              int f()[] {
+                return null;
+              }
+
+              abstract int[] g()[];
+
+              int[] h()[][] {
+                return null;
+              }
+
+              abstract int[][] i()[][];
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "abstract class Test {",
-            "  int[] f()  { return null; }",
-            "  abstract int[][] g() ;",
-            "  int[][][] h()  { return null; }",
-            "  abstract int[][][][] i() ;",
-            "}")
-        .doTest(TEXT_MATCH);
+            """
+            abstract class Test {
+              int[] f() {
+                return null;
+              }
+
+              abstract int[][] g();
+
+              int[][][] h() {
+                return null;
+              }
+
+              abstract int[][][][] i();
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -77,14 +97,40 @@ public class MixedArrayDimensionsTest {
     CompilationTestHelper.newInstance(MixedArrayDimensions.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  int[] f() { return null; }",
-            "  abstract int[][] g();",
-            "  int[][][] h() { return null; }",
-            "  abstract int[][][][] i();",
-            "  int  [] a  = null;",
-            "  void f(boolean[]... xs) {}",
-            "}")
+            """
+            abstract class Test {
+              int[] f() {
+                return null;
+              }
+
+              abstract int[][] g();
+
+              int[][][] h() {
+                return null;
+              }
+
+              abstract int[][][][] i();
+
+              int[] a = null;
+
+              void f(boolean[]... xs) {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeInSimpleCharStream() {
+    CompilationTestHelper.newInstance(MixedArrayDimensions.class, getClass())
+        .addSourceLines(
+            "SimpleCharStream.java",
+            """
+            final class SimpleCharStream {
+              void test() {
+                int a[];
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -92,10 +138,12 @@ public class MixedArrayDimensionsTest {
   public void comment() {
     CompilationTestHelper.newInstance(MixedArrayDimensions.class, getClass())
         .addSourceLines(
-            "Test.java", //
-            "abstract class Test {",
-            "  int /*@Nullable*/ [] x;",
-            "}")
+            "Test.java",
+            """
+            abstract class Test {
+              int /*@Nullable*/[] x;
+            }
+            """)
         .doTest();
   }
 }

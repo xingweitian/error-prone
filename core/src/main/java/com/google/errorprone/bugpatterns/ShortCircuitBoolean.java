@@ -41,7 +41,6 @@ import java.util.Iterator;
  * @author mariasam@google.com (Maria Sam)
  */
 @BugPattern(
-    name = "ShortCircuitBoolean",
     summary = "Prefer the short-circuiting boolean operators && and || to & and |.",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
@@ -50,11 +49,10 @@ public class ShortCircuitBoolean extends BugChecker implements BinaryTreeMatcher
   @Override
   public Description matchBinary(BinaryTree tree, VisitorState state) {
     switch (tree.getKind()) {
-      case AND:
-      case OR:
-        break;
-      default:
+      case AND, OR -> {}
+      default -> {
         return NO_MATCH;
+      }
     }
     if (!isSameType(getType(tree), state.getSymtab().booleanType, state)) {
       return NO_MATCH;

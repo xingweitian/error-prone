@@ -19,13 +19,10 @@ package com.google.errorprone.bugpatterns.inject;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.fixes.SuggestedFix.delete;
 import static com.google.errorprone.matchers.ChildMultiMatcher.MatchType.AT_LEAST_ONE;
-import static com.google.errorprone.matchers.InjectMatchers.GUICE_INJECT_ANNOTATION;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.annotations;
-import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.enclosingClass;
 import static com.google.errorprone.matchers.Matchers.hasModifier;
-import static com.google.errorprone.matchers.Matchers.isType;
 import static com.google.errorprone.matchers.Matchers.methodIsConstructor;
 import static javax.lang.model.element.Modifier.ABSTRACT;
 
@@ -41,9 +38,10 @@ import com.google.errorprone.matchers.MultiMatcher.MultiMatchResult;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.MethodTree;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @BugPattern(
-    name = "InjectOnConstructorOfAbstractClass",
     summary =
         "Constructors on abstract classes are never directly @Inject'ed, only the constructors"
             + " of their subclasses can be @Inject'ed.",
@@ -51,9 +49,7 @@ import com.sun.source.tree.MethodTree;
 public class InjectOnConstructorOfAbstractClass extends BugChecker implements MethodTreeMatcher {
 
   private static final MultiMatcher<MethodTree, AnnotationTree> INJECT_FINDER =
-      annotations(
-          AT_LEAST_ONE,
-          anyOf(isType(InjectMatchers.JAVAX_INJECT_ANNOTATION), isType(GUICE_INJECT_ANNOTATION)));
+      annotations(AT_LEAST_ONE, InjectMatchers.IS_APPLICATION_OF_AT_INJECT);
 
   private static final Matcher<MethodTree> TO_MATCH =
       allOf(methodIsConstructor(), enclosingClass(hasModifier(ABSTRACT)));
@@ -64,7 +60,7 @@ public class InjectOnConstructorOfAbstractClass extends BugChecker implements Me
       MultiMatchResult<AnnotationTree> injectAnnotations =
           INJECT_FINDER.multiMatchResult(methodTree, state);
       if (injectAnnotations.matches()) {
-        AnnotationTree injectAnnotation = injectAnnotations.matchingNodes().get(0);
+        AnnotationTree injectAnnotation = injectAnnotations.matchingNodes().getFirst();
         return describeMatch(injectAnnotation, delete(injectAnnotation));
       }
     }

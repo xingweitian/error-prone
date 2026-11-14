@@ -54,14 +54,15 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.UnionClassType;
 import com.sun.tools.javac.code.Types;
 
-/** @author epmjohnston@google.com */
+/**
+ * @author epmjohnston@google.com
+ */
 @BugPattern(
-    name = "WakelockReleasedDangerously",
     tags = StandardTags.FRAGILE_CODE,
     summary =
-        "A wakelock acquired with a timeout may be released by the system before calling"
-            + " `release`, even after checking `isHeld()`. If so, it will throw a RuntimeException."
-            + " Please wrap in a try/catch block.",
+        "On Android versions < P, a wakelock acquired with a timeout may be released by the system"
+            + " before calling `release`, even after checking `isHeld()`. If so, it will throw a"
+            + " RuntimeException. Please wrap in a try/catch block.",
     severity = SeverityLevel.WARNING)
 public class WakelockReleasedDangerously extends BugChecker implements MethodInvocationTreeMatcher {
 
@@ -109,13 +110,11 @@ public class WakelockReleasedDangerously extends BugChecker implements MethodInv
 
     // Lambda expressions are special. If the release call is in a one-expression lambda,
     // only wrap body (not args) and convert to block lambda.
-    if (releaseStatement.getKind() == Kind.LAMBDA_EXPRESSION) {
-      LambdaExpressionTree enclosingLambda = (LambdaExpressionTree) releaseStatement;
-      if (enclosingLambda.getBodyKind() == BodyKind.EXPRESSION) {
-        releaseStatement = enclosingLambda.getBody();
-        before = "{" + before;
-        after = ";" + after + "}";
-      }
+    if (releaseStatement instanceof LambdaExpressionTree enclosingLambda
+        && enclosingLambda.getBodyKind() == BodyKind.EXPRESSION) {
+      releaseStatement = enclosingLambda.getBody();
+      before = "{" + before;
+      after = ";" + after + "}";
     }
 
     // Remove `if (wakelock.isHeld())` check.
@@ -150,24 +149,22 @@ public class WakelockReleasedDangerously extends BugChecker implements MethodInv
   private boolean tryCatchesException(TryTree tryTree, Type exceptionToCatch, VisitorState state) {
     Types types = state.getTypes();
     return tryTree.getCatches().stream()
-        .anyMatch(
-            (CatchTree catchClause) -> {
-              Type catchesException = getType(catchClause.getParameter().getType());
-              // Examine all alternative types of a union type.
-              if (catchesException != null && catchesException.isUnion()) {
-                return Streams.stream(((UnionClassType) catchesException).getAlternativeTypes())
-                    .anyMatch(caught -> types.isSuperType(caught, exceptionToCatch));
-              }
-              // Simple type, just check superclass.
-              return types.isSuperType(catchesException, exceptionToCatch);
-            });
+        .anyMatch((CatchTree catchClause) -> {
+          Type catchesException = getType(catchClause.getParameter().getType());
+          // Examine all alternative types of a union type.
+          if (catchesException != null && catchesException.isUnion()) {
+            return Streams.stream(((UnionClassType) catchesException).getAlternativeTypes())
+                .anyMatch(caught -> types.isSuperType(caught, exceptionToCatch));
+          }
+          // Simple type, just check superclass.
+          return types.isSuperType(catchesException, exceptionToCatch);
+        });
   }
 
   /**
    * Whether the given WakeLock may throw an unexpected RuntimeException when released.
    *
-   * <p>Returns true if: 1) the given WakeLock was acquired with timeout, and 2) the given WakeLock
-   * is reference counted.
+   * <p>Returns true if the given WakeLock was acquired with timeout and it is reference counted.
    */
   private boolean wakelockMayThrow(Symbol wakelockSymbol, VisitorState state) {
     ClassTree enclosingClass = getTopLevelClass(state);
@@ -178,7 +175,7 @@ public class WakelockReleasedDangerously extends BugChecker implements MethodInv
         // Is reference counted, i.e., referenceCounted not explicitly set to false.
         && map.get("setReferenceCounted").stream()
             .noneMatch(
-                m -> Boolean.FALSE.equals(constValue(m.getArguments().get(0), Boolean.class)));
+                m -> Boolean.FALSE.equals(constValue(m.getArguments().getFirst(), Boolean.class)));
   }
 
   private static ClassTree getTopLevelClass(VisitorState state) {
@@ -203,11 +200,9 @@ public class WakelockReleasedDangerously extends BugChecker implements MethodInv
           public Void visitMethodInvocation(MethodInvocationTree callTree, Void unused) {
             if (sym.equals(getSymbol(getReceiver(callTree)))) {
               MethodSymbol methodSymbol = getSymbol(callTree);
-              if (methodSymbol != null) {
-                methodMap.put(methodSymbol.getSimpleName().toString(), callTree);
-              }
+              methodMap.put(methodSymbol.getSimpleName().toString(), callTree);
             }
-            return super.visitMethodInvocation(callTree, unused);
+            return super.visitMethodInvocation(callTree, null);
           }
         },
         null);

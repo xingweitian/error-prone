@@ -16,19 +16,38 @@
 
 package com.google.errorprone;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.truth.Truth.assertThat;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.Files.newOutputStream;
 import static org.junit.Assert.assertThrows;
 
+import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableClassToInstanceMap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.errorprone.ErrorProneOptions.Severity;
 import com.google.errorprone.apply.ImportOrganizer;
+import com.sun.source.util.TreePath;
+import com.sun.tools.javac.util.Context;
+import java.io.File;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.io.ObjectStreamClass;
+import java.io.Serializable;
+import java.lang.annotation.Annotation;
+import java.lang.annotation.Retention;
+import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.regex.Pattern;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+import org.safere.Pattern;
 
 /**
  * Unit tests for {@code ErrorProneOptions}.
@@ -37,12 +56,13 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class ErrorProneOptionsTest {
+  @Rule public final TemporaryFolder tempFolder = new TemporaryFolder();
 
   @Test
   public void nonErrorProneFlagsPlacedInRemainingArgs() {
     String[] args = {"-nonErrorProneFlag", "value"};
     ErrorProneOptions options = ErrorProneOptions.processArgs(args);
-    assertThat(options.getRemainingArgs()).isEqualTo(args);
+    assertThat(options.getRemainingArgs()).containsExactlyElementsIn(args);
   }
 
   @Test
@@ -53,21 +73,21 @@ public class ErrorProneOptionsTest {
             "-Xep:", // no check name
             "-Xep:Foo:FJDKFJSD"); // nonexistent severity level
 
-    badArgs.forEach(
-        arg -> {
-          InvalidCommandLineOptionException expected =
-              assertThrows(
-                  InvalidCommandLineOptionException.class,
-                  () -> ErrorProneOptions.processArgs(Arrays.asList(arg)));
-          assertThat(expected).hasMessageThat().contains("invalid flag");
-        });
+    badArgs.forEach(arg -> {
+      InvalidCommandLineOptionException expected =
+          assertThrows(
+              InvalidCommandLineOptionException.class,
+              () -> ErrorProneOptions.processArgs(Arrays.asList(arg)));
+      assertThat(expected).hasMessageThat().contains("invalid flag");
+    });
   }
 
   @Test
   public void handlesErrorProneSeverityFlags() {
     String[] args1 = {"-Xep:Check1"};
     ErrorProneOptions options = ErrorProneOptions.processArgs(args1);
-    Map<String, Severity> expectedSeverityMap = ImmutableMap.of("Check1", Severity.DEFAULT);
+    ImmutableMap<String, Severity> expectedSeverityMap =
+        ImmutableMap.of("Check1", Severity.DEFAULT);
     assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
 
     String[] args2 = {"-Xep:Check1", "-Xep:Check2:OFF", "-Xep:Check3:WARN"};
@@ -77,7 +97,7 @@ public class ErrorProneOptionsTest {
             .put("Check1", Severity.DEFAULT)
             .put("Check2", Severity.OFF)
             .put("Check3", Severity.WARN)
-            .build();
+            .buildOrThrow();
     assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
   }
 
@@ -85,12 +105,12 @@ public class ErrorProneOptionsTest {
   public void handlesErrorProneCustomFlags() {
     String[] args = {"-XepOpt:Flag1", "-XepOpt:Flag2=Value2", "-XepOpt:Flag3=a,b,c"};
     ErrorProneOptions options = ErrorProneOptions.processArgs(args);
-    Map<String, String> expectedFlagsMap =
+    ImmutableMap<String, String> expectedFlagsMap =
         ImmutableMap.<String, String>builder()
             .put("Flag1", "true")
             .put("Flag2", "Value2")
             .put("Flag3", "a,b,c")
-            .build();
+            .buildOrThrow();
     assertThat(options.getFlags().getFlagsMap()).isEqualTo(expectedFlagsMap);
   }
 
@@ -106,14 +126,14 @@ public class ErrorProneOptionsTest {
     };
     ErrorProneOptions options = ErrorProneOptions.processArgs(args);
     String[] expectedRemainingArgs = {"-classpath", "/this/is/classpath", "-verbose"};
-    assertThat(options.getRemainingArgs()).isEqualTo(expectedRemainingArgs);
-    Map<String, Severity> expectedSeverityMap =
+    assertThat(options.getRemainingArgs()).containsExactlyElementsIn(expectedRemainingArgs);
+    ImmutableMap<String, Severity> expectedSeverityMap =
         ImmutableMap.<String, Severity>builder()
             .put("Check1", Severity.WARN)
             .put("Check2", Severity.ERROR)
-            .build();
+            .buildOrThrow();
     assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
-    Map<String, String> expectedFlagsMap = ImmutableMap.of("Check1:Flag1", "Value1");
+    ImmutableMap<String, String> expectedFlagsMap = ImmutableMap.of("Check1:Flag1", "Value1");
     assertThat(options.getFlags().getFlagsMap()).containsExactlyEntriesIn(expectedFlagsMap);
   }
 
@@ -121,7 +141,7 @@ public class ErrorProneOptionsTest {
   public void lastSeverityFlagWins() {
     String[] args = {"-Xep:Check1:ERROR", "-Xep:Check1:OFF"};
     ErrorProneOptions options = ErrorProneOptions.processArgs(args);
-    Map<String, Severity> expectedSeverityMap = ImmutableMap.of("Check1", Severity.OFF);
+    ImmutableMap<String, Severity> expectedSeverityMap = ImmutableMap.of("Check1", Severity.OFF);
     assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
   }
 
@@ -129,7 +149,7 @@ public class ErrorProneOptionsTest {
   public void lastCustomFlagWins() {
     String[] args = {"-XepOpt:Flag1=First", "-XepOpt:Flag1=Second"};
     ErrorProneOptions options = ErrorProneOptions.processArgs(args);
-    Map<String, String> expectedFlagsMap = ImmutableMap.of("Flag1", "Second");
+    ImmutableMap<String, String> expectedFlagsMap = ImmutableMap.of("Flag1", "Second");
     assertThat(options.getFlags().getFlagsMap()).containsExactlyEntriesIn(expectedFlagsMap);
   }
 
@@ -148,6 +168,13 @@ public class ErrorProneOptionsTest {
   }
 
   @Test
+  public void recognizesAllSuggestionsAsWarnings() {
+    ErrorProneOptions options =
+        ErrorProneOptions.processArgs(new String[] {"-XepAllSuggestionsAsWarnings"});
+    assertThat(options.isSuggestionsAsWarnings()).isTrue();
+  }
+
+  @Test
   public void recognizesDisableAllChecks() {
     ErrorProneOptions options =
         ErrorProneOptions.processArgs(new String[] {"-XepDisableAllChecks"});
@@ -155,10 +182,40 @@ public class ErrorProneOptionsTest {
   }
 
   @Test
+  public void recognizesPrintTimings() {
+    ErrorProneOptions options = ErrorProneOptions.processArgs(new String[] {"-XepPrintTimings"});
+    assertThat(options.printTimings()).isTrue();
+    assertThat(options.recordTimings()).isTrue();
+    assertThat(ErrorProneOptions.isSupportedOption("-XepPrintTimings")).isEqualTo(0);
+  }
+
+  @Test
+  public void recognizesRecordTimings() {
+    ErrorProneOptions options = ErrorProneOptions.processArgs(new String[] {"-XepRecordTimings"});
+    assertThat(options.recordTimings()).isTrue();
+    assertThat(options.printTimings()).isFalse();
+    assertThat(ErrorProneOptions.isSupportedOption("-XepRecordTimings")).isEqualTo(0);
+  }
+
+  @Test
+  public void printTimingsIsOffByDefault() {
+    ErrorProneOptions options = ErrorProneOptions.processArgs(new String[] {});
+    assertThat(options.printTimings()).isFalse();
+    assertThat(options.recordTimings()).isFalse();
+  }
+
+  @Test
   public void recognizesCompilingTestOnlyCode() {
     ErrorProneOptions options =
         ErrorProneOptions.processArgs(new String[] {"-XepCompilingTestOnlyCode"});
     assertThat(options.isTestOnlyTarget()).isTrue();
+  }
+
+  @Test
+  public void recognizesCompilingPubliclyVisibleCode() {
+    ErrorProneOptions options =
+        ErrorProneOptions.processArgs(new String[] {"-XepCompilingPubliclyVisibleCode"});
+    assertThat(options.isPubliclyVisibleTarget()).isTrue();
   }
 
   @Test
@@ -221,9 +278,6 @@ public class ErrorProneOptionsTest {
   public void throwsExceptionWithBadPatchArgs() {
     assertThrows(
         InvalidCommandLineOptionException.class,
-        () -> ErrorProneOptions.processArgs(new String[] {"-XepPatchLocation:IN_PLACE"}));
-    assertThrows(
-        InvalidCommandLineOptionException.class,
         () ->
             ErrorProneOptions.processArgs(new String[] {"-XepPatchChecks:FooBar,MissingOverride"}));
   }
@@ -236,6 +290,63 @@ public class ErrorProneOptionsTest {
     assertThat(options.patchingOptions().doRefactor()).isTrue();
     assertThat(options.patchingOptions().inPlace()).isTrue();
     assertThat(options.patchingOptions().customRefactorer()).isPresent();
+  }
+
+  private record ThrowingCodeTransformer(ImmutableClassToInstanceMap<Annotation> annotations)
+      implements CodeTransformer, Serializable {
+    @Override
+    public void apply(TreePath path, Context context, DescriptionListener listener) {
+      throw new AssertionError();
+    }
+  }
+
+  @Test
+  public void refasterRuleWithDifferentImmutableClassToInstanceMapSerialVersionUID()
+      throws Exception {
+    var rulePath = tempFolder.newFile().toPath();
+    @SuppressWarnings("IdentifierName") // might as well match JDK casing
+    long currentSerialVersionUID =
+        ObjectStreamClass.lookup(ImmutableClassToInstanceMap.class).getSerialVersionUID();
+    var annotations =
+        ImmutableClassToInstanceMap.<Annotation, Retention>of(
+            Retention.class, Test.class.getAnnotation(Retention.class));
+    try (var oos =
+        new ObjectOutputStream(newOutputStream(rulePath)) {
+          boolean wroteLong;
+
+          @Override
+          public void writeLong(long val) throws IOException {
+            wroteLong = true;
+            super.writeLong(val == currentSerialVersionUID ? ~val : val);
+          }
+        }) {
+      oos.writeObject(new ThrowingCodeTransformer(annotations));
+      assertThat(oos.wroteLong).isTrue();
+    }
+
+    var options =
+        ErrorProneOptions.processArgs(
+            new String[] {"-XepPatchChecks:refaster:" + rulePath, "-XepPatchLocation:IN_PLACE"});
+    assertThat(options.patchingOptions().customRefactorer().get().get().annotations())
+        .isEqualTo(annotations);
+  }
+
+  @Test
+  public void understandsEmptySetOfNamedCheckers() {
+    ErrorProneOptions options =
+        ErrorProneOptions.processArgs(new String[] {"-XepPatchLocation:IN_PLACE"});
+    assertThat(options.patchingOptions().doRefactor()).isTrue();
+    assertThat(options.patchingOptions().inPlace()).isTrue();
+    assertThat(options.patchingOptions().namedCheckers()).isEmpty();
+    assertThat(options.patchingOptions().customRefactorer()).isAbsent();
+
+    options =
+        ErrorProneOptions.processArgs(
+            new String[] {"-XepPatchLocation:IN_PLACE", "-XepPatchChecks:"});
+    assertThat(options.patchingOptions().doRefactor()).isTrue();
+    assertThat(options.patchingOptions().inPlace()).isTrue();
+    assertThat(options.patchingOptions().namedCheckers()).isEmpty();
+    assertThat(options.patchingOptions().customRefactorer()).isAbsent();
   }
 
   @Test
@@ -275,5 +386,136 @@ public class ErrorProneOptionsTest {
     assertThrows(
         InvalidCommandLineOptionException.class,
         () -> ErrorProneOptions.processArgs(new String[] {"-XepNoSuchFlag"}));
+  }
+
+  @Test
+  public void severityOrder() {
+    for (Collection<String> permutation :
+        Collections2.permutations(ImmutableList.of("A", "B", "C"))) {
+      ImmutableMap<String, Severity> severityMap =
+          permutation.stream().collect(toImmutableMap(x -> x, x -> Severity.ERROR));
+      ErrorProneOptions options =
+          ErrorProneOptions.processArgs(
+              permutation.stream()
+                  .map(x -> String.format("-Xep:%s:ERROR", x))
+                  .collect(toImmutableList()));
+      assertThat(options.getSeverityMap()).containsExactlyEntriesIn(severityMap).inOrder();
+    }
+  }
+
+  @Test
+  public void processArgumentsFileParsing() throws IOException {
+    File source = File.createTempFile("ep_argfile_", ".cfg");
+    source.deleteOnExit();
+    Files.write(
+        source.toPath(),
+        ImmutableList.of(
+            "# Line comment",
+            "-Xep:UnicodeEscape:OFF",
+            "-Xep:InvalidBlockTag:OFF # inline comment",
+            "-Xep:JavaUtilDate:OFF",
+            "# Several flags on a single line are acceptable:",
+            "-Xep:LabelledBreakTarget:OFF \t -Xep:JUnit4TestNotRun:OFF"
+                + "   -Xep:ComparableType:OFF",
+            "-Xep:EqualsHashCode:WARN",
+            "-Xep:ReturnValueIgnored:WARN",
+            "  # Indents and trailing, comment also indented:",
+            "\t\t  \t-Xep:ArrayToString:WARN",
+            "  -Xep:MisusedDayOfYear:WARN\t   ",
+            "  -Xep:SelfComparison:WARN   ",
+            "-Xep:MisusedWeekYear:WARN"),
+        UTF_8);
+
+    String[] args = {"@" + source.getAbsolutePath()};
+    ImmutableMap<String, Severity> expectedSeverityMap =
+        ImmutableMap.<String, Severity>builder()
+            .put("UnicodeEscape", Severity.OFF)
+            .put("InvalidBlockTag", Severity.OFF)
+            .put("JavaUtilDate", Severity.OFF)
+            .put("LabelledBreakTarget", Severity.OFF)
+            .put("JUnit4TestNotRun", Severity.OFF)
+            .put("ComparableType", Severity.OFF)
+            .put("EqualsHashCode", Severity.WARN)
+            .put("ReturnValueIgnored", Severity.WARN)
+            .put("ArrayToString", Severity.WARN)
+            .put("MisusedDayOfYear", Severity.WARN)
+            .put("SelfComparison", Severity.WARN)
+            .put("MisusedWeekYear", Severity.WARN)
+            .buildOrThrow();
+
+    ErrorProneOptions options = ErrorProneOptions.processArgs(args);
+    assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
+  }
+
+  @Test
+  public void processArgumentsFileOverrides() throws IOException {
+    File source1 = File.createTempFile("ep_argfile_", ".cfg");
+    source1.deleteOnExit();
+    File source2 = File.createTempFile("ep_argfile_", ".cfg");
+    source2.deleteOnExit();
+
+    Files.write(
+        source1.toPath(),
+        ImmutableList.of(
+            "-Xep:InvalidParam:WARN", "-Xep:JUnit4TestNotRun:WARN", "-Xep:EmptyBlockTag:WARN"),
+        UTF_8);
+    Files.write(
+        source2.toPath(),
+        ImmutableList.of(
+            "-Xep:EffectivelyPrivate:OFF",
+            "-Xep:ReturnValueIgnored:OFF",
+            "-Xep:EmptyBlockTag:OFF",
+            "-Xep:IntLongMath:OFF"),
+        UTF_8);
+
+    String[] args = {
+      "-Xep:InvalidParam:ERROR",
+      "-Xep:EffectivelyPrivate:ERROR",
+      "-Xep:UnicodeEscape:ERROR",
+      "-Xep:JavaUtilDate:ERROR",
+      "@" + source1.getAbsolutePath(),
+      "-Xep:UnicodeEscape:ERROR",
+      "-Xep:JUnit4TestNotRun:ERROR",
+      "@" + source2.getAbsolutePath(),
+      "-Xep:JavaUtilDate:ERROR",
+      "-Xep:IntLongMath:ERROR"
+    };
+
+    // To make the result easier to follow, the `args` set flags to ERROR,
+    // the first config file uses WARN, and the second config file uses OFF.
+    ImmutableMap<String, Severity> expectedSeverityMap =
+        ImmutableMap.<String, Severity>builder()
+            .put("InvalidParam", Severity.WARN)
+            .put("EffectivelyPrivate", Severity.OFF)
+            .put("UnicodeEscape", Severity.ERROR)
+            .put("JavaUtilDate", Severity.ERROR)
+            .put("JUnit4TestNotRun", Severity.ERROR)
+            .put("EmptyBlockTag", Severity.OFF)
+            .put("ReturnValueIgnored", Severity.OFF)
+            .put("IntLongMath", Severity.ERROR)
+            .buildOrThrow();
+
+    ErrorProneOptions options = ErrorProneOptions.processArgs(args);
+    assertThat(options.getSeverityMap()).isEqualTo(expectedSeverityMap);
+  }
+
+  @Test
+  public void processArgumentsFileRefOtherConfig() throws IOException {
+    File source = File.createTempFile("ep_argfile_", ".cfg");
+    source.deleteOnExit();
+    Files.write(
+        source.toPath(),
+        ImmutableList.of("-Xep:InvalidParam:WARN", "@other.cfg", "-Xep:EmptyBlockTag:WARN"),
+        UTF_8);
+    assertThrows(
+        InvalidCommandLineOptionException.class,
+        () -> ErrorProneOptions.processArgs(new String[] {"@" + source.getAbsolutePath()}));
+  }
+
+  @Test
+  public void processArgumentsFileMissing() {
+    assertThrows(
+        InvalidCommandLineOptionException.class,
+        () -> ErrorProneOptions.processArgs(new String[] {"@test_cfg_is_missing.cfg"}));
   }
 }

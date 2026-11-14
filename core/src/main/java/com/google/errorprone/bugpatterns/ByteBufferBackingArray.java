@@ -48,7 +48,6 @@ import java.util.Optional;
  * array, or when the buffer wasn't initialized using ByteBuffer.wrap() or ByteBuffer.allocate().
  */
 @BugPattern(
-    name = "ByteBufferBackingArray",
     summary =
         "ByteBuffer.array() shouldn't be called unless ByteBuffer.arrayOffset() is used or "
             + "if the ByteBuffer was initialized using ByteBuffer.wrap() or ByteBuffer.allocate().",
@@ -87,8 +86,8 @@ public class ByteBufferBackingArray extends BugChecker implements MethodInvocati
     }
 
     // Checks for validating use on method scope.
-    if (bufferSymbol.owner instanceof MethodSymbol) {
-      MethodTree enclosingMethod = ASTHelpers.findMethod((MethodSymbol) bufferSymbol.owner, state);
+    if (bufferSymbol.owner instanceof MethodSymbol methodSymbol) {
+      MethodTree enclosingMethod = ASTHelpers.findMethod(methodSymbol, state);
       if (enclosingMethod == null
           || ValidByteBufferArrayScanner.scan(enclosingMethod, state, bufferSymbol)) {
         return Description.NO_MATCH;
@@ -96,8 +95,8 @@ public class ByteBufferBackingArray extends BugChecker implements MethodInvocati
     }
 
     // Checks for validating use on fields.
-    if (bufferSymbol.owner instanceof ClassSymbol) {
-      ClassTree enclosingClass = ASTHelpers.findClass((ClassSymbol) bufferSymbol.owner, state);
+    if (bufferSymbol.owner instanceof ClassSymbol classSymbol) {
+      ClassTree enclosingClass = ASTHelpers.findClass(classSymbol, state);
       if (enclosingClass == null) {
         return Description.NO_MATCH;
       }
@@ -124,7 +123,7 @@ public class ByteBufferBackingArray extends BugChecker implements MethodInvocati
    * Scan for a call to ByteBuffer.arrayOffset() or check if buffer was initialized with either
    * ByteBuffer.wrap() or ByteBuffer.allocate().
    */
-  private static class ValidByteBufferArrayScanner extends TreeScanner<Void, VisitorState> {
+  private static final class ValidByteBufferArrayScanner extends TreeScanner<Void, VisitorState> {
 
     private final Symbol searchedBufferSymbol;
     private boolean visited;
@@ -186,7 +185,7 @@ public class ByteBufferBackingArray extends BugChecker implements MethodInvocati
   }
 
   /** Scan for a call to ByteBuffer.wrap() or ByteBuffer.allocate(). */
-  private static class ValidByteBufferInitializerScanner
+  private static final class ValidByteBufferInitializerScanner
       extends TreeScanner<Boolean, VisitorState> {
 
     static Boolean scan(ExpressionTree tree, VisitorState state) {

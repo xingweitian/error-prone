@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @RunWith(JUnit4.class)
 public class InjectOnConstructorOfAbstractClassTest {
 
@@ -29,69 +31,89 @@ public class InjectOnConstructorOfAbstractClassTest {
       CompilationTestHelper.newInstance(InjectOnConstructorOfAbstractClass.class, getClass());
 
   @Test
-  public void testPositiveCase() {
+  public void positiveCase() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import javax.inject.Inject;",
-            "abstract class Foo {",
-            "  // BUG: Diagnostic contains: Foo() {}",
-            "  @Inject Foo() {}",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            abstract class Foo {
+              // BUG: Diagnostic contains:
+              @Inject
+              Foo() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testGuiceConstructor() {
+  public void guiceConstructor() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import com.google.inject.Inject;",
-            "abstract class Foo {",
-            "  // BUG: Diagnostic contains: Foo() {}",
-            "  @Inject Foo() {}",
-            "}")
+            """
+            import com.google.inject.Inject;
+
+            abstract class Foo {
+              // BUG: Diagnostic contains:
+              @Inject
+              Foo() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testAbstractClassInConcreteClass() {
+  public void abstractClassInConcreteClass() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import javax.inject.Inject;",
-            "class Bar {",
-            "  abstract static class Foo {",
-            "     // BUG: Diagnostic contains: Foo() {}",
-            "     @Inject Foo() {}",
-            "  }",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            class Bar {
+              abstract static class Foo {
+                // BUG: Diagnostic contains:
+                @Inject
+                Foo() {}
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
+  public void negativeCase() {
     compilationHelper
         .addSourceLines(
-            "Foo.java", //
-            "import javax.inject.Inject;",
-            "class Foo {",
-            "  @Inject Foo() {}",
-            "}")
+            "Foo.java",
+            """
+            import javax.inject.Inject;
+
+            class Foo {
+              @Inject
+              Foo() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testConcreteClassInAbstractClass() {
+  public void concreteClassInAbstractClass() {
     compilationHelper
         .addSourceLines(
             "Foo.java",
-            "import javax.inject.Inject;",
-            "abstract class Bar {",
-            "  static class Foo {",
-            "    @Inject Foo() {}",
-            "  }",
-            "}")
+            """
+            import javax.inject.Inject;
+
+            abstract class Bar {
+              static class Foo {
+                @Inject
+                Foo() {}
+              }
+            }
+            """)
         .doTest();
   }
 }

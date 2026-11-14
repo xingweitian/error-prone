@@ -40,21 +40,16 @@ public class AnnotationMatcher<T extends Tree> extends ChildMultiMatcher<T, Anno
 
   @Override
   protected Iterable<? extends AnnotationTree> getChildNodes(T tree, VisitorState state) {
-    if (tree instanceof ClassTree) {
-      return ((ClassTree) tree).getModifiers().getAnnotations();
-    } else if (tree instanceof VariableTree) {
-      return ((VariableTree) tree).getModifiers().getAnnotations();
-    } else if (tree instanceof MethodTree) {
-      return ((MethodTree) tree).getModifiers().getAnnotations();
-    } else if (tree instanceof CompilationUnitTree) {
-      return ((CompilationUnitTree) tree).getPackageAnnotations();
-    } else if (tree instanceof AnnotatedTypeTree) {
-      return ((AnnotatedTypeTree) tree).getAnnotations();
-    } else if (tree instanceof PackageTree) {
-      return ((PackageTree) tree).getAnnotations();
-    } else {
-      throw new IllegalArgumentException(
-          "Cannot access annotations from tree of type " + tree.getClass());
-    }
+    return switch (tree) {
+      case ClassTree classTree -> classTree.getModifiers().getAnnotations();
+      case VariableTree variableTree -> variableTree.getModifiers().getAnnotations();
+      case MethodTree methodTree -> methodTree.getModifiers().getAnnotations();
+      case CompilationUnitTree compilationUnitTree -> compilationUnitTree.getPackageAnnotations();
+      case AnnotatedTypeTree annotatedTypeTree -> annotatedTypeTree.getAnnotations();
+      case PackageTree packageTree -> packageTree.getAnnotations();
+      default ->
+          throw new IllegalArgumentException(
+              "Cannot access annotations from tree of type " + tree.getClass());
+    };
   }
 }

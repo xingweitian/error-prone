@@ -37,7 +37,6 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TypeParameterTree;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.PackageSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
@@ -48,7 +47,6 @@ import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.tree.JCTree.Tag;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -57,7 +55,6 @@ import java.util.stream.Collectors;
  * @author bennostein@google.com (Benno Stein)
  */
 @BugPattern(
-    name = "TypeNameShadowing",
     summary = "Type parameter declaration shadows another named type",
     severity = WARNING,
     tags = StandardTags.STYLE)
@@ -88,19 +85,16 @@ public class TypeNameShadowing extends BugChecker implements MethodTreeMatcher, 
     // Collect all visible type names declared in this source file by ascending lexical scopes,
     // collecting all members, filtering to keep type symbols and exclude TypeVariableSymbols
     // (otherwise, every type parameter spuriously shadows itself)
-    Iterable<Symbol> localSymbolsInScope =
+    ImmutableList<Symbol> localSymbolsInScope =
         Streams.stream(env)
-            .map(
-                ctx ->
-                    ctx.tree.getTag() == Tag.CLASSDEF
-                        ? ((ClassSymbol) ASTHelpers.getSymbol(ctx.tree)).members().getSymbols()
-                        : ctx.info.getLocalElements())
-            .flatMap(
-                symbols ->
-                    Streams.stream(symbols)
-                        .filter(
-                            sym ->
-                                sym instanceof TypeSymbol && !(sym instanceof TypeVariableSymbol)))
+            .map(ctx ->
+                ctx.tree.getTag() == Tag.CLASSDEF
+                    ? ASTHelpers.getSymbol(ctx.tree).members().getSymbols()
+                    : ctx.info.getLocalElements())
+            .flatMap(symbols ->
+                Streams.stream(symbols)
+                    .filter(
+                        sym -> sym instanceof TypeSymbol && !(sym instanceof TypeVariableSymbol)))
             .collect(ImmutableList.toImmutableList());
 
     // Concatenate with all visible type names declared in other source files:
@@ -125,16 +119,15 @@ public class TypeNameShadowing extends BugChecker implements MethodTreeMatcher, 
 
     Iterable<Symbol> enclosingTypes = typesInEnclosingScope(env, javaLang);
 
-    List<Symbol> shadowedTypes =
+    ImmutableList<Symbol> shadowedTypes =
         typeParameters.stream()
-            .map(
-                param ->
-                    Iterables.tryFind(
-                            enclosingTypes,
-                            sym ->
-                                sym.getSimpleName()
-                                    .equals(ASTHelpers.getType(param).tsym.getSimpleName()))
-                        .orNull())
+            .map(param ->
+                Iterables.tryFind(
+                        enclosingTypes,
+                        sym ->
+                            sym.getSimpleName()
+                                .equals(ASTHelpers.getType(param).tsym.getSimpleName()))
+                    .orNull())
             .filter(Objects::nonNull)
             .collect(ImmutableList.toImmutableList());
 
@@ -146,7 +139,7 @@ public class TypeNameShadowing extends BugChecker implements MethodTreeMatcher, 
 
     descBuilder.setMessage(buildMessage(shadowedTypes));
 
-    Set<String> visibleNames =
+    ImmutableSet<String> visibleNames =
         Streams.stream(Iterables.concat(env.info.getLocalElements(), enclosingTypes))
             .map(sym -> sym.getSimpleName().toString())
             .collect(ImmutableSet.toImmutableSet());
@@ -154,13 +147,12 @@ public class TypeNameShadowing extends BugChecker implements MethodTreeMatcher, 
     SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
     shadowedTypes.stream()
         .filter(tv -> TypeParameterNamingClassification.classify(tv.name.toString()).isValidName())
-        .map(
-            tv ->
-                SuggestedFixes.renameTypeParameter(
-                    TypeParameterShadowing.typeParameterInList(typeParameters, tv),
-                    tree,
-                    TypeParameterShadowing.replacementTypeVarName(tv.name, visibleNames),
-                    state))
+        .map(tv ->
+            SuggestedFixes.renameTypeParameter(
+                TypeParameterShadowing.typeParameterInList(typeParameters, tv),
+                tree,
+                TypeParameterShadowing.replacementTypeVarName(tv.name, visibleNames),
+                state))
         .forEach(fixBuilder::merge);
 
     descBuilder.addFix(fixBuilder.build());
@@ -170,12 +162,8 @@ public class TypeNameShadowing extends BugChecker implements MethodTreeMatcher, 
   private static String buildMessage(List<Symbol> shadowedTypes) {
     return "Found type parameters shadowing other declared types:\n\t"
         + shadowedTypes.stream()
-            .map(
-                sym ->
-                    "Type parameter "
-                        + sym.getSimpleName()
-                        + " shadows visible type "
-                        + sym.flatName())
+            .map(sym ->
+                "Type parameter " + sym.getSimpleName() + " shadows visible type " + sym.flatName())
             .collect(Collectors.joining("\n\t"));
   }
 }

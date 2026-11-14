@@ -25,7 +25,6 @@ import static com.google.errorprone.bugpatterns.javadoc.Utils.replace;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
-import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
@@ -33,6 +32,7 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.sun.source.doctree.BlockTagTree;
 import com.sun.source.doctree.DocTree;
 import com.sun.source.doctree.EndElementTree;
 import com.sun.source.doctree.ErroneousTree;
@@ -43,37 +43,35 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.DocTreePath;
 import com.sun.source.util.DocTreePathScanner;
-import com.sun.tools.javac.tree.DCTree.DCBlockTag;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
 import com.sun.tools.javac.tree.DCTree.DCErroneous;
 import com.sun.tools.javac.util.JCDiagnostic;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import javax.inject.Inject;
 
 /**
  * Matches invalid Javadoc tags, and tries to suggest fixes.
  *
  * @author ghm@google.com (Graeme Morgan)
  */
-@BugPattern(
-    name = "InvalidBlockTag",
-    summary = "This tag is invalid.",
-    severity = WARNING,
-    tags = StandardTags.STYLE,
-    documentSuppression = false)
+@BugPattern(summary = "This tag is invalid.", severity = WARNING, documentSuppression = false)
 public final class InvalidBlockTag extends BugChecker
     implements ClassTreeMatcher, MethodTreeMatcher, VariableTreeMatcher {
-
-  private static final String INVALID_TAG_IS_PARAMETER_NAME =
-      "@%1$s is not a valid tag, but is a parameter name. "
-          + "Use {@code %1%s} to refer to parameter names inline.";
 
   /**
    * HTML tags which imply we're showing code, and should therefore probably escape unknown block
    * tags.
    */
   private static final ImmutableSet<String> CODE_TAGS = ImmutableSet.of("code", "pre");
+
+  private final KnownTags knownTags;
+
+  @Inject
+  InvalidBlockTag(KnownTags knownTags) {
+    this.knownTags = knownTags;
+  }
 
   @Override
   public Description matchClass(ClassTree classTree, VisitorState state) {
@@ -167,18 +165,14 @@ public final class InvalidBlockTag extends BugChecker
     public Void visitUnknownBlockTag(UnknownBlockTagTree unknownBlockTagTree, Void unused) {
       String tagName = unknownBlockTagTree.getTagName();
       JavadocTag tag = blockTag(tagName);
-      if (JavadocTag.KNOWN_OTHER_TAGS.contains(tag)) {
+      if (knownTags.isKnownTag(tag)) {
         return super.visitUnknownBlockTag(unknownBlockTagTree, null);
       }
       if (codeTagNestedDepth > 0) {
         // If we're in a <code> tag, this is probably meant to be an annotation.
         if (parentIsErroneousCodeTag()) {
           String message =
-              String.format(
-                  "@%s is interpreted as a block tag here, not as a literal. Escaping "
-                      + "annotations within {@code } tags is problematic; you may have to avoid "
-                      + "using {@code } and escape any HTML entities manually instead.",
-                  tagName);
+              String.format("@%s is interpreted as a block tag here, not as a literal.", tagName);
           state.reportMatch(
               buildDescription(diagnosticPosition(getCurrentPath(), state))
                   .setMessage(message)
@@ -189,9 +183,9 @@ public final class InvalidBlockTag extends BugChecker
         int startPos = Utils.getStartPosition(unknownBlockTagTree, state);
         String message =
             String.format(
-                "@%s is not a valid block tag. Did you mean to escape it? Annotations must be "
-                    + "escaped even within <pre> and <code>, otherwise they will be "
-                    + "interpreted as block tags.",
+                "@%s is not a valid block tag. Did you mean to escape it? Annotations must be"
+                    + " escaped even within <pre> and <code>, but will be rendered correctly inside"
+                    + " {@code blocks.",
                 tagName);
         state.reportMatch(
             buildDescription(diagnosticPosition(getCurrentPath(), state))
@@ -203,7 +197,11 @@ public final class InvalidBlockTag extends BugChecker
       }
       if (parameters.contains(tagName)) {
         int startPos = Utils.getStartPosition(unknownBlockTagTree, state);
-        String message = String.format(INVALID_TAG_IS_PARAMETER_NAME, tagName);
+        String message =
+            String.format(
+                "@%1$s is not a valid tag, but is a parameter name. "
+                    + "Use {@code %1$s} to refer to parameter names inline.",
+                tagName);
         state.reportMatch(
             buildDescription(diagnosticPosition(getCurrentPath(), state))
                 .setMessage(message)
@@ -225,13 +223,12 @@ public final class InvalidBlockTag extends BugChecker
         return false;
       }
       DocTree parentDoc = getCurrentPath().getParentPath().getLeaf();
-      if (!(parentDoc instanceof DCDocComment)) {
+      if (!(parentDoc instanceof DCDocComment dcDocComment)) {
         return false;
       }
-      DCDocComment dcDocComment = (DCDocComment) parentDoc;
       return dcDocComment.getFullBody().stream()
           .anyMatch(
-              dc -> dc instanceof DCErroneous && ((DCErroneous) dc).body.startsWith("{@code"));
+              dc -> dc instanceof DCErroneous dCErroneous && dCErroneous.body.startsWith("{@code"));
     }
 
     private void reportUnknownTag(DocTree docTree, JavadocTag tag) {
@@ -247,12 +244,11 @@ public final class InvalidBlockTag extends BugChecker
       String message = String.format("Tag name `%s` is unknown.", tag.name());
       state.reportMatch(
           bestMatch
-              .map(
-                  bm ->
-                      buildDescription(diagnosticPosition(getCurrentPath(), state))
-                          .setMessage(message + String.format(" Did you mean tag `%s`?", bm))
-                          .addFix(SuggestedFix.replace(pos, pos + tag.name().length(), bm))
-                          .build())
+              .map(bm ->
+                  buildDescription(diagnosticPosition(getCurrentPath(), state))
+                      .setMessage(message + String.format(" Did you mean tag `%s`?", bm))
+                      .addFix(SuggestedFix.replace(pos, pos + tag.name().length(), bm))
+                      .build())
               .orElse(
                   buildDescription(diagnosticPosition(getCurrentPath(), state))
                       .setMessage(
@@ -270,11 +266,12 @@ public final class InvalidBlockTag extends BugChecker
       if (fixedTags.contains(docTree)) {
         return null;
       }
-      if (!(docTree instanceof DCBlockTag)) {
+      if (!(docTree instanceof BlockTagTree blockTagTree)) {
         return null;
       }
-      JavadocTag tag = blockTag(((DCBlockTag) docTree).getTagName());
-      if (validTags.contains(tag) || JavadocTag.KNOWN_OTHER_TAGS.contains(tag)) {
+      String tagName = blockTagTree.getTagName();
+      JavadocTag tag = blockTag(tagName);
+      if (validTags.contains(tag) || knownTags.isKnownTag(tag)) {
         return null;
       }
       String message =

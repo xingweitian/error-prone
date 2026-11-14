@@ -23,7 +23,7 @@ import com.sun.source.tree.InstanceOfTree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCInstanceOf;
 import java.lang.reflect.Proxy;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UTree} representation of a {@link InstanceOfTree}.
@@ -49,19 +49,24 @@ abstract class UInstanceOf extends UExpression {
                 new Class<?>[] {InstanceOfTree.class},
                 (unused, method, args) -> {
                   switch (method.getName()) {
-                    case "getPattern":
-                      // TOOD(cushon): support refaster template matching on instanceof patterns
+                    case "getPattern" -> {
+                      // TODO(b/422117955): support refaster template matching on instanceof
+                      // patterns.
                       return null;
-                    case "getExpression":
+                    }
+                    case "getExpression" -> {
                       return getExpression();
-                    case "getType":
+                    }
+                    case "getType" -> {
                       return getType();
-                    default:
+                    }
+                    default -> {
                       try {
                         return method.invoke(UInstanceOf.this, args);
                       } catch (IllegalArgumentException e) {
                         throw new LinkageError(method.getName(), e);
                       }
+                    }
                   }
                 });
     return visitor.visitInstanceOf(proxy, data);
@@ -78,10 +83,12 @@ abstract class UInstanceOf extends UExpression {
   }
 
   @Override
-  @Nullable
   public Choice<Unifier> visitInstanceOf(InstanceOfTree instanceOf, @Nullable Unifier unifier) {
+    if (instanceOf.getPattern() != null) {
+      return Choice.none();
+    }
     return getExpression()
         .unify(instanceOf.getExpression(), unifier)
-        .thenChoose(unifications(getType(), instanceOf.getType()));
+        .flatMap(unifications(getType(), instanceOf.getType()));
   }
 }

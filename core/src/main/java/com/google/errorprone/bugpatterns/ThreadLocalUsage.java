@@ -29,6 +29,7 @@ import static com.google.errorprone.util.ASTHelpers.isSubtype;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
@@ -42,14 +43,13 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "ThreadLocalUsage",
-    summary = "ThreadLocals should be stored in static fields",
-    severity = WARNING)
+@BugPattern(summary = "ThreadLocals should be stored in static fields", severity = WARNING)
 public class ThreadLocalUsage extends BugChecker implements NewClassTreeMatcher {
 
+  private static final ClassName JAVA_LANG_THREADLOCAL = ClassName.of("java.lang.ThreadLocal");
+
   private static final Matcher<ExpressionTree> NEW_THREAD_LOCAL =
-      constructor().forClass(isDescendantOf("java.lang.ThreadLocal"));
+      constructor().forClass(isDescendantOf(JAVA_LANG_THREADLOCAL));
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
@@ -60,29 +60,21 @@ public class ThreadLocalUsage extends BugChecker implements NewClassTreeMatcher 
       return NO_MATCH;
     }
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (!(parent instanceof VariableTree)) {
+    if (!(parent instanceof VariableTree variableTree)) {
       // If the ThreadLocal is created outside of a field we can't easily make assumptions about its
       // scope.
       return NO_MATCH;
     }
-    VarSymbol sym = getSymbol((VariableTree) parent);
-    if (sym != null && sym.isStatic()) {
+    VarSymbol sym = getSymbol(variableTree);
+    if (sym.isStatic()) {
       return NO_MATCH;
     }
     if (Streams.stream(state.getPath())
         .filter(ClassTree.class::isInstance)
         .map(ClassTree.class::cast)
-        .anyMatch(
-            c -> {
-              if (hasDirectAnnotationWithSimpleName(getSymbol(c), "Singleton")) {
-                return true;
-              }
-              Type scopeType = state.getTypeFromString("com.google.inject.Scope");
-              if (isSubtype(getType(c), scopeType, state)) {
-                return true;
-              }
-              return false;
-            })) {
+        .anyMatch(c ->
+            hasDirectAnnotationWithSimpleName(getSymbol(c), "Singleton")
+                || isSubtype(getType(c), COM_GOOGLE_INJECT_SCOPE, state))) {
       // The instance X thread issue doesn't apply if there's only one instance.
       return NO_MATCH;
     }
@@ -106,7 +98,7 @@ public class ThreadLocalUsage extends BugChecker implements NewClassTreeMatcher 
     if (type == null) {
       return false;
     }
-    type = state.getTypes().asSuper(type, state.getSymbolFromString("java.lang.ThreadLocal"));
+    type = state.getTypes().asSuper(type, JAVA_LANG_THREADLOCAL.symbol(state));
     if (type == null) {
       return false;
     }
@@ -117,9 +109,10 @@ public class ThreadLocalUsage extends BugChecker implements NewClassTreeMatcher 
     if (WELL_KNOWN_TYPES.contains(argType.asElement().getQualifiedName().toString())) {
       return true;
     }
-    if (isSubtype(argType, state.getTypeFromString("java.text.DateFormat"), state)) {
-      return true;
-    }
-    return false;
+    return isSubtype(argType, JAVA_TEXT_DATEFORMAT, state);
   }
+
+  private static final ClassName COM_GOOGLE_INJECT_SCOPE = ClassName.of("com.google.inject.Scope");
+
+  private static final ClassName JAVA_TEXT_DATEFORMAT = ClassName.of("java.text.DateFormat");
 }

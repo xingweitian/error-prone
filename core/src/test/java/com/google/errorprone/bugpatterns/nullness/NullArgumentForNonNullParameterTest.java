@@ -1,0 +1,660 @@
+/*
+ * Copyright 2022 The Error Prone Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.errorprone.bugpatterns.nullness;
+
+import com.google.errorprone.CompilationTestHelper;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
+
+/** {@link NullArgumentForNonNullParameter}Test */
+@RunWith(JUnit4.class)
+public class NullArgumentForNonNullParameterTest {
+  private final CompilationTestHelper conservativeHelper =
+      CompilationTestHelper.newInstance(NullArgumentForNonNullParameter.class, getClass());
+  private final CompilationTestHelper aggressiveHelper =
+      CompilationTestHelper.newInstance(NullArgumentForNonNullParameter.class, getClass())
+          .setArgs("-XepOpt:Nullness:Conservative=false");
+
+  @Test
+  public void positiveConstructor() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NullMarked;
+
+            @NullMarked
+            class Foo {
+              Foo(String s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains: parameter 's' of constructor 'Foo'
+                new Foo(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positivePrimitive() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void consume(int i) {}
+
+              void foo(Optional<Integer> o) {
+                // BUG: Diagnostic contains: parameter 'i' of method 'consume'
+                consume(o.orElse(null));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveAnnotatedNonnullAggressive() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import javax.annotation.Nonnull;
+
+            class Foo {
+              void consume(@Nonnull String s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeAnnotatedNonnullConservative() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import javax.annotation.Nonnull;
+
+            class Foo {
+              void consume(@Nonnull String s) {}
+
+              void foo() {
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveJavaOptionalOf() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                // BUG: Diagnostic contains: parameter 'value' of method 'of'
+                Optional.of(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveGuavaOptionalOf() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.common.base.Optional;
+
+            class Foo {
+              void foo() {
+                // BUG: Diagnostic contains:
+                Optional.of(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveGuavaImmutableSetOf() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.common.collect.ImmutableSet;
+
+            class Foo {
+              void foo() {
+                // BUG: Diagnostic contains:
+                ImmutableSet.of(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveGuavaImmutableSetBuilderAdd() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            // We use a ternary to avoid:
+            // "non-varargs call of varargs method with inexact argument type for last parameter"
+            """
+            import com.google.common.collect.ImmutableSet;
+
+            class Foo {
+              void foo(boolean b) {
+                // BUG: Diagnostic contains:
+                ImmutableSet.builder().add(b ? 1 : null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveArgumentCaptorForClass() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.mockito.ArgumentCaptor;
+
+            class Foo {
+              void foo() {
+                // BUG: Diagnostic contains:
+                ArgumentCaptor.forClass(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeNullMarkedComGoogleCommonButNullable() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.common.collect.ImmutableSet;
+
+            class Foo {
+              void foo() {
+                ImmutableSet.of().contains(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveNullMarkedOtherPackageAggressive() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NullMarked;
+
+            @NullMarked
+            class Foo {
+              void consume(String s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveNullMarkedPackageInfo() {
+    aggressiveHelper
+        .addSourceLines(
+            "p/package-info.java",
+            """
+            @org.jspecify.annotations.NullMarked
+            package p;
+            """)
+        .addSourceLines(
+            "p/Foo.java",
+            """
+            package p;
+
+            class Foo {
+              void consume(String s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeNullMarkedPackageInfoCountermanded() {
+    aggressiveHelper
+        .addSourceLines(
+            "p/package-info.java",
+            """
+            @org.jspecify.annotations.NullMarked
+            package p;
+            """)
+        .addSourceLines(
+            "p/Foo.java",
+            """
+            package p;
+
+            import org.jspecify.annotations.NullUnmarked;
+
+            @NullUnmarked
+            class Foo {
+              void consume(String s) {}
+
+              void foo() {
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeNullMarkedNonComGoogleCommonPackageConservative() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NullMarked;
+
+            @NullMarked
+            class Foo {
+              void consume(String s) {}
+
+              void foo() {
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeNullMarkedTypeVariable() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.common.collect.ConcurrentHashMultiset;
+
+            class Foo {
+              void foo() {
+                ConcurrentHashMultiset.create().add(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativePrimitiveButEnclosingClass() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              class Bar {
+                Bar(int i) {}
+              }
+
+              void foo(Optional<Integer> o) {
+                // It would be nice to catch this, but for now, at least, we don't.
+                new Bar(o.orElse(null));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveNullMarkedClassWithUnboundedTypeParameter() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NullMarked;
+
+            @NullMarked
+            class Foo<T> {
+              void consume(T s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeNullMarkedClassWithNullableBoundedTypeParameter() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NullMarked;
+            import org.jspecify.annotations.Nullable;
+
+            @NullMarked
+            class Foo<T extends @Nullable Object> {
+              void consume(T s) {}
+
+              void foo() {
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveNullMarkedTypeParameter() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NonNull;
+
+            class Foo<T extends @NonNull Object> {
+              void consume(T s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveNullMarkedTypeParameterIntersection() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.io.Serializable;
+            import org.jspecify.annotations.NonNull;
+
+            class Foo<T extends @NonNull Object & Serializable> {
+              void consume(T s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveRecursiveTypeParameter() {
+    aggressiveHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import org.jspecify.annotations.NonNull;
+
+            class Foo<V extends @NonNull Object, T extends V> {
+              void consume(T s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains:
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void assertThrowsNpe() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import static org.junit.Assert.assertThrows;
+
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                assertThrows(NullPointerException.class, () -> Optional.of(null));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void assertThrowsWithMessage() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import static org.junit.Assert.assertThrows;
+
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                assertThrows("message", NullPointerException.class, () -> Optional.of(null));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void assertThrowsJUnit5Ordering() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              interface Executable {
+                void execute() throws Throwable;
+              }
+
+              static <T extends Throwable> T assertThrows(
+                  Class<T> expectedType, Executable executable, String message) {
+                return null;
+              }
+
+              void foo() {
+                assertThrows(NullPointerException.class, () -> Optional.of(null), "message");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void assertThrowsRuntimeException() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import static org.junit.Assert.assertThrows;
+
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                assertThrows(RuntimeException.class, () -> Optional.of(null));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void anonymousClassInsideTry() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                try {
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      // BUG: Diagnostic contains:
+                      Optional.of(null);
+                    }
+                  }.run();
+                } catch (Exception e) {
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void tryNpe() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                try {
+                  Optional.of(null);
+                } catch (NullPointerException e) {
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void catchNpe() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                try {
+                } catch (NullPointerException e) {
+                  // BUG: Diagnostic contains:
+                  Optional.of(null);
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void finallyNpe() {
+    conservativeHelper
+        .addSourceLines(
+            "Foo.java",
+            """
+            import java.util.Optional;
+
+            class Foo {
+              void foo() {
+                try {
+                } catch (NullPointerException e) {
+                } finally {
+                  // BUG: Diagnostic contains:
+                  Optional.of(null);
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveProtoNonnullApi() {
+    conservativeHelper
+        .addSourceLines(
+            "com/google/protobuf/Internal.java",
+            """
+            package com.google.protobuf;
+
+            public class Internal {
+              public @interface ProtoNonnullApi {}
+            }
+            """)
+        .addSourceLines(
+            "Foo.java",
+            """
+            import com.google.protobuf.Internal.ProtoNonnullApi;
+
+            @ProtoNonnullApi
+            class Foo {
+              void consume(String s) {}
+
+              void foo() {
+                // BUG: Diagnostic contains: parameter 's' of method 'consume'
+                consume(null);
+              }
+            }
+            """)
+        .doTest();
+  }
+}

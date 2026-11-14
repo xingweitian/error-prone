@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Streams;
@@ -26,6 +27,7 @@ import com.google.errorprone.CompilationTestHelper;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
+import com.google.errorprone.bugpatterns.argumentselectiondefects.NamedParameterComment.ParsedParameterComment;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.MethodInvocationTree;
@@ -44,7 +46,6 @@ public class NameInCommentHeuristicTest {
 
   /** A {@link BugChecker} which runs the NameInCommentHeuristic and prints the result */
   @BugPattern(
-      name = "NameInCommentHeuristicChecker",
       severity = SeverityLevel.ERROR,
       summary = "Runs NameInCommentHeuristic and prints the result")
   public static class NameInCommentHeuristicChecker extends BugChecker
@@ -76,13 +77,16 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first);",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: true",
-            "     target(first /* first */);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first);
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: true
+                target(first /* first */);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -92,13 +96,16 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first);",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: true",
-            "     target(/*first= */ first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first);
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: true
+                target(/* first= */ first);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -108,13 +115,16 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first);",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: true",
-            "     target(/*note first = */ first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first);
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: true
+                target(/*note first = */ first);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -123,13 +133,16 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first);",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: false",
-            "     target(first);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first);
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: false
+                target(first);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -138,13 +151,16 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first);",
-            "  void test(Object first) {",
-            "     // BUG: Diagnostic contains: false",
-            "     target(first /* other */);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first);
+
+              void test(Object first) {
+                // BUG: Diagnostic contains: false
+                target(first /* other */);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -153,14 +169,70 @@ public class NameInCommentHeuristicTest {
     CompilationTestHelper.newInstance(NameInCommentHeuristicChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object first, Object second);",
-            "  void test(Object first, Object second) {",
-            "     // BUG: Diagnostic contains: true",
-            "     target(first, // first",
-            "            second);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object first, Object second);
+
+              void test(Object first, Object second) {
+                // BUG: Diagnostic contains: true
+                target(
+                    first, // first
+                    second);
+              }
+            }
+            """)
         .doTest();
+  }
+
+  @Test
+  public void parseParameterComment_validInputs() {
+    assertThat(NamedParameterComment.parseParameterComment("foo="))
+        .hasValue(new ParsedParameterComment("foo", false));
+    assertThat(NamedParameterComment.parseParameterComment(" foo= "))
+        .hasValue(new ParsedParameterComment("foo", false));
+    assertThat(
+            NamedParameterComment.parseParameterComment(
+                " \t\n\u000B\f\rfoo \t\n\u000B\f\r= \t\n\u000B\f\r"))
+        .hasValue(new ParsedParameterComment("foo", false));
+    assertThat(NamedParameterComment.parseParameterComment(" $foo_1$ = "))
+        .hasValue(new ParsedParameterComment("$foo_1$", false));
+    assertThat(NamedParameterComment.parseParameterComment(" λ_α1 = "))
+        .hasValue(new ParsedParameterComment("λ_α1", false));
+    assertThat(NamedParameterComment.parseParameterComment(" \uD835\uDCB0\uD835\uDFCE = "))
+        .hasValue(new ParsedParameterComment("\uD835\uDCB0\uD835\uDFCE", false));
+    assertThat(NamedParameterComment.parseParameterComment(" int = "))
+        .hasValue(new ParsedParameterComment("int", false));
+    assertThat(NamedParameterComment.parseParameterComment(" default = "))
+        .hasValue(new ParsedParameterComment("default", false));
+    assertThat(NamedParameterComment.parseParameterComment(" args...= "))
+        .hasValue(new ParsedParameterComment("args", true));
+    assertThat(NamedParameterComment.parseParameterComment("args...\t = \n"))
+        .hasValue(new ParsedParameterComment("args", true));
+  }
+
+  @Test
+  public void parseParameterComment_invalidInputs() {
+    assertThat(NamedParameterComment.parseParameterComment("")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("   ")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("...=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("foo")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("1foo=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("\uD835\uDFCE=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("a.b=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("a..b=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment(".a=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("a.=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("args..=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("args....=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("args ...=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("foo==")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("foo=bar")).isEmpty();
+    // Non-ASCII whitespace (e.g. U+00A0 NO-BREAK SPACE and U+2000 EN QUAD, which is
+    // Character.isWhitespace) is not matched by regex \s.
+    assertThat(NamedParameterComment.parseParameterComment("\u00A0foo=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("\u2000foo=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("foo\u2000=")).isEmpty();
+    assertThat(NamedParameterComment.parseParameterComment("foo=\u2000")).isEmpty();
   }
 }

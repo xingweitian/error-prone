@@ -17,6 +17,7 @@
 package com.google.errorprone;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.TruthJUnit.assume;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static org.junit.Assert.assertThrows;
@@ -24,11 +25,18 @@ import static org.junit.Assert.assertThrows;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.bugpatterns.BugChecker;
+import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.ReturnTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
+import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ReturnTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.main.Main.Result;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -48,54 +56,52 @@ public class CompilationTestHelperTest {
 
   @Test
   public void fileWithNoBugMarkersAndErrorFails() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public boolean doIt() {
+                return true;
+              }
+            }
+            """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  public boolean doIt() {",
-                        "    return true;",
-                        "  }",
-                        "}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Saw unexpected error on line 3");
   }
 
   @Test
   public void fileWithBugMarkerAndNoErrorsFails() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              public void doIt() {}
+            }
+            """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  // BUG: Diagnostic contains:",
-                        "  public void doIt() {}",
-                        "}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Did not see an error on line 3");
   }
 
   @Test
   public void fileWithBugMatcherAndNoErrorsFails() {
+    var compilationTestHelper =
+        compilationHelper
+            .addSourceLines(
+                "Test.java",
+                """
+                public class Test {
+                  // BUG: Diagnostic matches: X
+                  public void doIt() {}
+                }
+                """)
+            .expectErrorMessage("X", Predicates.containsPattern(""));
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  // BUG: Diagnostic matches: X",
-                        "  public void doIt() {}",
-                        "}")
-                    .expectErrorMessage("X", Predicates.containsPattern(""))
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Did not see an error on line 3");
   }
 
@@ -104,12 +110,14 @@ public class CompilationTestHelperTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic contains: Method may return normally",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic contains: Method may return normally
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -118,53 +126,196 @@ public class CompilationTestHelperTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic matches: X",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic matches: X
+                return true;
+              }
+            }
+            """)
         .expectErrorMessage("X", Predicates.containsPattern("Method may return normally"))
         .doTest();
   }
 
   @Test
   public void fileWithBugMarkerAndErrorOnWrongLineFails() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              public boolean doIt() {
+                return true;
+              }
+            }
+            """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  // BUG: Diagnostic contains:",
-                        "  public boolean doIt() {",
-                        "    return true;",
-                        "  }",
-                        "}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Did not see an error on line 3");
   }
 
   @Test
   public void fileWithBugMatcherAndErrorOnWrongLineFails() {
+    var compilationTestHelper =
+        compilationHelper
+            .addSourceLines(
+                "Test.java",
+                """
+                public class Test {
+                  // BUG: Diagnostic matches: X
+                  public boolean doIt() {
+                    return true;
+                  }
+                }
+                """)
+            .expectErrorMessage("X", Predicates.containsPattern(""));
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  // BUG: Diagnostic matches: X",
-                        "  public boolean doIt() {",
-                        "    return true;",
-                        "  }",
-                        "}")
-                    .expectErrorMessage("X", Predicates.containsPattern(""))
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Did not see an error on line 3");
+  }
+
+  @Test
+  public void fileWithTwoBugMarkersAndNoErrorsReportsBothLines() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              // BUG: Diagnostic contains: foo
+              public void doIt() {}
+
+              // BUG: Diagnostic contains: bar
+              public void doItAgain() {}
+            }
+            """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .isEqualTo(
+            """
+            Did not see an error on line 3 matching foo.
+            Did not see an error on line 6 matching bar.
+            There were no errors.\
+            """);
+  }
+
+  @Test
+  public void fileWithTwoUnexpectedErrorsReportsBothLinesBeforeTheDiagnostics() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public boolean doIt() {
+                return true;
+              }
+
+              public boolean doItAgain() {
+                return false;
+              }
+            }
+            """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .startsWith(
+            """
+            Saw unexpected error on line 3.
+            Saw unexpected error on line 7.
+            All errors:
+            """);
+  }
+
+  @Test
+  public void markerWithUnknownKeyIsReportedWithTheOtherMismatches() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public boolean doIt() {
+                return true;
+              }
+
+              // BUG: Diagnostic matches: X
+              public void doItAgain() {}
+            }
+            """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .startsWith(
+            """
+            Saw unexpected error on line 3.
+            No expected error message with key [X] as expected from line [6] \
+            with diagnostic [// BUG: Diagnostic matches: X]
+            All errors:
+            """);
+  }
+
+  @Test
+  public void fileWithUnexpectedErrorBeforeMissingOneReportsBothLines() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public boolean doIt() {
+                return true;
+              }
+
+              // BUG: Diagnostic contains: foo
+              public void doItAgain() {}
+            }
+            """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .startsWith(
+            """
+            Saw unexpected error on line 3.
+            Did not see an error on line 7 matching foo.
+            All errors:
+            """);
+  }
+
+  @Test
+  public void mismatchesInTwoFilesAreReportedWithTheirFileNames() {
+    var compilationTestHelper =
+        compilationHelper
+            .addSourceLines(
+                "A.java",
+                """
+                public class A {
+                  public boolean doIt() {
+                    return true;
+                  }
+                }
+                """)
+            .addSourceLines(
+                "B.java",
+                """
+                public class B {
+                  // BUG: Diagnostic contains: foo
+                  public void doIt() {}
+                }
+                """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .startsWith(
+            """
+            /A.java: Saw unexpected error on line 3.
+            /B.java: Did not see an error on line 3 matching foo.
+            All errors:
+            """);
   }
 
   @Test
@@ -172,16 +323,19 @@ public class CompilationTestHelperTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic contains: Method may return normally",
-            "    return true;",
-            "  }",
-            "  public String doItAgain() {",
-            "    // BUG: Diagnostic contains: Method may return normally",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic contains: Method may return normally
+                return true;
+              }
+
+              public String doItAgain() {
+                // BUG: Diagnostic contains: Method may return normally
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -190,16 +344,19 @@ public class CompilationTestHelperTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic matches: X",
-            "    return true;",
-            "  }",
-            "  public String doItAgain() {",
-            "    // BUG: Diagnostic matches: X",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic matches: X
+                return true;
+              }
+
+              public String doItAgain() {
+                // BUG: Diagnostic matches: X
+                return null;
+              }
+            }
+            """)
         .expectErrorMessage("X", Predicates.containsPattern("Method may return normally"))
         .doTest();
   }
@@ -209,16 +366,19 @@ public class CompilationTestHelperTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic matches: X",
-            "    return true;",
-            "  }",
-            "  public String doItAgain() {",
-            "    // BUG: Diagnostic matches: Y",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic matches: X
+                return true;
+              }
+
+              public String doItAgain() {
+                // BUG: Diagnostic matches: Y
+                return null;
+              }
+            }
+            """)
         .expectErrorMessage("X", Predicates.containsPattern("Method may return normally"))
         .expectErrorMessage("Y", Predicates.containsPattern("Method may return normally"))
         .doTest();
@@ -226,21 +386,25 @@ public class CompilationTestHelperTest {
 
   @Test
   public void fileWithSyntaxErrorFails() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            "class Test {",
+            "  void m() {",
+            "    // BUG: Diagnostic contains:",
+            // There's a syntax error on this line, but it shouldn't register as an
+            // Error Prone diagnostic
+            "    return}",
+            "}");
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java",
-                        "class Test {",
-                        "  void m() {",
-                        "    // BUG: Diagnostic contains:",
-                        // There's a syntax error on this line, but it shouldn't register as an
-                        // Error Prone diagnostic
-                        "    return}",
-                        "}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .startsWith(
+            """
+            Did not see an error on line 4 containing [ReturnTreeChecker].
+            All errors:
+            """);
     assertThat(expected).hasMessageThat().contains("error: illegal start of expression");
   }
 
@@ -254,14 +418,12 @@ public class CompilationTestHelperTest {
 
   @Test
   public void expectedResultDiffersFromActualResultFails() {
+    var compilationTestHelper =
+        compilationHelper
+            .expectResult(Result.ERROR)
+            .addSourceLines("Test.java", "public class Test {}");
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .expectResult(Result.ERROR)
-                    .addSourceLines("Test.java", "public class Test {}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Expected compilation result ERROR, but was OK");
   }
 
@@ -269,7 +431,12 @@ public class CompilationTestHelperTest {
   public void expectNoDiagnoticsAndNoDiagnosticsProducedSucceeds() {
     compilationHelper
         .expectNoDiagnostics()
-        .addSourceLines("Test.java", "// BUG: Diagnostic contains:", "public class Test {}")
+        .addSourceLines(
+            "Test.java",
+            """
+            // BUG: Diagnostic contains:
+            public class Test {}
+            """)
         .doTest();
   }
 
@@ -277,64 +444,66 @@ public class CompilationTestHelperTest {
   public void expectNoDiagnoticsAndNoDiagnosticsProducedSucceedsWithMatches() {
     compilationHelper
         .expectNoDiagnostics()
-        .addSourceLines("Test.java", "// BUG: Diagnostic matches: X", "public class Test {}")
+        .addSourceLines(
+            "Test.java",
+            """
+            // BUG: Diagnostic matches: X
+            public class Test {}
+            """)
         .expectErrorMessage("X", Predicates.containsPattern(""))
         .doTest();
   }
 
   @Test
   public void expectNoDiagnoticsButDiagnosticsProducedFails() {
+    var compilationTestHelper =
+        compilationHelper
+            .expectNoDiagnostics()
+            .addSourceLines(
+                "Test.java",
+                """
+                public class Test {
+                  public boolean doIt() {
+                    // BUG: Diagnostic contains:
+                    return true;
+                  }
+                }
+                """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .expectNoDiagnostics()
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  public boolean doIt() {",
-                        "    // BUG: Diagnostic contains:",
-                        "    return true;",
-                        "  }",
-                        "}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Expected no diagnostics produced, but found 1");
   }
 
   @Test
   public void expectNoDiagnoticsButDiagnosticsProducedFailsWithMatches() {
+    var compilationTestHelper =
+        compilationHelper
+            .expectNoDiagnostics()
+            .addSourceLines(
+                "Test.java",
+                """
+                public class Test {
+                  public boolean doIt() {
+                    // BUG: Diagnostic matches: X
+                    return true;
+                  }
+                }
+                """)
+            .expectErrorMessage("X", Predicates.containsPattern(""));
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .expectNoDiagnostics()
-                    .addSourceLines(
-                        "Test.java",
-                        "public class Test {",
-                        "  public boolean doIt() {",
-                        "    // BUG: Diagnostic matches: X",
-                        "    return true;",
-                        "  }",
-                        "}")
-                    .expectErrorMessage("X", Predicates.containsPattern(""))
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Expected no diagnostics produced, but found 1");
   }
 
   @Test
   public void failureWithErrorAndNoDiagnosticFails() {
+    var compilationTestHelper =
+        compilationHelper
+            .expectNoDiagnostics()
+            .addSourceLines("Test.java", "public class Test {}")
+            .setArgs(ImmutableList.of("-Xep:ReturnTreeChecker:Squirrels")); // Bad flag crashes.
     InvalidCommandLineOptionException expected =
-        assertThrows(
-            InvalidCommandLineOptionException.class,
-            () ->
-                compilationHelper
-                    .expectNoDiagnostics()
-                    .addSourceLines("Test.java", "public class Test {}")
-                    .setArgs(
-                        ImmutableList.of("-Xep:ReturnTreeChecker:Squirrels")) // Bad flag crashes.
-                    .doTest());
+        assertThrows(InvalidCommandLineOptionException.class, () -> compilationTestHelper.doTest());
     assertThat(expected)
         .hasMessageThat()
         .contains("invalid flag: -Xep:ReturnTreeChecker:Squirrels");
@@ -347,30 +516,32 @@ public class CompilationTestHelperTest {
         .expectNoDiagnostics()
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean doIt() {",
-            "    // BUG: Diagnostic contains:",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean doIt() {
+                // BUG: Diagnostic contains:
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void missingExpectErrorFails() {
+    var compilationTestHelper =
+        compilationHelper.addSourceLines(
+            "Test.java",
+            """
+            // BUG: Diagnostic matches: X
+            public class Test {}
+            """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                compilationHelper
-                    .addSourceLines(
-                        "Test.java", " // BUG: Diagnostic matches: X", "public class Test {}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("No expected error message with key [X]");
   }
 
   @BugPattern(
-      name = "ReturnTreeChecker",
       summary = "Method may return normally.",
       explanation = "Consider mutating some global state instead.",
       severity = ERROR)
@@ -383,18 +554,21 @@ public class CompilationTestHelperTest {
 
   @Test
   public void unexpectedDiagnosticOnFirstLine() {
+    var compilationTestHelper =
+        CompilationTestHelper.newInstance(PackageTreeChecker.class, getClass())
+            .addSourceLines(
+                "test/Test.java",
+                """
+                package test;
+
+                public class Test {}
+                """);
     AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                CompilationTestHelper.newInstance(PackageTreeChecker.class, getClass())
-                    .addSourceLines("test/Test.java", "package test;", "public class Test {}")
-                    .doTest());
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
     assertThat(expected).hasMessageThat().contains("Package declaration found");
   }
 
   @BugPattern(
-      name = "PackageTreeChecker",
       summary = "Package declaration found",
       explanation = "Prefer to use the default package for everything.",
       severity = ERROR)
@@ -406,112 +580,6 @@ public class CompilationTestHelperTest {
       }
       return NO_MATCH;
     }
-  }
-
-  @BugPattern(
-      name = "PrivateConstructorChecker",
-      summary = "A checker that Error Prone can't instantiate because its constructor is private.",
-      severity = ERROR)
-  public static class PrivateConstructorChecker extends BugChecker
-      implements CompilationUnitTreeMatcher {
-    private PrivateConstructorChecker() {}
-
-    @Override
-    public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
-      return NO_MATCH;
-    }
-  }
-
-  @Test
-  public void cannotInstantiateCheckerWithPrivateConstructor() {
-    AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                CompilationTestHelper.newInstance(PrivateConstructorChecker.class, getClass())
-                    .addSourceLines(
-                        "test/Test.java",
-                        "package test;",
-                        "// BUG: Diagnostic contains:",
-                        "public class Test {}")
-                    .doTest());
-    assertThat(expected).hasMessageThat().contains("Could not instantiate BugChecker");
-    assertThat(expected)
-        .hasMessageThat()
-        .contains("Are both the class and the zero-arg constructor public?");
-  }
-
-  @BugPattern(
-      name = "PrivateChecker",
-      summary =
-          "A checker that Error Prone can't instantiate because it is private and has a default"
-              + " constructor.",
-      severity = ERROR)
-  private static class PrivateChecker extends BugChecker implements CompilationUnitTreeMatcher {
-
-    // By JLS 8.8.9, if there are no constructor declarations, then a default constructor with the
-    // same access modifier as the class is implicitly declared.  So here there is a default
-    // constructor with private access.
-
-    @Override
-    public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
-      return NO_MATCH;
-    }
-  }
-
-  @Test
-  public void cannotInstantiatePrivateChecker() {
-    AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                CompilationTestHelper.newInstance(PrivateChecker.class, getClass())
-                    .addSourceLines(
-                        "test/Test.java",
-                        "package test;",
-                        "// BUG: Diagnostic contains:",
-                        "public class Test {}")
-                    .doTest());
-    assertThat(expected).hasMessageThat().contains("Could not instantiate BugChecker");
-    assertThat(expected)
-        .hasMessageThat()
-        .contains("Are both the class and the zero-arg constructor public?");
-  }
-
-  @BugPattern(
-      name = "PrivateCheckerWithPublicConstructor",
-      summary =
-          "A checker that Error Prone can't instantiate because the class is private even though"
-              + " the constructor is public.",
-      severity = ERROR)
-  private static class PrivateCheckerWithPublicConstructor extends BugChecker
-      implements CompilationUnitTreeMatcher {
-    public PrivateCheckerWithPublicConstructor() {}
-
-    @Override
-    public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
-      return NO_MATCH;
-    }
-  }
-
-  @Test
-  public void cannotInstantiatePrivateCheckerWithPublicConstructor() {
-    AssertionError expected =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                CompilationTestHelper.newInstance(
-                        PrivateCheckerWithPublicConstructor.class, getClass())
-                    .addSourceLines(
-                        "test/Test.java",
-                        "package test;",
-                        "// BUG: Diagnostic contains:",
-                        "public class Test {}")
-                    .doTest());
-    assertThat(expected).hasMessageThat().contains("Could not instantiate BugChecker");
-    assertThat(expected)
-        .hasMessageThat()
-        .contains("Are both the class and the zero-arg constructor public?");
   }
 
   /** Test classes used for withClassPath tests */
@@ -553,5 +621,104 @@ public class CompilationTestHelperTest {
     IllegalStateException expected =
         assertThrows(IllegalStateException.class, () -> compilationHelper.doTest());
     assertThat(expected).hasMessageThat().contains("doTest");
+  }
+
+  @Test
+  public void assertionErrors_causeTestFailures() {
+    var compilationTestHelper =
+        CompilationTestHelper.newInstance(AssertionFailingChecker.class, getClass())
+            .addSourceLines(
+                "test/Test.java",
+                """
+                package test;
+
+                public class Test {}
+                """);
+    AssertionError expected =
+        assertThrows(AssertionError.class, () -> compilationTestHelper.doTest());
+    assertThat(expected)
+        .hasMessageThat()
+        .contains("An unhandled exception was thrown by the Error Prone static analysis plugin");
+  }
+
+  /** A BugPattern that always throws. */
+  @BugPattern(summary = "A really broken checker.", severity = ERROR)
+  public static class AssertionFailingChecker extends BugChecker
+      implements CompilationUnitTreeMatcher {
+    @Override
+    public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
+      throw new AssertionError();
+    }
+  }
+
+  @BugPattern(summary = "Replaces var types", severity = ERROR)
+  public static class ReplaceVarTypes extends BugChecker implements VariableTreeMatcher {
+    @SuppressWarnings("TreeToString")
+    @Override
+    public Description matchVariable(VariableTree tree, VisitorState state) {
+      Tree type = tree.getType();
+      if (ASTHelpers.hasExplicitSource(type, state)) {
+        return Description.NO_MATCH;
+      }
+      return describeMatch(type, SuggestedFix.replace(type, "Object"));
+    }
+  }
+
+  @SuppressWarnings("MissingTestCall") // used in a method reference in assertThrows
+  @Test
+  public void replaceVarTypes() {
+    // after JDK-8358604 in JDK 27, var types have source positions
+    // after JDK-8359383 in JDK 26, var type start and end positions are the same
+    assume().that(Runtime.version().feature()).isLessThan(26);
+    var compilationTestHelper =
+        CompilationTestHelper.newInstance(ReplaceVarTypes.class, getClass())
+            .addSourceLines(
+                "Test.java",
+                """
+                public class Test {
+                  public void foo() {
+                    var x = 1 + 2;
+                    System.out.println(x);
+                  }
+                }
+                """);
+    AssertionError e = assertThrows(AssertionError.class, compilationTestHelper::doTest);
+    assertThat(e)
+        .hasMessageThat()
+        .contains(
+            """
+            Test.java:3: error: An unhandled exception was thrown by the Error Prone static analysis plugin.
+                var x = 1 + 2;
+            """);
+    assertThat(e).hasMessageThat().contains("BugPattern: ReplaceVarTypes");
+  }
+
+  @BugPattern(summary = "Checks if isTestOnlyTarget is true", severity = ERROR)
+  public static class TestOnlyChecker extends BugChecker implements ClassTreeMatcher {
+    @Override
+    public Description matchClass(ClassTree tree, VisitorState state) {
+      if (state.errorProneOptions().isTestOnlyTarget()) {
+        return describeMatch(tree);
+      }
+      return Description.NO_MATCH;
+    }
+  }
+
+  @Test
+  public void testOnly_falseByDefault() {
+    CompilationTestHelper.newInstance(TestOnlyChecker.class, getClass())
+        .addSourceLines("Test.java", "public class Test {}")
+        .doTest();
+  }
+
+  @Test
+  public void testOnly_enabled() {
+    CompilationTestHelper.newInstance(TestOnlyChecker.class, getClass())
+        .setTestOnly()
+        .addSourceLines(
+            "Test.java",
+            "// BUG: Diagnostic contains: Checks if isTestOnlyTarget is true",
+            "public class Test {}")
+        .doTest();
   }
 }

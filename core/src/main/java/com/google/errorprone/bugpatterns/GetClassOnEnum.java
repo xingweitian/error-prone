@@ -31,14 +31,13 @@ import com.sun.source.tree.MethodInvocationTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "GetClassOnEnum",
     summary = "Calling getClass() on an enum may return a subclass of the enum type",
     severity = WARNING,
     tags = StandardTags.FRAGILE_CODE)
 public class GetClassOnEnum extends BugChecker implements BugChecker.MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> ENUM_CLASS =
-      instanceMethod().onDescendantOf(Enum.class.getName()).named("getClass").withParameters();
+      instanceMethod().onDescendantOf(Enum.class.getName()).named("getClass").withNoParameters();
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {

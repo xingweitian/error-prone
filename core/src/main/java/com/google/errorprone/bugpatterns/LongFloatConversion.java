@@ -19,13 +19,14 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getType;
-import static com.google.errorprone.util.ASTHelpers.targetType;
+import static com.google.errorprone.util.TargetType.targetType;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.util.TreePath;
@@ -33,7 +34,6 @@ import javax.lang.model.type.TypeKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "LongFloatConversion",
     summary =
         "Conversion from long to float may lose precision; use an explicit cast to float if this"
             + " was intentional",
@@ -43,11 +43,14 @@ public class LongFloatConversion extends BugChecker implements MethodInvocationT
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     for (ExpressionTree arg : tree.getArguments()) {
-      if (getType(arg).getKind().equals(TypeKind.LONG)
-          && targetType(state.withPath(new TreePath(state.getPath(), arg)))
-              .type()
-              .getKind()
-              .equals(TypeKind.FLOAT)) {
+      if (!getType(arg).getKind().equals(TypeKind.LONG)) {
+        continue;
+      }
+      TargetType targetType = targetType(state.withPath(new TreePath(state.getPath(), arg)));
+      if (targetType == null) {
+        continue;
+      }
+      if (targetType.type().getKind().equals(TypeKind.FLOAT)) {
         state.reportMatch(describeMatch(arg, SuggestedFix.prefixWith(arg, "(float) ")));
       }
     }

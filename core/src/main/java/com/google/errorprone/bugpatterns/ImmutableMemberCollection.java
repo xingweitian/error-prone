@@ -15,8 +15,9 @@
  */
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
-import static com.google.common.collect.Streams.stream;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
@@ -24,10 +25,14 @@ import static com.google.errorprone.matchers.Matchers.hasAnnotationWithSimpleNam
 import static com.google.errorprone.matchers.Matchers.hasModifier;
 import static com.google.errorprone.matchers.Matchers.isSameType;
 import static com.google.errorprone.matchers.Matchers.kindIs;
+import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.enclosingPackage;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
+import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.getType;
+import static java.util.stream.Collectors.joining;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
@@ -38,11 +43,14 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.SetMultimap;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
+import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.matchers.method.MethodMatchers;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
@@ -50,6 +58,7 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.ParameterizedTypeTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.Tree.Kind;
@@ -57,6 +66,7 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
+import com.sun.tools.javac.code.Type;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -64,11 +74,12 @@ import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.regex.Pattern;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 
 /** Refactoring to suggest Immutable types for member collection that are not mutated. */
 @BugPattern(
-    name = "ImmutableMemberCollection",
     summary = "If you don't intend to mutate a member collection prefer using Immutable types.",
     severity = SUGGESTION)
 public final class ImmutableMemberCollection extends BugChecker implements ClassTreeMatcher {
@@ -113,20 +124,53 @@ public final class ImmutableMemberCollection extends BugChecker implements Class
   private static final Matcher<Tree> PRIVATE_FINAL_VAR_MATCHER =
       allOf(kindIs(Kind.VARIABLE), hasModifier(Modifier.PRIVATE), hasModifier(Modifier.FINAL));
 
+  private static final Matcher<ExpressionTree> COLLECTION_FACTORY_MATCHER =
+      anyOf(
+          staticMethod().onDescendantOf("java.util.Collection").named("of"),
+          staticMethod().onClass("java.util.Arrays").named("asList"));
+
+  private static final Matcher<ExpressionTree> UNMODIFIABLE_MATCHER =
+      staticMethod()
+          .onClass("java.util.Collections")
+          .withNameMatching(Pattern.compile("unmodifiable.*"));
+
+  private static final Matcher<ExpressionTree> JDK_EMPTY_COLLECTION_CONSTRUCTOR =
+      MethodMatchers.constructor()
+          .forClass((type, state) ->
+              enclosingPackage(type.asElement())
+                  .map(p -> p.getQualifiedName().contentEquals("java.util"))
+                  .orElse(false))
+          .withNoParameters();
+
+  private static final ClassName JAVA_UTIL_MAP = ClassName.of("java.util.Map");
+
+  private static final Matcher<ExpressionTree> MAP_OF_ENTRIES =
+      staticMethod().onDescendantOf(JAVA_UTIL_MAP).named("ofEntries");
+
+  private static final Matcher<ExpressionTree> MAP_ENTRY =
+      staticMethod().onDescendantOf(JAVA_UTIL_MAP).named("entry");
+
   // TODO(ashishkedia) : Share this with ImmutableSetForContains.
   private static final Matcher<Tree> EXCLUSIONS =
-      anyOf(
-          hasAnnotationWithSimpleName("Bind"),
-          hasAnnotationWithSimpleName("Inject"));
+      anyOf(hasAnnotationWithSimpleName("Bind"), hasAnnotationWithSimpleName("Inject"));
+
+  private final WellKnownKeep wellKnownKeep;
+
+  @Inject
+  ImmutableMemberCollection(WellKnownKeep wellKnownKeep) {
+    this.wellKnownKeep = wellKnownKeep;
+  }
 
   @Override
   public Description matchClass(ClassTree classTree, VisitorState state) {
     ImmutableMap<Symbol, ReplaceableVar> replaceableVars =
         classTree.getMembers().stream()
             .filter(member -> PRIVATE_FINAL_VAR_MATCHER.matches(member, state))
+            .filter(member -> !wellKnownKeep.shouldKeep(member))
             .filter(member -> !EXCLUSIONS.matches(member, state))
+            .filter(member -> !isSuppressed(member, state))
             .map(VariableTree.class::cast)
-            .flatMap(varTree -> stream(isReplaceable(varTree, state)))
+            .flatMap(varTree -> isReplaceable(varTree, state).stream())
             .collect(toImmutableMap(ReplaceableVar::symbol, var -> var));
     if (replaceableVars.isEmpty()) {
       return Description.NO_MATCH;
@@ -189,14 +233,12 @@ public final class ImmutableMemberCollection extends BugChecker implements Class
     ImmutableSetMultimap<Symbol, Tree> initTrees = initTreesBuilder.build();
     SuggestedFix.Builder suggestedFix = SuggestedFix.builder();
     replaceableVars.values().stream()
-        .filter(
-            var ->
-                var.areAllInitImmutable(initTrees.get(var.symbol()), state)
-                    || !isPotentiallyMutated.contains(var.symbol()))
-        .forEach(
-            replaceableVar ->
-                suggestedFix.merge(
-                    replaceableVar.getFix(initTrees.get(replaceableVar.symbol()), state)));
+        .filter(var ->
+            var.areAllInitImmutable(initTrees.get(var.symbol()), state)
+                || !isPotentiallyMutated.contains(var.symbol()))
+        .forEach(replaceableVar ->
+            suggestedFix.merge(
+                replaceableVar.getFix(initTrees.get(replaceableVar.symbol()), state)));
     if (suggestedFix.isEmpty()) {
       return Description.NO_MATCH;
     }
@@ -210,29 +252,15 @@ public final class ImmutableMemberCollection extends BugChecker implements Class
         .map(type -> ReplaceableVar.create(tree, type));
   }
 
-  @AutoValue
-  abstract static class ReplaceableType<M> {
-    abstract Class<M> interfaceType();
-
-    abstract Class<? extends M> immutableType();
-
+  record ReplaceableType<M>(Class<M> interfaceType, Class<? extends M> immutableType) {
     static <M> ReplaceableType<M> create(Class<M> interfaceType, Class<? extends M> immutableType) {
-      return new AutoValue_ImmutableMemberCollection_ReplaceableType<>(
-          interfaceType, immutableType);
+      return new ReplaceableType<>(interfaceType, immutableType);
     }
   }
 
-  @AutoValue
-  abstract static class ReplaceableVar {
-    abstract Symbol symbol();
-
-    abstract ReplaceableType<?> type();
-
-    abstract Tree declaredType();
-
+  record ReplaceableVar(Symbol symbol, ReplaceableType<?> type, Tree declaredType) {
     static ReplaceableVar create(VariableTree variableTree, ReplaceableType<?> type) {
-      return new AutoValue_ImmutableMemberCollection_ReplaceableVar(
-          getSymbol(variableTree), type, variableTree.getType());
+      return new ReplaceableVar(getSymbol(variableTree), type, variableTree.getType());
     }
 
     private SuggestedFix getFix(ImmutableSet<Tree> initTrees, VisitorState state) {
@@ -242,13 +270,56 @@ public final class ImmutableMemberCollection extends BugChecker implements Class
               .addImport(type().immutableType().getName());
       initTrees.stream()
           .filter(initTree -> !isSameType(type().immutableType()).matches(initTree, state))
-          .forEach(init -> fixBuilder.replace(init, wrapWithImmutableCopy(init, state)));
+          .forEach(
+              init -> fixBuilder.replace(init, wrapWithImmutableCopy(init, fixBuilder, state)));
       return fixBuilder.build();
     }
 
-    private String wrapWithImmutableCopy(Tree tree, VisitorState state) {
+    private String wrapWithImmutableCopy(
+        Tree tree, SuggestedFix.Builder fixBuilder, VisitorState state) {
       String type = type().immutableType().getSimpleName();
+      switch (tree) {
+        case NewClassTree newClassTree -> {
+          if (JDK_EMPTY_COLLECTION_CONSTRUCTOR.matches(newClassTree, state)) {
+            return type + ".of()";
+          }
+        }
+        case MethodInvocationTree methodInvocationTree -> {
+          var arguments = methodInvocationTree.getArguments();
+          if (MAP_OF_ENTRIES.matches(methodInvocationTree, state)
+              && arguments.stream().allMatch(a -> MAP_ENTRY.matches(a, state))) {
+            ImmutableList<String> entries =
+                arguments.stream()
+                    .map(a -> argumentSource(((MethodInvocationTree) a).getArguments(), state))
+                    .collect(toImmutableList());
+            Symbol mapSymbol = JAVA_UTIL_MAP.symbol(state);
+            Type mapType = state.getTypes().asSuper(getType(methodInvocationTree), mapSymbol);
+            var mapTypeTypeArguments = mapType.getTypeArguments();
+            if (mapTypeTypeArguments.isEmpty()) {
+              break;
+            }
+            return String.format(
+                "ImmutableMap.<%s, %s>builder()%s.buildOrThrow()",
+                SuggestedFixes.qualifyType(state, fixBuilder, mapTypeTypeArguments.get(0)),
+                SuggestedFixes.qualifyType(state, fixBuilder, mapTypeTypeArguments.get(1)),
+                entries.stream().map(entry -> ".put(" + entry + ")").collect(joining("\n")));
+          }
+          if (COLLECTION_FACTORY_MATCHER.matches(methodInvocationTree, state)) {
+            return type + ".of(" + argumentSource(arguments, state) + ")";
+          }
+          if (UNMODIFIABLE_MATCHER.matches(methodInvocationTree, state)) {
+            return wrapWithImmutableCopy(getOnlyElement(arguments), fixBuilder, state);
+          }
+        }
+        default -> {}
+      }
       return type + ".copyOf(" + state.getSourceForNode(tree) + ")";
+    }
+
+    private String argumentSource(List<? extends ExpressionTree> arguments, VisitorState state) {
+      int start = getStartPosition(arguments.getFirst());
+      int end = state.getEndPosition(arguments.getLast());
+      return state.getSourceCode().subSequence(start, end).toString();
     }
 
     private boolean areAllInitImmutable(ImmutableSet<Tree> initTrees, VisitorState state) {
@@ -257,8 +328,8 @@ public final class ImmutableMemberCollection extends BugChecker implements Class
     }
 
     private static Tree stripTypeParameters(Tree tree) {
-      return tree.getKind().equals(Kind.PARAMETERIZED_TYPE)
-          ? ((ParameterizedTypeTree) tree).getType()
+      return tree instanceof ParameterizedTypeTree parameterizedTypeTree
+          ? parameterizedTypeTree.getType()
           : tree;
     }
   }

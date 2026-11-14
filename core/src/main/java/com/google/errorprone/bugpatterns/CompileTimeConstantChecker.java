@@ -20,6 +20,7 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.errorprone.BugPattern.LinkType.NONE;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.CompileTimeConstantExpressionMatcher.hasCompileTimeConstantAnnotation;
+import static javax.lang.model.element.ElementKind.FIELD;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
@@ -51,44 +52,8 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import javax.lang.model.element.ElementKind;
 
-/**
- * Detects invocations of methods with a parameter annotated {@code @CompileTimeConstant} such that
- * the corresponding actual parameter is not a compile-time constant expression, and initialisation
- * of fields declared {@code @CompileTimeConstant final} such that the actual value is not a
- * compile-time constant expression.
- *
- * <p>This type annotation checker enforces that for all method and constructor invocations, for all
- * formal parameters of the invoked method/constructor that are annotated with the {@link
- * com.google.errorprone.annotations.CompileTimeConstant} type annotation, the corresponding actual
- * parameter is an expression that satisfies one of the following conditions:
- *
- * <ol>
- *   <li>The expression is one for which the Java compiler can determine a constant value at compile
- *       time, or
- *   <li>the expression consists of the literal {@code null}, or
- *   <li>the expression consists of a single identifier, where the identifier is a formal method
- *       parameter or class field that is declared {@code final} and has the {@link
- *       com.google.errorprone.annotations.CompileTimeConstant} annotation.
- * </ol>
- *
- * <p>This type annotation checker also enforces that for all field declarations annotated with the
- * {@link com.google.errorprone.annotations.CompileTimeConstant} type annotation, the field is also
- * declared {@code final} and the corresponding initialised value satifsies one of the following
- * conditions:
- *
- * <ol>
- *   <li>The expression is one for which the Java compiler can determine a constant value at compile
- *       time, or
- *   <li>the expression consists of the literal {@code null}, or
- *   <li>the expression consists of a single identifier, where the identifier is a formal method
- *       parameter or class field that is declared {@code final} and has the {@link
- *       com.google.errorprone.annotations.CompileTimeConstant} annotation.
- * </ol>
- *
- * @see CompileTimeConstantExpressionMatcher
- */
+/** A Bugpattern; see the accompanying Markdown documentation. */
 @BugPattern(
     name = "CompileTimeConstant",
     summary =
@@ -108,7 +73,7 @@ public class CompileTimeConstantChecker extends BugChecker
   private static final String DID_YOU_MEAN_FINAL_FMT_MESSAGE = " Did you mean to make '%s' final?";
 
   private final Matcher<ExpressionTree> compileTimeConstExpressionMatcher =
-      new CompileTimeConstantExpressionMatcher();
+      CompileTimeConstantExpressionMatcher.instance();
 
   /**
    * Matches formal parameters with {@link com.google.errorprone.annotations.CompileTimeConstant}
@@ -125,7 +90,7 @@ public class CompileTimeConstantChecker extends BugChecker
    */
   private Description matchArguments(
       VisitorState state,
-      final Symbol.MethodSymbol calleeSymbol,
+      Symbol.MethodSymbol calleeSymbol,
       Iterator<? extends ExpressionTree> actualParams) {
     Symbol.VarSymbol lastFormalParam = null;
     for (Symbol.VarSymbol formalParam : calleeSymbol.getParameters()) {
@@ -172,11 +137,9 @@ public class CompileTimeConstantChecker extends BugChecker
    * non-final. Suggest making it final in the error message.
    */
   private Description handleMatch(ExpressionTree actualParam, VisitorState state) {
-    Symbol sym = ASTHelpers.getSymbol(actualParam);
-    if (!(sym instanceof VarSymbol)) {
+    if (!(ASTHelpers.getSymbol(actualParam) instanceof VarSymbol var)) {
       return describeMatch(actualParam);
     }
-    VarSymbol var = (VarSymbol) sym;
     if (!hasCompileTimeConstantAnnotation(state, var)) {
       return describeMatch(actualParam);
     }
@@ -189,27 +152,18 @@ public class CompileTimeConstantChecker extends BugChecker
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
     Symbol.MethodSymbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null) {
-      return Description.NO_MATCH;
-    }
     return matchArguments(state, sym, tree.getArguments().iterator());
   }
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     Symbol.MethodSymbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null) {
-      return Description.NO_MATCH;
-    }
     return matchArguments(state, sym, tree.getArguments().iterator());
   }
 
   @Override
   public Description matchMethod(MethodTree node, VisitorState state) {
     Symbol.MethodSymbol method = ASTHelpers.getSymbol(node);
-    if (method == null) {
-      return Description.NO_MATCH;
-    }
     List<Integer> compileTimeConstantAnnotationIndexes =
         getAnnotatedParams(method.getParameters(), state);
     if (compileTimeConstantAnnotationIndexes.isEmpty()) {
@@ -225,9 +179,6 @@ public class CompileTimeConstantChecker extends BugChecker
   @Override
   public Description matchMemberReference(MemberReferenceTree node, VisitorState state) {
     Symbol.MethodSymbol sym = ASTHelpers.getSymbol(node);
-    if (sym == null) {
-      return Description.NO_MATCH;
-    }
     List<Integer> compileTimeConstantAnnotationIndexes =
         getAnnotatedParams(sym.getParameters(), state);
     if (compileTimeConstantAnnotationIndexes.isEmpty()) {
@@ -260,6 +211,7 @@ public class CompileTimeConstantChecker extends BugChecker
       case FIELD:
         break; // continue below
       case LOCAL_VARIABLE: // disallowed by @Target meta-annotation
+      case BINDING_VARIABLE:
       default: // impossible
         throw new AssertionError(symbol.getKind());
     }
@@ -282,10 +234,7 @@ public class CompileTimeConstantChecker extends BugChecker
     ExpressionTree variable = node.getVariable();
     ExpressionTree expression = node.getExpression();
     Symbol assignedSymbol = ASTHelpers.getSymbol(variable);
-    if (assignedSymbol == null || assignedSymbol.owner == null) {
-      return Description.NO_MATCH;
-    }
-    if (assignedSymbol.owner.getKind() != ElementKind.CLASS) {
+    if (assignedSymbol == null || assignedSymbol.getKind() != FIELD) {
       return Description.NO_MATCH;
     }
     if (!hasCompileTimeConstantAnnotation(state, assignedSymbol)) {

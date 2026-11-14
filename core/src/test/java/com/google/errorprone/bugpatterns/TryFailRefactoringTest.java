@@ -22,7 +22,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** {@link ExpectedExceptionRefactoring}Test */
 @RunWith(JUnit4.class)
 public class TryFailRefactoringTest {
 
@@ -36,59 +35,67 @@ public class TryFailRefactoringTest {
     testHelper
         .addInputLines(
             "in/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.fail;",
-            "import java.io.IOException;",
-            "import java.nio.file.*;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void f(String message) throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "      Files.readAllBytes(p);",
-            "      fail(message);",
-            "    } catch (IOException e) {",
-            "      assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "    }",
-            "  }",
-            "  @Test",
-            "  public void g() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "      fail(\"expected exception not thrown\");",
-            "    } catch (IOException e) {",
-            "      assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "    }",
-            "  }",
-            "}")
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void f(String msg) throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  Files.readAllBytes(p);
+                  fail(msg);
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+
+              @Test
+              public void g() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  fail("expected exception not thrown");
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.assertThrows;",
-            "import static org.junit.Assert.fail;",
-            "import java.io.IOException;",
-            "import java.nio.file.*;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void f(String message) throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    IOException e = assertThrows(message, IOException.class, () -> {",
-            "      Files.readAllBytes(p);",
-            "      Files.readAllBytes(p);",
-            "    });",
-            "    assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "  }",
-            "  @Test",
-            "  public void g() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    IOException e = assertThrows(IOException.class, () -> Files.readAllBytes(p));",
-            "    assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "  }",
-            "}")
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void f(String msg) throws Exception {
+                Path p = Paths.get("NOSUCH");
+                Files.readAllBytes(p);
+                var e = assertThrows(IOException.class, () -> Files.readAllBytes(p));
+                assertThat(e).hasMessageThat().contains("NOSUCH");
+              }
+
+              @Test
+              public void g() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                var e = assertThrows(IOException.class, () -> Files.readAllBytes(p));
+                assertThat(e).hasMessageThat().contains("NOSUCH");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -97,37 +104,43 @@ public class TryFailRefactoringTest {
     testHelper
         .addInputLines(
             "in/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.fail;",
-            "import java.io.IOException;",
-            "import java.nio.file.*;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void test() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "      fail();",
-            "    } catch (IOException e) {",
-            "    }",
-            "  }",
-            "}")
+            """
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  fail();
+                } catch (IOException e) {
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.assertThrows;",
-            "import static org.junit.Assert.fail;",
-            "import java.io.IOException;",
-            "import java.nio.file.*;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void test() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    assertThrows(IOException.class, () -> Files.readAllBytes(p));",
-            "  }",
-            "}")
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                assertThrows(IOException.class, () -> Files.readAllBytes(p));
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -136,45 +149,53 @@ public class TryFailRefactoringTest {
     testHelper
         .addInputLines(
             "in/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.fail;",
-            "import com.google.common.io.CharSource;",
-            "import java.io.BufferedReader;",
-            "import java.io.IOException;",
-            "import java.io.PushbackReader;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void f(String message, CharSource cs) throws IOException {",
-            "    try (BufferedReader buf = cs.openBufferedStream();",
-            "         PushbackReader pbr = new PushbackReader(buf)) {",
-            "      pbr.read();",
-            "      fail(message);",
-            "    } catch (IOException e) {",
-            "      assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "    }",
-            "  }",
-            "}")
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.fail;
+
+            import com.google.common.io.CharSource;
+            import java.io.BufferedReader;
+            import java.io.IOException;
+            import java.io.PushbackReader;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void f(String msg, CharSource cs) throws IOException {
+                try (BufferedReader buf = cs.openBufferedStream();
+                    PushbackReader pbr = new PushbackReader(buf)) {
+                  pbr.read();
+                  fail(msg);
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "out/ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.assertThrows;",
-            "import static org.junit.Assert.fail;",
-            "import com.google.common.io.CharSource;",
-            "import java.io.BufferedReader;",
-            "import java.io.IOException;",
-            "import java.io.PushbackReader;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void f(String message, CharSource cs) throws IOException {",
-            "    try (BufferedReader buf = cs.openBufferedStream();",
-            "         PushbackReader pbr = new PushbackReader(buf)) {",
-            "      IOException e = assertThrows(message, IOException.class, () -> pbr.read());",
-            "      assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "    }",
-            "  }",
-            "}")
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import com.google.common.io.CharSource;
+            import java.io.BufferedReader;
+            import java.io.IOException;
+            import java.io.PushbackReader;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void f(String msg, CharSource cs) throws IOException {
+                try (BufferedReader buf = cs.openBufferedStream();
+                    PushbackReader pbr = new PushbackReader(buf)) {
+                  var e = assertThrows(IOException.class, () -> pbr.read());
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -183,55 +204,64 @@ public class TryFailRefactoringTest {
     CompilationTestHelper.newInstance(TryFailRefactoring.class, getClass())
         .addSourceLines(
             "ExceptionTest.java",
-            "import static com.google.common.truth.Truth.assertThat;",
-            "import static org.junit.Assert.fail;",
-            "import java.io.IOException;",
-            "import java.nio.file.*;",
-            "import org.junit.Test;",
-            "class ExceptionTest {",
-            "  @Test",
-            "  public void noFail() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "    } catch (IOException e) {",
-            "    }",
-            "  }",
-            "  @Test",
-            "  public void unionCatch() throws Exception {",
-            "    try {",
-            "      ((Class<?>) null).newInstance();",
-            "      fail();",
-            "    } catch (IllegalAccessException | InstantiationException e) {",
-            "    }",
-            "  }",
-            "  @Test",
-            "  public void multiCatch() throws Exception {",
-            "    try {",
-            "      ((Class<?>) null).newInstance();",
-            "      fail();",
-            "    } catch (IllegalAccessException e) {",
-            "    } catch (InstantiationException e) {",
-            "    }",
-            "  }",
-            "  @Test",
-            "  public void finallyBlock() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "    } catch (IOException e) {",
-            "    } finally {}",
-            "  }",
-            "  public void nonTestMethod() throws Exception {",
-            "    Path p = Paths.get(\"NOSUCH\");",
-            "    try {",
-            "      Files.readAllBytes(p);",
-            "      fail();",
-            "    } catch (IOException e) {",
-            "      assertThat(e).hasMessageThat().contains(\"NOSUCH\");",
-            "    }",
-            "  }",
-            "}")
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void noFail() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                } catch (IOException e) {
+                }
+              }
+
+              @Test
+              public void unionCatch() throws Exception {
+                try {
+                  ((Class<?>) null).newInstance();
+                  fail();
+                } catch (IllegalAccessException | InstantiationException e) {
+                }
+              }
+
+              @Test
+              public void multiCatch() throws Exception {
+                try {
+                  ((Class<?>) null).newInstance();
+                  fail();
+                } catch (IllegalAccessException e) {
+                } catch (InstantiationException e) {
+                }
+              }
+
+              @Test
+              public void finallyBlock() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                } catch (IOException e) {
+                } finally {
+                }
+              }
+
+              public void nonTestMethod() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  fail();
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -240,14 +270,381 @@ public class TryFailRefactoringTest {
     compilationTestHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  static {",
-            "    try {",
-            "      int a;",
-            "    } catch (Exception e) {",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              static {
+                try {
+                  int a;
+                } catch (Exception e) {
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void twoTryFailBlocksSameScope() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.nio.file.Paths;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  fail("expected exception not thrown");
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+                try {
+                  Files.readAllBytes(p);
+                  fail("expected exception not thrown");
+                } catch (IOException e) {
+                  assertThat(e).hasMessageThat().contains("NOSUCH");
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static com.google.common.truth.Truth.assertThat;
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.nio.file.Paths;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                var e = assertThrows(IOException.class, () -> Files.readAllBytes(p));
+                assertThat(e).hasMessageThat().contains("NOSUCH");
+                var e2 = assertThrows(IOException.class, () -> Files.readAllBytes(p));
+                assertThat(e2).hasMessageThat().contains("NOSUCH");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void commentsArePreserved() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                // This is a comment inside test method, before the try block
+                try {
+                  // This is a comment inside try block, before the statement
+                  Files.readAllBytes(p);
+                  // This is a comment inside try block, after the statement
+                  fail();
+                  // This is a comment inside try block, after the fail statement
+                } catch (IOException e) {
+                  // This is a comment inside catch block
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              @Test
+              public void test() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                // This is a comment inside test method, before the try block
+                // This is a comment inside try block, before the statement
+                // This is a comment inside try block, after the statement
+                // This is a comment inside try block, after the fail statement
+                // This is a comment inside catch block
+                assertThrows(IOException.class, () -> Files.readAllBytes(p));
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void variableDeclaration() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                try {
+                  int age = getAge();
+                  fail();
+                } catch (IllegalArgumentException e) {
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                assertThrows(IllegalArgumentException.class, () -> getAge());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void variableDeclarationWithAssignmentUsedOnce() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                int age;
+                try {
+                  age = getAge();
+                  fail();
+                } catch (IllegalArgumentException e) {
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                int age;
+                assertThrows(IllegalArgumentException.class, () -> getAge());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void variableDeclarationWithAssignmentUsedTwice() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                int age;
+                try {
+                  age = getAge();
+                  fail();
+                } catch (IllegalArgumentException e) {
+                }
+                try {
+                  age = getAge();
+                  fail();
+                } catch (IllegalArgumentException e) {
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                int age;
+                assertThrows(IllegalArgumentException.class, () -> getAge());
+                assertThrows(IllegalArgumentException.class, () -> getAge());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void failureMessageIncludesReturnValue() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                try {
+                  int age = getAge();
+                  fail("Expected getAge() to throw but it returned: " + age);
+                } catch (IllegalArgumentException e) {
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import org.junit.Test;
+
+            class ExceptionTest {
+              int getAge() {
+                return 42;
+              }
+
+              @Test
+              void f() {
+                assertThrows(IllegalArgumentException.class, () -> getAge());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void catchBlock_unusedException() {
+    testHelper
+        .addInputLines(
+            "in/ExceptionTest.java",
+            """
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              private void cleanup() {}
+
+              @Test
+              public void f() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                try {
+                  Files.readAllBytes(p);
+                  fail();
+                } catch (IOException e) {
+                  cleanup();
+                }
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/ExceptionTest.java",
+            """
+            import static org.junit.Assert.assertThrows;
+            import static org.junit.Assert.fail;
+
+            import java.io.IOException;
+            import java.nio.file.*;
+            import org.junit.Test;
+
+            class ExceptionTest {
+              private void cleanup() {}
+
+              @Test
+              public void f() throws Exception {
+                Path p = Paths.get("NOSUCH");
+                assertThrows(IOException.class, () -> Files.readAllBytes(p));
+                cleanup();
+              }
+            }
+            """)
         .doTest();
   }
 }

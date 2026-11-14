@@ -21,6 +21,7 @@ import static com.google.errorprone.BugPattern.StandardTags.FRAGILE_CODE;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
+import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
@@ -38,6 +39,7 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.TryTree;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreeScanner;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Suggests that calls to {@code Lock.lock} must be immediately followed by a {@code try-finally}
@@ -46,7 +48,6 @@ import com.sun.source.util.TreeScanner;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "LockNotBeforeTry",
     summary =
         "Calls to Lock#lock should be immediately followed by a try block which releases the lock.",
     severity = WARNING,
@@ -68,10 +69,9 @@ public final class LockNotBeforeTry extends BugChecker implements MethodInvocati
       return NO_MATCH;
     }
     Tree enclosing = state.getPath().getParentPath().getParentPath().getLeaf();
-    if (!(enclosing instanceof BlockTree)) {
+    if (!(enclosing instanceof BlockTree block)) {
       return NO_MATCH;
     }
-    BlockTree block = (BlockTree) enclosing;
     int index = block.getStatements().indexOf(parent);
     if (index + 1 < block.getStatements().size()) {
       StatementTree nextStatement = block.getStatements().get(index + 1);
@@ -91,13 +91,15 @@ public final class LockNotBeforeTry extends BugChecker implements MethodInvocati
     }
     TryTree enclosingTry = state.findEnclosing(TryTree.class);
     if (enclosingTry != null && releases(enclosingTry, lockee, state)) {
-      SuggestedFix fix =
-          SuggestedFix.builder()
-              .replace(lockStatement, "")
-              .prefixWith(enclosingTry, state.getSourceForNode(lockStatement))
-              .build();
-      return buildDescription(lockInvocation)
-          .addFix(fix)
+      Description.Builder description = buildDescription(lockInvocation);
+      if (enclosingTry.getBlock().getStatements().indexOf(lockStatement) == 0) {
+        description.addFix(
+            SuggestedFix.builder()
+                .replace(lockStatement, "")
+                .prefixWith(enclosingTry, state.getSourceForNode(lockStatement))
+                .build());
+      }
+      return description
           .setMessage(
               String.format(
                   "Prefer obtaining the lock for %s outside the try block. That way, if #lock"
@@ -106,19 +108,20 @@ public final class LockNotBeforeTry extends BugChecker implements MethodInvocati
           .build();
     }
     Tree enclosing = state.getPath().getParentPath().getParentPath().getLeaf();
-    if (!(enclosing instanceof BlockTree)) {
+    if (!(enclosing instanceof BlockTree block)) {
       return NO_MATCH;
     }
-    BlockTree block = (BlockTree) enclosing;
     int index = block.getStatements().indexOf(lockStatement);
     // Scan through the enclosing statements
     for (StatementTree statement : Iterables.skip(block.getStatements(), index + 1)) {
       // ... for a try/finally which releases this lock.
-      if (statement instanceof TryTree && releases((TryTree) statement, lockee, state)) {
+      if (statement instanceof TryTree tryTree && releases(tryTree, lockee, state)) {
+        int start = getStartPosition(statement);
+        int end = getStartPosition(tryTree.getBlock().getStatements().getFirst());
         SuggestedFix fix =
             SuggestedFix.builder()
-                .replace(lockStatement, "")
-                .prefixWith(statement, state.getSourceForNode(lockStatement))
+                .replace(start, end, "")
+                .postfixWith(lockStatement, state.getSourceCode(start, end).toString())
                 .build();
         return buildDescription(lockInvocation)
             .addFix(fix)
@@ -128,8 +131,8 @@ public final class LockNotBeforeTry extends BugChecker implements MethodInvocati
             .build();
       }
       // ... or an unlock at the same level.
-      if (statement instanceof ExpressionStatementTree) {
-        ExpressionTree expression = ((ExpressionStatementTree) statement).getExpression();
+      if (statement instanceof ExpressionStatementTree expressionStatementTree) {
+        ExpressionTree expression = expressionStatementTree.getExpression();
         if (acquires(expression, lockee, state)) {
           return buildDescription(lockInvocation)
               .setMessage(
@@ -166,7 +169,7 @@ public final class LockNotBeforeTry extends BugChecker implements MethodInvocati
     Boolean released =
         new TreeScanner<Boolean, Void>() {
           @Override
-          public Boolean reduce(Boolean r1, Boolean r2) {
+          public @Nullable Boolean reduce(Boolean r1, Boolean r2) {
             return r1 == null ? r2 : (r2 == null ? null : r1 && r2);
           }
 

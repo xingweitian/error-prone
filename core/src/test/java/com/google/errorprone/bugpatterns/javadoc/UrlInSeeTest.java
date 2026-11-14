@@ -16,8 +16,6 @@
 
 package com.google.errorprone.bugpatterns.javadoc;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,30 +31,34 @@ public final class UrlInSeeTest {
   public void positive() {
     helper
         .addInputLines(
-            "Test.java", //
-            "/**",
-            " * @see http://foo for more details",
-            "*/",
-            "class Test {}")
+            "Test.java",
+            """
+            /**
+             * @see https://foo for more details
+             */
+            class Test {}
+            """)
         .addOutputLines(
-            "Test.java", //
-            "/**",
-            " * See http://foo for more details",
-            "*/",
-            "class Test {}")
-        .doTest(TEXT_MATCH);
+            "Test.java",
+            """
+            /** See https://foo for more details */
+            class Test {}
+            """)
+        .doTest();
   }
 
   @Test
   public void negative() {
     helper
         .addInputLines(
-            "Test.java", //
-            "/**",
-            " * @see java.util.List",
-            "*/",
-            "class Test {}")
+            "Test.java",
+            """
+            /**
+             * @see java.util.List
+             */
+            class Test {}
+            """)
         .expectUnchanged()
-        .doTest(TEXT_MATCH);
+        .doTest();
   }
 }

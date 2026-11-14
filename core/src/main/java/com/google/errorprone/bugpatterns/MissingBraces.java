@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.errorprone.fixes.Replacements.CoalescePolicy.KEEP_ONLY_IDENTICAL_INSERTS;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 
 import com.google.errorprone.BugPattern;
@@ -36,20 +37,17 @@ import com.sun.source.tree.EnhancedForLoopTree;
 import com.sun.source.tree.ForLoopTree;
 import com.sun.source.tree.IfTree;
 import com.sun.source.tree.StatementTree;
-import com.sun.source.tree.Tree;
 import com.sun.source.tree.WhileLoopTree;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "MissingBraces",
     summary =
         "The Google Java Style Guide requires braces to be used with if, else, for, do and while"
             + " statements, even when the body is empty or contains only a single statement.",
     severity = SeverityLevel.SUGGESTION,
     tags = StandardTags.STYLE,
     linkType = LinkType.CUSTOM,
-    link = "https://google.github.io/styleguide/javaguide.html#s4.1.1-braces-always-used"
-    )
+    link = "https://google.github.io/styleguide/javaguide.html#s4.1.1-braces-always-used")
 public class MissingBraces extends BugChecker
     implements IfTreeMatcher,
         ForLoopTreeMatcher,
@@ -60,8 +58,7 @@ public class MissingBraces extends BugChecker
   @Override
   public Description matchIf(IfTree tree, VisitorState state) {
     check(tree.getThenStatement(), state);
-    if (tree.getElseStatement() != null
-        && !tree.getElseStatement().getKind().equals(Tree.Kind.IF)) {
+    if (tree.getElseStatement() != null && !(tree.getElseStatement() instanceof IfTree)) {
       check(tree.getElseStatement(), state);
     }
     return NO_MATCH;
@@ -95,7 +92,12 @@ public class MissingBraces extends BugChecker
     if (tree != null && !(tree instanceof BlockTree)) {
       state.reportMatch(
           describeMatch(
-              tree, SuggestedFix.builder().prefixWith(tree, "{").postfixWith(tree, "}").build()));
+              tree,
+              SuggestedFix.builder()
+                  .prefixWith(tree, "{")
+                  .postfixWith(tree, "}")
+                  .setCoalescePolicy(KEEP_ONLY_IDENTICAL_INSERTS)
+                  .build()));
     }
   }
 }

@@ -16,10 +16,12 @@
 
 package com.google.errorprone.bugpatterns.threadsafety;
 
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 import static com.google.errorprone.util.ASTHelpers.stripParentheses;
 
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.SetMultimap;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -47,17 +49,13 @@ import java.util.Map;
     severity = SeverityLevel.WARNING,
     tags = StandardTags.FRAGILE_CODE)
 public class StaticGuardedByInstance extends BugChecker implements SynchronizedTreeMatcher {
-
-  private static final String MESSAGE =
-      "Write to static variable should not be guarded by instance lock '%s'";
-
   @Override
   public Description matchSynchronized(SynchronizedTree tree, VisitorState state) {
     Symbol lock = ASTHelpers.getSymbol(stripParentheses(tree.getExpression()));
     if (!(lock instanceof VarSymbol)) {
       return Description.NO_MATCH;
     }
-    if (lock.isStatic()) {
+    if (isStatic(lock)) {
       return Description.NO_MATCH;
     }
     Multimap<VarSymbol, Tree> writes = WriteVisitor.scan(tree.getBlock());
@@ -66,25 +64,29 @@ public class StaticGuardedByInstance extends BugChecker implements SynchronizedT
         continue;
       }
       state.reportMatch(
-          buildDescription(write.getValue()).setMessage(String.format(MESSAGE, lock)).build());
+          buildDescription(write.getValue())
+              .setMessage(
+                  String.format(
+                      "Write to static variable should not be guarded by instance lock '%s'", lock))
+              .build());
     }
     return Description.NO_MATCH;
   }
 
   static class WriteVisitor extends TreeScanner<Void, Void> {
 
-    static Multimap<VarSymbol, Tree> scan(Tree tree) {
+    static SetMultimap<VarSymbol, Tree> scan(Tree tree) {
       WriteVisitor visitor = new WriteVisitor();
       tree.accept(visitor, null);
       return visitor.writes;
     }
 
-    private final Multimap<VarSymbol, Tree> writes = LinkedHashMultimap.create();
+    private final SetMultimap<VarSymbol, Tree> writes = LinkedHashMultimap.create();
 
     private void recordWrite(ExpressionTree variable) {
       Symbol sym = ASTHelpers.getSymbol(variable);
-      if (sym instanceof VarSymbol) {
-        writes.put((VarSymbol) sym, variable);
+      if (sym instanceof VarSymbol varSymbol) {
+        writes.put(varSymbol, variable);
       }
     }
 
@@ -103,14 +105,9 @@ public class StaticGuardedByInstance extends BugChecker implements SynchronizedT
     @Override
     public Void visitUnary(UnaryTree node, Void unused) {
       switch (node.getKind()) {
-        case PREFIX_DECREMENT:
-        case PREFIX_INCREMENT:
-        case POSTFIX_DECREMENT:
-        case POSTFIX_INCREMENT:
-          recordWrite(node.getExpression());
-          break;
-        default:
-          break;
+        case PREFIX_DECREMENT, PREFIX_INCREMENT, POSTFIX_DECREMENT, POSTFIX_INCREMENT ->
+            recordWrite(node.getExpression());
+        default -> {}
       }
       return super.visitUnary(node, null);
     }

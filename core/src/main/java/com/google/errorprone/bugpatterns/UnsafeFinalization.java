@@ -20,6 +20,7 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Streams;
@@ -28,19 +29,19 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.util.TreeScanner;
-import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Flags.Flag;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.util.Name;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -48,10 +49,7 @@ import javax.lang.model.element.ElementKind;
 import javax.lang.model.type.TypeKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "UnsafeFinalization",
-    summary = "Finalizer may run before native code finishes execution",
-    severity = WARNING)
+@BugPattern(summary = "Finalizer may run before native code finishes execution", severity = WARNING)
 public class UnsafeFinalization extends BugChecker implements MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> FENCE_MATCHER =
@@ -61,7 +59,7 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     MethodSymbol sym = ASTHelpers.getSymbol(tree);
     // Match invocations of static native methods.
-    if (sym == null || !sym.isStatic() || !Flags.asFlagSet(sym.flags()).contains(Flag.NATIVE)) {
+    if (!sym.isStatic() || !ASTHelpers.asFlagSet(sym.flags()).contains("native")) {
       return NO_MATCH;
     }
     // Find the enclosing method declaration where the invocation occurs.
@@ -73,7 +71,7 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
     // static methods don't have an instance to finalize, and we shouldn't need to worry about
     // finalization during construction.
     MethodSymbol enclosing = ASTHelpers.getSymbol(method);
-    if (enclosing == null || enclosing.isStatic() || enclosing.isConstructor()) {
+    if (enclosing.isStatic() || enclosing.isConstructor()) {
       return NO_MATCH;
     }
     // Check if any arguments of the static native method are members (e.g. fields) of the enclosing
@@ -85,19 +83,17 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
             .filter(x -> x != null)
             .collect(toImmutableList());
     if (arguments.stream()
-        .filter(
-            x ->
-                EnumSet.of(TypeKind.INT, TypeKind.LONG)
-                    .contains(state.getTypes().unboxedTypeOrType(x.asType()).getKind()))
+        .filter(x ->
+            EnumSet.of(TypeKind.INT, TypeKind.LONG)
+                .contains(state.getTypes().unboxedTypeOrType(x.asType()).getKind()))
         .noneMatch(arg -> arg.isMemberOf(enclosing.enclClass(), state.getTypes()))) {
       // no instance state is passed to the native method
       return NO_MATCH;
     }
     if (arguments.stream()
-        .anyMatch(
-            arg ->
-                arg.getSimpleName().contentEquals("this")
-                    && arg.isMemberOf(enclosing.enclClass(), state.getTypes()))) {
+        .anyMatch(arg ->
+            arg.getSimpleName().contentEquals("this")
+                && arg.isMemberOf(enclosing.enclClass(), state.getTypes()))) {
       // the instance is passed to the native method
       return NO_MATCH;
     }
@@ -128,7 +124,7 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
   }
 
   private static Symbol getFinalizer(VisitorState state, ClassSymbol enclosing) {
-    Type finalizerType = state.getTypeFromString("com.google.common.labs.base.Finalizer");
+    Type finalizerType = COM_GOOGLE_COMMON_LABS_BASE_FINALIZER.get(state);
     Optional<VarSymbol> finalizerField =
         state.getTypes().closure(enclosing.asType()).stream()
             .flatMap(s -> getFields(s.asElement()))
@@ -140,7 +136,7 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
     return ASTHelpers.resolveExistingMethod(
         state,
         enclosing.enclClass(),
-        state.getName("finalize"),
+        FINALIZE.get(state),
         /* argTypes= */ ImmutableList.of(),
         /* tyargTypes= */ ImmutableList.of());
   }
@@ -149,4 +145,10 @@ public class UnsafeFinalization extends BugChecker implements MethodInvocationTr
     return Streams.stream(s.members().getSymbols(m -> m.getKind() == ElementKind.FIELD))
         .map(VarSymbol.class::cast);
   }
+
+  private static final Supplier<Name> FINALIZE =
+      VisitorState.memoize(state -> state.getName("finalize"));
+
+  private static final Supplier<Type> COM_GOOGLE_COMMON_LABS_BASE_FINALIZER =
+      typeFromString("com.google.common.labs.base.Finalizer");
 }

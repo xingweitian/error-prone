@@ -76,13 +76,14 @@ public class CharacterGetNumericValueTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.lang.Character;",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: CharacterGetNumericValue",
-            "    Character.getNumericValue('A');",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: CharacterGetNumericValue
+                Character.getNumericValue('A');
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -91,13 +92,14 @@ public class CharacterGetNumericValueTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.lang.Character;",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: CharacterGetNumericValue",
-            "    Character.getNumericValue(41);",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: CharacterGetNumericValue
+                Character.getNumericValue(41);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -106,13 +108,16 @@ public class CharacterGetNumericValueTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import com.ibm.icu.lang.UCharacter;",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: CharacterGetNumericValue",
-            "    UCharacter.getNumericValue(41);",
-            "  }",
-            "}")
+            """
+            import com.ibm.icu.lang.UCharacter;
+
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: CharacterGetNumericValue
+                UCharacter.getNumericValue(41);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -121,13 +126,16 @@ public class CharacterGetNumericValueTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import com.ibm.icu.lang.UCharacter;",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: CharacterGetNumericValue",
-            "    UCharacter.getNumericValue(41);",
-            "  }",
-            "}")
+            """
+            import com.ibm.icu.lang.UCharacter;
+
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: CharacterGetNumericValue
+                UCharacter.getNumericValue(41);
+              }
+            }
+            """)
         .doTest();
   }
 }

@@ -20,7 +20,6 @@ import static com.google.errorprone.matchers.Matchers.instanceMethod;
 
 import com.google.common.base.Enums;
 import com.google.common.base.Optional;
-import com.google.common.primitives.Longs;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
@@ -32,11 +31,11 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
+import com.sun.tools.javac.code.Symbol;
 import java.util.concurrent.TimeUnit;
 
 /** Check for problematic or suspicious TimeUnit conversion calls. */
 @BugPattern(
-    name = "TimeUnitConversionChecker",
     summary =
         "This TimeUnit conversion looks buggy: converting from a smaller unit to a larger unit "
             + "(and passing a constant), converting to/from the same TimeUnit, or converting "
@@ -74,7 +73,11 @@ public final class TimeUnitConversionChecker extends BugChecker
     // TimeUnit SECONDS = TimeUnit.MINUTES;
     // long about2500 = SECONDS.toSeconds(42);
     // but... I think that's bad enough to ignore here :)
-    String timeUnitName = ASTHelpers.getSymbol(receiverOfConversion).getSimpleName().toString();
+    Symbol receiverOfConversionSymbol = ASTHelpers.getSymbol(receiverOfConversion);
+    if (receiverOfConversionSymbol == null) {
+      return Description.NO_MATCH;
+    }
+    String timeUnitName = receiverOfConversionSymbol.getSimpleName().toString();
     Optional<TimeUnit> receiver = Enums.getIfPresent(TimeUnit.class, timeUnitName);
     if (!receiver.isPresent()) {
       return Description.NO_MATCH;
@@ -82,15 +85,15 @@ public final class TimeUnitConversionChecker extends BugChecker
 
     String methodName = ASTHelpers.getSymbol(tree).getSimpleName().toString();
     TimeUnit convertTo = methodNameToTimeUnit(methodName);
-    ExpressionTree arg0 = tree.getArguments().get(0);
+    ExpressionTree arg0 = tree.getArguments().getFirst();
 
-    // if we have a constant and can Long-parse it...
-    Long constant = Longs.tryParse(String.valueOf(state.getSourceForNode(arg0)));
+    Number constant = ASTHelpers.constValue(arg0, Number.class);
     if (constant != null) {
-      long converted = invokeConversion(receiver.get(), methodName, constant);
+      long value = constant.longValue();
+      long converted = invokeConversion(receiver.get(), methodName, value);
 
       // ... and the conversion results in 0 or 1, just inline it!
-      if (converted == 0 || converted == 1 || constant == converted) {
+      if (converted == 0 || converted == 1 || value == converted) {
         SuggestedFix fix = replaceTreeWith(tree, convertTo, converted + "L");
         return describeMatch(tree, fix);
       }
@@ -121,44 +124,28 @@ public final class TimeUnitConversionChecker extends BugChecker
   }
 
   private static long invokeConversion(TimeUnit timeUnit, String methodName, long duration) {
-    switch (methodName) {
-      case "toDays":
-        return timeUnit.toDays(duration);
-      case "toHours":
-        return timeUnit.toHours(duration);
-      case "toMinutes":
-        return timeUnit.toMinutes(duration);
-      case "toSeconds":
-        return timeUnit.toSeconds(duration);
-      case "toMillis":
-        return timeUnit.toMillis(duration);
-      case "toMicros":
-        return timeUnit.toMicros(duration);
-      case "toNanos":
-        return timeUnit.toNanos(duration);
-      default:
-        throw new IllegalArgumentException();
-    }
+    return switch (methodName) {
+      case "toDays" -> timeUnit.toDays(duration);
+      case "toHours" -> timeUnit.toHours(duration);
+      case "toMinutes" -> timeUnit.toMinutes(duration);
+      case "toSeconds" -> timeUnit.toSeconds(duration);
+      case "toMillis" -> timeUnit.toMillis(duration);
+      case "toMicros" -> timeUnit.toMicros(duration);
+      case "toNanos" -> timeUnit.toNanos(duration);
+      default -> throw new IllegalArgumentException();
+    };
   }
 
   private static TimeUnit methodNameToTimeUnit(String methodName) {
-    switch (methodName) {
-      case "toDays":
-        return TimeUnit.DAYS;
-      case "toHours":
-        return TimeUnit.HOURS;
-      case "toMinutes":
-        return TimeUnit.MINUTES;
-      case "toSeconds":
-        return TimeUnit.SECONDS;
-      case "toMillis":
-        return TimeUnit.MILLISECONDS;
-      case "toMicros":
-        return TimeUnit.MICROSECONDS;
-      case "toNanos":
-        return TimeUnit.NANOSECONDS;
-      default:
-        throw new IllegalArgumentException();
-    }
+    return switch (methodName) {
+      case "toDays" -> TimeUnit.DAYS;
+      case "toHours" -> TimeUnit.HOURS;
+      case "toMinutes" -> TimeUnit.MINUTES;
+      case "toSeconds" -> TimeUnit.SECONDS;
+      case "toMillis" -> TimeUnit.MILLISECONDS;
+      case "toMicros" -> TimeUnit.MICROSECONDS;
+      case "toNanos" -> TimeUnit.NANOSECONDS;
+      default -> throw new IllegalArgumentException();
+    };
   }
 }

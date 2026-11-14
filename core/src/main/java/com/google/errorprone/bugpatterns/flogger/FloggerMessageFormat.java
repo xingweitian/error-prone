@@ -31,11 +31,12 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import java.util.List;
-import java.util.regex.Pattern;
+import org.safere.Pattern;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 @BugPattern(
-    name = "FloggerMessageFormat",
     summary = "Invalid message format-style format specifier ({0}), expected printf-style (%s)",
     explanation =
         "Flogger uses printf-style format specifiers, such as %s and %d. Message format-style"
@@ -59,7 +60,7 @@ public class FloggerMessageFormat extends BugChecker implements MethodInvocation
     if (arguments.isEmpty()) {
       return NO_MATCH;
     }
-    ExpressionTree formatArg = arguments.get(0);
+    ExpressionTree formatArg = arguments.getFirst();
     String formatString = ASTHelpers.constValue(formatArg, String.class);
     if (formatString == null) {
       return NO_MATCH;

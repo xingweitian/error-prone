@@ -29,163 +29,222 @@ public class FormatStringAnnotationCheckerTest {
       CompilationTestHelper.newInstance(FormatStringAnnotationChecker.class, getClass());
 
   @Test
-  public void testMatches_failsWithNonMatchingFormatArgs() {
+  public void matches_failsWithNonMatchingFormatArgs() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  @FormatMethod public static void callLog(@FormatString String s, Object arg,",
-            "      Object arg2) {",
-            "    // BUG: Diagnostic contains: The number of format arguments passed with an",
-            "    log(s, \"test\");",
-            "    // BUG: Diagnostic contains: The format argument types passed with an",
-            "    log(s, \"test1\", \"test2\");",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              @FormatMethod
+              public static void callLog(@FormatString String s, Object arg, Object arg2) {
+                // BUG: Diagnostic contains: The number of format arguments passed with an
+                log(s, "test");
+                // BUG: Diagnostic contains: The format argument types passed with an
+                log(s, "test1", "test2");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsWithMatchingFormatStringAndArgs() {
+  public void matches_succeedsWithMatchingFormatStringAndArgs() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  @FormatMethod public static void callLog(@FormatString String s, Object arg) {",
-            "    log(s, arg);",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              @FormatMethod
+              public static void callLog(@FormatString String s, Object arg) {
+                log(s, arg);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsForMatchingFormatMethodWithImplicitFormatString() {
+  public void matches_succeedsForMatchingFormatMethodWithImplicitFormatString() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  @FormatMethod public static void callLog(String s, Object arg) {",
-            "    log(s, arg);",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              @FormatMethod
+              public static void callLog(String s, Object arg) {
+                log(s, arg);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_failsWithMismatchedFormatString() {
+  public void matches_failsWithMismatchedFormatString() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  public static void callLog() {",
-            "    // BUG: Diagnostic contains: extra format arguments: used 1, provided 2",
-            "    log(\"%s\", new Object(), new Object());",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              public static void callLog() {
+                // BUG: Diagnostic contains: extra format arguments: used 1, provided 2
+                log("%s", new Object(), new Object());
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsForCompileTimeConstantFormatString() {
+  public void matches_succeedsForCompileTimeConstantFormatString() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  public static void callLog() {",
-            "    final String formatString = \"%d\";",
-            "    log(formatString, Integer.valueOf(0));",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              public static void callLog() {
+                final String formatString = "%d";
+                log(formatString, Integer.valueOf(0));
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_failsWhenExpressionGivenForFormatString() {
+  public void matches_failsWhenExpressionGivenForFormatString() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod static void log(String s, Object... args) {}",
-            "  public static String formatString() { return \"\";}",
-            "  public static void callLog() {",
-            "    String format = \"log: \";",
-            "    // BUG: Diagnostic contains: Format strings must be either literals or",
-            "    log(format + 3);",
-            "    // BUG: Diagnostic contains: Format strings must be either literals or",
-            "    log(formatString());",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              static void log(String s, Object... args) {}
+
+              public static String formatString() {
+                return "";
+              }
+
+              public static void callLog() {
+                String format = "log: ";
+                // BUG: Diagnostic contains: Format strings must be either literals or
+                log(format + 3);
+                // BUG: Diagnostic contains: Format strings must be either literals or
+                log(formatString());
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_failsForInvalidMethodHeaders() {
+  public void matches_failsForInvalidMethodHeaders() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  // BUG: Diagnostic contains: A method cannot have more than one @FormatString",
-            "  @FormatMethod void log1(@FormatString String s1, @FormatString String s2) {}",
-            "  // BUG: Diagnostic contains: An @FormatMethod must contain at least one String",
-            "  @FormatMethod void log2(Object o) {}",
-            "  // BUG: Diagnostic contains: Only strings can be annotated @FormatString.",
-            "  @FormatMethod void log3(@FormatString Object o) {}",
-            "  // BUG: Diagnostic contains: A parameter can only be annotated @FormatString in a",
-            "  void log4(@FormatString Object o) {}",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              // BUG: Diagnostic contains: A method cannot have more than one @FormatString
+              void log1(@FormatString String s1, @FormatString String s2) {}
+
+              @FormatMethod
+              // BUG: Diagnostic contains: An @FormatMethod must contain at least one String
+              void log2(Object o) {}
+
+              @FormatMethod
+              // BUG: Diagnostic contains: Only strings can be annotated @FormatString.
+              void log3(@FormatString Object o) {}
+
+              // BUG: Diagnostic contains: A parameter can only be annotated @FormatString in a
+              void log4(@FormatString Object o) {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_failsForIncorrectStringParameterUsedWithImplicitFormatString() {
+  public void matches_failsForIncorrectStringParameterUsedWithImplicitFormatString() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public static void log(@FormatString String s, Object... args) {}",
-            "  @FormatMethod public static void callLog1(String format, String s, Object arg) {",
-            "    // BUG: Diagnostic contains: Format strings must be compile time constants or",
-            "    log(s, arg);",
-            "  }",
-            "  @FormatMethod public static void callLog2(String s, @FormatString String format,",
-            "      Object arg) {",
-            "    // BUG: Diagnostic contains: Format strings must be compile time constants or",
-            "    log(s, arg);",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public static void log(@FormatString String s, Object... args) {}
+
+              @FormatMethod
+              public static void callLog1(String format, String s, Object arg) {
+                // BUG: Diagnostic contains: Format strings must be compile time constants or
+                log(s, arg);
+              }
+
+              @FormatMethod
+              public static void callLog2(String s, @FormatString String format, Object arg) {
+                // BUG: Diagnostic contains: Format strings must be compile time constants or
+                log(s, arg);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsForNonParameterFinalOrEffectivelyFinalFormatStrings() {
+  public void matches_succeedsForNonParameterFinalOrEffectivelyFinalFormatStrings() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
@@ -208,7 +267,7 @@ public class FormatStringAnnotationCheckerTest {
   }
 
   @Test
-  public void testMatches_failsForNonFinalParametersOrNonMatchingFinalParameters() {
+  public void matches_failsForNonFinalParametersOrNonMatchingFinalParameters() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
@@ -237,7 +296,7 @@ public class FormatStringAnnotationCheckerTest {
             "    } else {",
             "      fmt3 = \"bar%s\";",
             "    }",
-            "    // BUG: Diagnostic contains: Variables used as format strings must be initialized",
+            "    // BUG: Diagnostic contains: must be initialized",
             "    log(fmt3);",
             "    String fmt4 = fmt3;",
             "    // BUG: Diagnostic contains: Local format string variables must only be assigned",
@@ -257,60 +316,79 @@ public class FormatStringAnnotationCheckerTest {
   }
 
   @Test
-  public void testMatches_failsForBadCallToConstructor() {
+  public void matches_failsForBadCallToConstructor() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public FormatStringTestCase(String s, Object... args) {}",
-            "  public static void createTestCase(String s, Object arg) {",
-            "    // BUG: Diagnostic contains: Format strings must be compile time constants or",
-            "    new FormatStringTestCase(s, arg);",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public FormatStringTestCase(String s, Object... args) {}
+
+              public static void createTestCase(String s, Object arg) {
+                // BUG: Diagnostic contains: Format strings must be compile time constants or
+                new FormatStringTestCase(s, arg);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsForMockitoMatchers() {
+  public void matches_succeedsForMockitoMatchers() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import static org.mockito.ArgumentMatchers.any;",
-            "import static org.mockito.ArgumentMatchers.eq;",
-            "import static org.mockito.Mockito.verify;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public void log(@FormatString String s, Object... args) {}",
-            "  public void callLog(String s, Object... args) {",
-            "    verify(this).log(any(String.class), eq(args));",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import static org.mockito.ArgumentMatchers.any;
+            import static org.mockito.ArgumentMatchers.eq;
+            import static org.mockito.Mockito.verify;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public void log(@FormatString String s, Object... args) {}
+
+              public void callLog(String s, Object... args) {
+                verify(this).log(any(String.class), eq(args));
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMatches_succeedsForMockitoArgumentMatchers() {
+  public void matches_succeedsForMockitoArgumentMatchers() {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import static org.mockito.ArgumentMatchers.any;",
-            "import static org.mockito.ArgumentMatchers.eq;",
-            "import static org.mockito.Mockito.verify;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "import com.google.errorprone.annotations.FormatString;",
-            "public class FormatStringTestCase {",
-            "  @FormatMethod public void log(@FormatString String s, Object... args) {}",
-            "  public void callLog(String s, Object... args) {",
-            "    verify(this).log(any(String.class), eq(args));",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import static org.mockito.ArgumentMatchers.any;
+            import static org.mockito.ArgumentMatchers.eq;
+            import static org.mockito.Mockito.verify;
+
+            import com.google.errorprone.annotations.FormatMethod;
+            import com.google.errorprone.annotations.FormatString;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              public void log(@FormatString String s, Object... args) {}
+
+              public void callLog(String s, Object... args) {
+                verify(this).log(any(String.class), eq(args));
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -319,15 +397,41 @@ public class FormatStringAnnotationCheckerTest {
     compilationHelper
         .addSourceLines(
             "test/FormatStringTestCase.java",
-            "package test;",
-            "import com.google.errorprone.annotations.FormatMethod;",
-            "public class FormatStringTestCase {",
-            "  // BUG: Diagnostic contains: must contain at least one String parameter",
-            "  @FormatMethod public static void log(int x, int y) {}",
-            "  void test() { ",
-            "    log(1, 2);",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.errorprone.annotations.FormatMethod;
+
+            public class FormatStringTestCase {
+              @FormatMethod
+              // BUG: Diagnostic contains: must contain at least one String parameter
+              public static void log(int x, int y) {}
+
+              void test() {
+                log(1, 2);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void notFirstArgument() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.annotations.FormatMethod;
+
+            class Test {
+              @FormatMethod
+              void f(Throwable o, String fmt, Object... args) {}
+
+              void test(Throwable t) {
+                f(t.getCause(), "message: %s", t.getMessage());
+              }
+            }
+            """)
         .doTest();
   }
 }

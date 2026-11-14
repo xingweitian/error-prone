@@ -33,12 +33,63 @@ public class ProtocolBufferOrdinalTest {
       CompilationTestHelper.newInstance(ProtocolBufferOrdinal.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("ProtocolBufferOrdinalPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "ProtocolBufferOrdinalPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestEnum;
+
+            /** Positive test cases for {@link ProtocolBufferOrdinal} check. */
+            public class ProtocolBufferOrdinalPositiveCases {
+
+              public static void checkCallOnOrdinal() {
+                // BUG: Diagnostic contains: ProtocolBufferOrdinal
+                TestEnum.TEST_ENUM_VAL.ordinal();
+
+                // BUG: Diagnostic contains: ProtocolBufferOrdinal
+                ProtoLiteEnum.FOO.ordinal();
+              }
+
+              enum ProtoLiteEnum implements com.google.protobuf.Internal.EnumLite {
+                FOO(1),
+                BAR(2);
+                private final int number;
+
+                private ProtoLiteEnum(int number) {
+                  this.number = number;
+                }
+
+                @Override
+                public int getNumber() {
+                  return number;
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("ProtocolBufferOrdinalNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "ProtocolBufferOrdinalNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestEnum;
+
+            /** Negative test cases for {@link ProtocolBufferOrdinal} check. */
+            public class ProtocolBufferOrdinalNegativeCases {
+
+              public static void checkProtoEnum() {
+                TestEnum.TEST_ENUM_VAL.getNumber();
+              }
+            }
+            """)
+        .doTest();
   }
 }

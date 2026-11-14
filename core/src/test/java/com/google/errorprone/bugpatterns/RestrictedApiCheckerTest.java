@@ -27,273 +27,414 @@ import org.junit.runners.JUnit4;
 /** Unit test for {@link RestrictedApiChecker} */
 @RunWith(JUnit4.class)
 public class RestrictedApiCheckerTest {
-  private final CompilationTestHelper helper;
-  private final BugCheckerRefactoringTestHelper refactoringTest;
+  private final CompilationTestHelper helper =
+      CompilationTestHelper.newInstance(RestrictedApiChecker.class, RestrictedApiCheckerTest.class)
+          .addSourceLines(
+              "Allowlist.java",
+              """
+              package com.google.errorprone.bugpatterns.testdata;
 
-  public RestrictedApiCheckerTest() {
-    this(RestrictedApiChecker.class);
-  }
+              import java.lang.annotation.ElementType;
+              import java.lang.annotation.Target;
 
-  protected RestrictedApiCheckerTest(Class<? extends BugChecker> checker) {
-    helper =
-        CompilationTestHelper.newInstance(checker, RestrictedApiCheckerTest.class)
-            .addSourceFile("Allowlist.java")
-            .addSourceFile("RestrictedApiMethods.java")
-            .matchAllDiagnostics();
-    refactoringTest =
-        BugCheckerRefactoringTestHelper.newInstance(checker, RestrictedApiCheckerTest.class);
-  }
+              @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+              public @interface Allowlist {}
+              """)
+          .addSourceLines(
+              "RestrictedApiMethods.java",
+              """
+              package com.google.errorprone.bugpatterns.testdata;
+
+              import com.google.errorprone.annotations.RestrictedApi;
+              import java.lang.annotation.ElementType;
+              import java.lang.annotation.Target;
+
+              /** Example for {@link com.google.errorprone.bugpatterns.RestrictedApiCheckerTest}. */
+              public class RestrictedApiMethods implements IFaceWithRestriction {
+
+                public int normalMethod() {
+                  return 0;
+                }
+
+                @RestrictedApi(
+                    explanation = "lorem",
+                    allowlistAnnotations = {Allowlist.class},
+                    allowlistWithWarningAnnotations = {AllowlistWithWarning.class},
+                    link = "")
+                public RestrictedApiMethods() {}
+
+                @RestrictedApi(
+                    explanation = "lorem",
+                    allowlistAnnotations = {Allowlist.class},
+                    allowlistWithWarningAnnotations = {AllowlistWithWarning.class},
+                    link = "")
+                public RestrictedApiMethods(int restricted) {}
+
+                @RestrictedApi(
+                    explanation = "lorem",
+                    allowlistAnnotations = {Allowlist.class},
+                    allowlistWithWarningAnnotations = {AllowlistWithWarning.class},
+                    link = "",
+                    allowedOnPath = ".*testsuite/.*")
+                public int restrictedMethod() {
+                  return 1;
+                }
+
+                @RestrictedApi(
+                    explanation = "lorem",
+                    allowlistAnnotations = {Allowlist.class},
+                    allowlistWithWarningAnnotations = {AllowlistWithWarning.class},
+                    link = "")
+                public static int restrictedStaticMethod() {
+                  return 2;
+                }
+
+                @Override
+                public void dontCallMe() {}
+
+                public static class Subclass extends RestrictedApiMethods {
+                  @Allowlist
+                  public Subclass(int restricted) {
+                    super(restricted);
+                  }
+
+                  @Override
+                  public int restrictedMethod() {
+                    return 42;
+                  }
+                }
+
+                public static void accept(Runnable r) {}
+              }
+
+              interface IFaceWithRestriction {
+                @RestrictedApi(explanation = "ipsum", link = "nothing")
+                void dontCallMe();
+              }
+
+              @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+              @interface AllowlistWithWarning {}
+              """)
+          .matchAllDiagnostics();
+  private final BugCheckerRefactoringTestHelper refactoringTest =
+      BugCheckerRefactoringTestHelper.newInstance(
+          RestrictedApiChecker.class, RestrictedApiCheckerTest.class);
 
   @Test
-  public void testNormalCallAllowed() {
+  public void normalCallAllowed() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo(RestrictedApiMethods m) {",
-            "    m.normalMethod();",
-            "    m.accept(m::normalMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo(RestrictedApiMethods m) {
+                m.normalMethod();
+                m.accept(m::normalMethod);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testRestrictedCallProhibited() {
+  public void restrictedCallProhibited() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo(RestrictedApiMethods m) {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.restrictedMethod();",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.accept(m::restrictedMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo(RestrictedApiMethods m) {
+                // BUG: Diagnostic contains: lorem
+                m.restrictedMethod();
+                // BUG: Diagnostic contains: lorem
+                m.accept(m::restrictedMethod);
+              }
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testRestrictedCallProhibited_inherited() {
+  public void restrictedCallProhibited_withLink() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo(RestrictedApiMethods.Subclass m) {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.restrictedMethod();",
-            "    // BUG: Diagnostic contains: ipsum",
-            "    m.dontCallMe();",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.accept(m::restrictedMethod);",
-            "    // BUG: Diagnostic contains: ipsum",
-            "    m.accept(m::dontCallMe);",
-            "  }",
-            "}")
+            """
+            package separate.test;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            class Testcase {
+              void caller() {
+                // BUG: Diagnostic contains: test
+                //    (see http://example.com)
+                restrictedMethod();
+              }
+
+              @RestrictedApi(explanation = "test", link = "http://example.com")
+              void restrictedMethod() {}
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testRestrictedCallAllowedOnAllowlistedPath() {
+  public void restrictedCallProhibited_inherited() {
+    helper
+        .addSourceLines(
+            "Testcase.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo(RestrictedApiMethods.Subclass m) {
+                // BUG: Diagnostic contains: lorem
+                m.restrictedMethod();
+                // BUG: Diagnostic contains: ipsum
+                m.dontCallMe();
+                // BUG: Diagnostic contains: lorem
+                m.accept(m::restrictedMethod);
+                // BUG: Diagnostic contains: ipsum
+                m.accept(m::dontCallMe);
+              }
+            }
+            """)
+        .expectResult(Result.ERROR)
+        .doTest();
+  }
+
+  @Test
+  public void restrictedCallAllowedOnAllowlistedPath() {
     helper
         .addSourceLines(
             "testsuite/Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo(RestrictedApiMethods m) {",
-            "    m.restrictedMethod();",
-            "    m.accept(m::restrictedMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo(RestrictedApiMethods m) {
+                m.restrictedMethod();
+                m.accept(m::restrictedMethod);
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
 
   @Test
-  public void testRestrictedStaticCallProhibited() {
+  public void restrictedStaticCallProhibited() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo() {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    RestrictedApiMethods.restrictedStaticMethod();",
-            "    // BUG: Diagnostic contains: lorem",
-            "    RestrictedApiMethods.accept(RestrictedApiMethods::restrictedStaticMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo() {
+                // BUG: Diagnostic contains: lorem
+                RestrictedApiMethods.restrictedStaticMethod();
+                // BUG: Diagnostic contains: lorem
+                RestrictedApiMethods.accept(RestrictedApiMethods::restrictedStaticMethod);
+              }
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testRestrictedConstructorProhibited() {
+  public void restrictedConstructorProhibited() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo() {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    new RestrictedApiMethods(0);",
-            "    // BUG: Diagnostic contains: lorem",
-            "    RestrictedApiMethods.accept(RestrictedApiMethods::new);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo() {
+                // BUG: Diagnostic contains: lorem
+                new RestrictedApiMethods(0);
+                // BUG: Diagnostic contains: lorem
+                RestrictedApiMethods.accept(RestrictedApiMethods::new);
+              }
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testRestrictedConstructorViaAnonymousClassProhibited() {
+  public void restrictedConstructorViaAnonymousClassProhibited() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo() {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    new RestrictedApiMethods() {};",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo() {
+                // BUG: Diagnostic contains: lorem
+                new RestrictedApiMethods() {};
+              }
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testRestrictedConstructorViaAnonymousClassAllowed() {
+  public void restrictedConstructorViaAnonymousClassAllowed() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  @Allowlist    ",
-            "  void foo() {",
-            "    new RestrictedApiMethods() {};",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              @Allowlist
+              void foo() {
+                new RestrictedApiMethods() {};
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
 
   @Test
-  public void testRestrictedCallAnonymousClassFromInterface() {
+  public void restrictedCallAnonymousClassFromInterface() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  void foo() {",
-            "    new IFaceWithRestriction() {",
-            "      @Override",
-            "      public void dontCallMe() {}",
-            "    }",
-            "    // BUG: Diagnostic contains: ipsum",
-            "    .dontCallMe();",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              void foo() {
+                new IFaceWithRestriction() {
+                  @Override
+                  public void dontCallMe() {}
+                }
+                // BUG: Diagnostic contains: ipsum
+                .dontCallMe();
+              }
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testImplicitRestrictedConstructorProhibited() {
+  public void implicitRestrictedConstructorProhibited() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase extends RestrictedApiMethods {",
-            "  // BUG: Diagnostic contains: lorem",
-            "  public Testcase() {}",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase extends RestrictedApiMethods {
+              // BUG: Diagnostic contains: lorem
+              public Testcase() {}
+            }
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Ignore("Doesn't work yet")
   @Test
-  public void testImplicitRestrictedConstructorProhibited_implicitConstructor() {
+  public void implicitRestrictedConstructorProhibited_implicitConstructor() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "  // BUG: Diagnostic contains: lorem",
-            "class Testcase extends RestrictedApiMethods {}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            // BUG: Diagnostic contains: lorem
+            class Testcase extends RestrictedApiMethods {}
+            """)
         .expectResult(Result.ERROR)
         .doTest();
   }
 
   @Test
-  public void testAllowWithWarning() {
+  public void allowWithWarning() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  @AllowlistWithWarning",
-            "  void foo(RestrictedApiMethods m) {",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.restrictedMethod();",
-            "    // BUG: Diagnostic contains: lorem",
-            "    m.accept(m::restrictedMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              @AllowlistWithWarning
+              void foo(RestrictedApiMethods m) {
+                // BUG: Diagnostic contains: lorem
+                m.restrictedMethod();
+                // BUG: Diagnostic contains: lorem
+                m.accept(m::restrictedMethod);
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
 
   @Test
-  public void testAllowWithoutWarning() {
+  public void allowWithoutWarning() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "package com.google.errorprone.bugpatterns.testdata;",
-            "class Testcase {",
-            "  @Allowlist",
-            "  void foo(RestrictedApiMethods m) {",
-            "    m.restrictedMethod();",
-            "    m.accept(m::restrictedMethod);",
-            "  }",
-            "}")
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            class Testcase {
+              @Allowlist
+              void foo(RestrictedApiMethods m) {
+                m.restrictedMethod();
+                m.accept(m::restrictedMethod);
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
 
   // Regression test for b/36160747
   @Test
-  public void testAllowAllDefinitionsInFile() {
+  public void allowAllDefinitionsInFile() {
     helper
         .addSourceLines(
             "Testcase.java",
-            "",
-            "package separate.test;",
-            "",
-            "import com.google.errorprone.annotations.RestrictedApi;",
-            "import java.lang.annotation.ElementType;",
-            "import java.lang.annotation.Target;",
-            "",
-            "class Testcase {",
-            "   @Allowlist",
-            "   void caller() {",
-            "     restrictedMethod();",
-            "   }",
-            "   @RestrictedApi(",
-            "     explanation=\"test\",",
-            "     allowlistAnnotations = {Allowlist.class},",
-            "     link = \"foo\"",
-            "   )",
-            "   void restrictedMethod() {",
-            "   }",
-            "   @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})",
-            "   @interface Allowlist {}",
-            "}")
+            """
+            package separate.test;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+            import java.lang.annotation.ElementType;
+            import java.lang.annotation.Target;
+
+            class Testcase {
+              @Allowlist
+              void caller() {
+                restrictedMethod();
+              }
+
+              @RestrictedApi(
+                  explanation = "test",
+                  allowlistAnnotations = {Allowlist.class},
+                  link = "foo")
+              void restrictedMethod() {}
+
+              @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+              @interface Allowlist {}
+            }
+            """)
         .doTest();
   }
 
@@ -303,15 +444,19 @@ public class RestrictedApiCheckerTest {
     helper
         .addSourceLines(
             "T.java",
-            "package t;",
-            "class T {",
-            "  static class Foo {",
-            "    class Loo {}",
-            "  }",
-            "  public void testFoo(Foo foo) {",
-            "    foo.new Loo() {};",
-            "  }",
-            "}")
+            """
+            package t;
+
+            class T {
+              static class Foo {
+                class Loo {}
+              }
+
+              public void testFoo(Foo foo) {
+                foo.new Loo() {};
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
@@ -322,16 +467,19 @@ public class RestrictedApiCheckerTest {
     helper
         .addSourceLines(
             "T.java",
-            "class T extends S {",
-            "  void f() {",
-            "    this.new I(\"\") {};",
-            "  }",
-            "}",
-            "abstract class S {",
-            "  public class I {",
-            "    public I(String name) {}",
-            "  }",
-            "}")
+            """
+            class T extends S {
+              void f() {
+                this.new I("") {};
+              }
+            }
+
+            abstract class S {
+              public class I {
+                public I(String name) {}
+              }
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
@@ -340,12 +488,276 @@ public class RestrictedApiCheckerTest {
   public void enumConstructor() {
     helper
         .addSourceLines(
-            "T.java", //
-            "enum E {",
-            "  ONE(1, 2) {};",
-            "  E(int x, int y) {}",
-            "}")
+            "T.java",
+            """
+            enum E {
+              ONE(1, 2) {};
+
+              E(int x, int y) {}
+            }
+            """)
         .expectResult(Result.OK)
         .doTest();
   }
+
+  @Test
+  public void restrictedApiOnRecordComponent() {
+    helper
+        .addSourceLines(
+            "Allowlist.java",
+            """
+            import java.lang.annotation.ElementType;
+            import java.lang.annotation.Target;
+
+            @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+            @interface Allowlist {}
+            """)
+        .addSourceLines(
+            "User.java",
+            """
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            public record User(
+                String name,
+                @RestrictedApi(
+                        explanation = "test",
+                        allowlistAnnotations = {Allowlist.class},
+                        link = "foo")
+                    String password) {}
+            """)
+        .addSourceLines(
+            "Testcase.java",
+            """
+            class Testcase {
+              void ctorAllowed() {
+                new User("kak", "Hunter2");
+              }
+
+              @Allowlist
+              void accessorAllowed(User user) {
+                user.password();
+              }
+
+              void accessorRestricted(User user) {
+                // BUG: Diagnostic contains: RestrictedApi
+                user.password();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void restrictedApiOnRecordConstructor() {
+    helper
+        .addSourceLines(
+            "Allowlist.java",
+            """
+            import java.lang.annotation.ElementType;
+            import java.lang.annotation.Target;
+
+            @Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+            @interface Allowlist {}
+            """)
+        .addSourceLines(
+            "User.java",
+            """
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            public record User(String name, String password) {
+
+              @RestrictedApi(
+                  explanation = "test",
+                  allowlistAnnotations = {Allowlist.class},
+                  link = "foo")
+              public User {}
+            }
+            """)
+        .addSourceLines(
+            "Testcase.java",
+            """
+            class Testcase {
+              void ctorRestricted() {
+                // BUG: Diagnostic contains: RestrictedApi
+                new User("kak", "Hunter2");
+              }
+
+              @Allowlist
+              void ctorAllowed(User user) {
+                new User("kak", "Hunter2");
+              }
+
+              void accessorAllowed(User user) {
+                user.password();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void allowedPaths() {
+    helper
+        .addSourceLines(
+            "com/google/restricted/Restricted.java",
+            """
+            package com.google.restricted;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            public class Restricted {
+              @RestrictedApi(
+                  explanation = "test",
+                  link = "",
+                  allowedPaths = {"com/google/allowed/", "com/google/other/SpecificCaller.java"})
+              public static void method() {}
+            }
+            """)
+        .addSourceLines(
+            "com/google/allowed/AllowedCaller.java",
+            """
+            package com.google.allowed;
+
+            import com.google.restricted.Restricted;
+
+            class AllowedCaller {
+              void test() {
+                Restricted.method();
+              }
+            }
+            """)
+        .addSourceLines(
+            "com/google/other/SpecificCaller.java",
+            """
+            package com.google.other;
+
+            import com.google.restricted.Restricted;
+
+            class SpecificCaller {
+              void test() {
+                Restricted.method();
+              }
+            }
+            """)
+        .addSourceLines(
+            "com/google/disallowed/DisallowedCaller.java",
+            """
+            package com.google.disallowed;
+
+            import com.google.restricted.Restricted;
+
+            class DisallowedCaller {
+              void test() {
+                // BUG: Diagnostic contains: test
+                Restricted.method();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void allowedPathsAndAllowedOnPathBothSpecified() {
+    helper
+        .addSourceLines(
+            "in/Testcase.java",
+            """
+            package separate.test;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            class Testcase {
+              // BUG: Diagnostic contains: Do not specify both allowedPaths and allowedOnPath on @RestrictedApi;
+              // prefer allowedPaths.
+              @RestrictedApi(
+                  explanation = "test",
+                  link = "",
+                  allowedPaths = {"foo/"},
+                  allowedOnPath = ".*")
+              void restrictedMethod() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void invalidAllowedPaths_rejectedAtDeclaration() {
+    helper
+        .addSourceLines(
+            "in/Testcase.java",
+            """
+            package separate.test;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            class Testcase {
+              // BUG: Diagnostic contains: Invalid allowedPaths on @RestrictedApi
+              @RestrictedApi(
+                  explanation = "test",
+                  link = "",
+                  allowedPaths = {"/foo/"})
+              void restrictedMethod() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void invalidAllowedOnPath_rejectedAtDeclaration() {
+    helper
+        .addSourceLines(
+            "in/Testcase.java",
+            """
+            package separate.test;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            class Testcase {
+              // BUG: Diagnostic contains: Invalid allowedOnPath regex on @RestrictedApi
+              @RestrictedApi(
+                  explanation = "test",
+                  link = "",
+                  allowedOnPath = "[")
+              void restrictedMethod() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void allowedPaths_nestedRunfiles_rejected() {
+    helper
+        .addSourceLines(
+            "com/google/restricted/Restricted.java",
+            """
+            package com.google.restricted;
+
+            import com.google.errorprone.annotations.RestrictedApi;
+
+            public class Restricted {
+              @RestrictedApi(
+                  explanation = "test",
+                  link = "",
+                  allowedPaths = {"java/com/google/allowed/"})
+              public static void method() {}
+            }
+            """)
+        .addSourceLines(
+            "java/com/google/disallowed/nested.runfiles/my_workspace/java/com/google/allowed/Foo.java",
+            """
+            package java.com.google.allowed;
+
+            import com.google.restricted.Restricted;
+
+            class Foo {
+              void test() {
+                // BUG: Diagnostic contains: test
+                Restricted.method();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  // NOTE: @RestrictedApi cannot be applied to an entire record declaration
 }

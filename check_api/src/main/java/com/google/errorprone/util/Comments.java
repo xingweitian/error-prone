@@ -25,21 +25,20 @@ import com.google.common.collect.Range;
 import com.google.common.collect.TreeRangeSet;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.util.Commented.Position;
-import com.google.errorprone.util.ErrorProneTokens.CommentWithTextAndPosition;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
-import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.DeconstructionPatternTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreeScanner;
-import com.sun.tools.javac.parser.Tokens.Comment;
 import com.sun.tools.javac.parser.Tokens.TokenKind;
 import com.sun.tools.javac.util.Position.LineMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Utilities for attaching comments to relevant AST nodes
@@ -47,6 +46,12 @@ import java.util.Optional;
  * @author andrewrice@google.com (Andrew Rice)
  */
 public final class Comments {
+
+  private static final Pattern BLOCK_COMMENT = Pattern.compile("^\\s*/\\*\\s*(.*?)\\s*\\*/\\s*");
+  private static final Pattern LINE_COMMENT = Pattern.compile("^\\s*//\\s*");
+  private static final Pattern JAVADOC_LINE_COMMENT = Pattern.compile("^\\s*///\\s*");
+  private static final Pattern JAVADOC_BLOCK_COMMENT =
+      Pattern.compile("^\\s*/\\*\\*\\s*(.*?)\\s*\\*/\\s*");
 
   /**
    * Attach comments to nodes on arguments of constructor calls. Calls such as {@code new Test(
@@ -59,7 +64,7 @@ public final class Comments {
    * the source positions in the returned {@code Comment} objects are adjusted so that they are
    * relative to the whole file.
    */
-  public static ImmutableList<Commented<ExpressionTree>> findCommentsForArguments(
+  public static ImmutableList<Commented> findCommentsForArguments(
       NewClassTree newClassTree, VisitorState state) {
     int startPosition = getStartPosition(newClassTree);
     return findCommentsForArguments(
@@ -77,11 +82,21 @@ public final class Comments {
    * the source positions in the returned {@code Comment} objects are adjusted so that they are
    * relative to the whole file.
    */
-  public static ImmutableList<Commented<ExpressionTree>> findCommentsForArguments(
+  public static ImmutableList<Commented> findCommentsForArguments(
       MethodInvocationTree methodInvocationTree, VisitorState state) {
     int startPosition = state.getEndPosition(methodInvocationTree.getMethodSelect());
     return findCommentsForArguments(
         methodInvocationTree, methodInvocationTree.getArguments(), startPosition, state);
+  }
+
+  public static ImmutableList<Commented> findCommentsForArguments(
+      DeconstructionPatternTree deconstructionPatternTree, VisitorState state) {
+    int startPosition = state.getEndPosition(deconstructionPatternTree.getDeconstructor());
+    return findCommentsForArguments(
+        deconstructionPatternTree,
+        deconstructionPatternTree.getNestedPatterns(),
+        startPosition,
+        state);
   }
 
   /**
@@ -92,23 +107,17 @@ public final class Comments {
    *
    * <p>TODO(andrewrice) Update this method to handle block comments properly if we find the need
    */
-  public static String getTextFromComment(Comment comment) {
-    switch (comment.getStyle()) {
-      case BLOCK:
-        return comment.getText().replaceAll("^\\s*/\\*\\s*(.*?)\\s*\\*/\\s*", "$1");
-      case LINE:
-        return comment.getText().replaceAll("^\\s*//\\s*", "");
-      case JAVADOC:
-        return comment.getText().replaceAll("^\\s*/\\*\\*\\s*(.*?)\\s*\\*/\\s*", "$1");
-    }
-    throw new AssertionError(comment.getStyle());
+  public static String getTextFromComment(ErrorProneComment comment) {
+    return switch (comment.getStyle()) {
+      case BLOCK -> BLOCK_COMMENT.matcher(comment.getText()).replaceAll("$1");
+      case LINE -> LINE_COMMENT.matcher(comment.getText()).replaceAll("");
+      case JAVADOC_LINE -> JAVADOC_LINE_COMMENT.matcher(comment.getText()).replaceAll("");
+      case JAVADOC_BLOCK -> JAVADOC_BLOCK_COMMENT.matcher(comment.getText()).replaceAll("$1");
+    };
   }
 
-  private static ImmutableList<Commented<ExpressionTree>> findCommentsForArguments(
-      Tree tree,
-      List<? extends ExpressionTree> arguments,
-      int invocationStart,
-      VisitorState state) {
+  private static ImmutableList<Commented> findCommentsForArguments(
+      Tree tree, List<? extends Tree> arguments, int invocationStart, VisitorState state) {
 
     if (arguments.isEmpty()) {
       return ImmutableList.of();
@@ -116,7 +125,7 @@ public final class Comments {
 
     CharSequence sourceCode = state.getSourceCode();
     Optional<Integer> endPosition = computeEndPosition(tree, sourceCode, state);
-    if (!endPosition.isPresent()) {
+    if (endPosition.isEmpty()) {
       return noComments(arguments);
     }
 
@@ -131,12 +140,11 @@ public final class Comments {
 
     // Ignore comments nested inside arguments.
     TreeRangeSet<Integer> exclude = TreeRangeSet.create();
-    arguments.forEach(
-        arg ->
-            exclude.add(
-                Range.closed(
-                    getStartPosition(arg) - invocationStart,
-                    state.getEndPosition(arg) - invocationStart)));
+    arguments.forEach(arg ->
+        exclude.add(
+            Range.closed(
+                getStartPosition(arg) - invocationStart,
+                state.getEndPosition(arg) - invocationStart)));
 
     ErrorProneTokens errorProneTokens = new ErrorProneTokens(source.toString(), state.context);
     ImmutableList<ErrorProneToken> tokens = errorProneTokens.getTokens();
@@ -152,29 +160,25 @@ public final class Comments {
       if (tokenTracker.atStartOfLine() && !tokenTracker.wasPreviousLineEmpty()) {
         // if the token is at the start of a line it could still have a comment attached which was
         // on the previous line
-        for (Comment c : token.comments()) {
-          if (!(c instanceof CommentWithTextAndPosition)) {
-            continue;
-          }
-          CommentWithTextAndPosition comment = (CommentWithTextAndPosition) c;
+        for (ErrorProneComment comment : token.comments()) {
           int commentStart = comment.getPos();
           int commentEnd = comment.getEndPos();
           if (exclude.intersects(Range.closedOpen(commentStart, commentEnd))) {
             continue;
           }
-          if (tokenTracker.isCommentOnPreviousLine(c)
+          if (tokenTracker.isCommentOnPreviousLine(comment)
               && token.pos() <= argumentTracker.currentArgumentStartPosition
               && argumentTracker.isPreviousArgumentOnPreviousLine()) {
             // token was on the previous line so therefore we should add it to the previous comment
             // unless the previous argument was not on the previous line with it
-            argumentTracker.addCommentToPreviousArgument(c, Position.ANY);
+            argumentTracker.addCommentToPreviousArgument(comment, Position.ANY);
           } else {
-            // if the comment comes after the end of the invocation and its not on the same line
+            // if the comment comes after the end of the invocation and it's not on the same line
             // as the final argument then we need to ignore it
             if (commentStart <= invocationEnd
                 || lineMap.getLineNumber(commentStart)
                     <= lineMap.getLineNumber(argumentTracker.currentArgumentEndPosition)) {
-              argumentTracker.addCommentToCurrentArgument(c, Position.ANY);
+              argumentTracker.addCommentToCurrentArgument(comment, Position.ANY);
             }
           }
         }
@@ -202,10 +206,9 @@ public final class Comments {
     return argumentTracker.build();
   }
 
-  private static ImmutableList<Commented<ExpressionTree>> noComments(
-      List<? extends ExpressionTree> arguments) {
+  private static ImmutableList<Commented> noComments(List<? extends Tree> arguments) {
     return arguments.stream()
-        .map(a -> Commented.<ExpressionTree>builder().setTree(a).build())
+        .map(a -> Commented.builder().setTree(a).build())
         .collect(toImmutableList());
   }
 
@@ -311,10 +314,10 @@ public final class Comments {
 
     Tree parent = enclosingPath.getLeaf();
 
-    if (parent instanceof BlockTree) {
-      return after(predecessorNode, ((BlockTree) parent).getStatements(), parent);
-    } else if (parent instanceof ClassTree) {
-      return after(predecessorNode, ((ClassTree) parent).getMembers(), parent);
+    if (parent instanceof BlockTree blockTree) {
+      return after(predecessorNode, blockTree.getStatements(), parent);
+    } else if (parent instanceof ClassTree classTree) {
+      return after(predecessorNode, classTree.getMembers(), parent);
     }
     return parent;
   }
@@ -366,7 +369,7 @@ public final class Comments {
       }
     }
 
-    boolean isCommentOnPreviousLine(Comment c) {
+    boolean isCommentOnPreviousLine(ErrorProneComment c) {
       int tokenLine = lineMap.getLineNumber(c.getSourcePos(0));
       return tokenLine == currentLineNumber - 1;
     }
@@ -391,24 +394,20 @@ public final class Comments {
   private static class ArgumentTracker {
 
     private final VisitorState state;
-    private final Iterator<? extends ExpressionTree> argumentsIterator;
+    private final Iterator<? extends Tree> argumentsIterator;
     private final int offset;
     private final LineMap lineMap;
 
-    private Commented.Builder<ExpressionTree> currentCommentedResultBuilder = null;
-    private Commented.Builder<ExpressionTree> previousCommentedResultBuilder = null;
-    private final ImmutableList.Builder<Commented<ExpressionTree>> resultBuilder =
-        ImmutableList.builder();
+    private Commented.Builder currentCommentedResultBuilder = null;
+    private Commented.Builder previousCommentedResultBuilder = null;
+    private final ImmutableList.Builder<Commented> resultBuilder = ImmutableList.builder();
 
     private int currentArgumentStartPosition = -1;
     private int currentArgumentEndPosition = -1;
     private int previousArgumentEndPosition = -1;
 
     ArgumentTracker(
-        Iterable<? extends ExpressionTree> arguments,
-        int offset,
-        VisitorState state,
-        LineMap lineMap) {
+        Iterable<? extends Tree> arguments, int offset, VisitorState state, LineMap lineMap) {
       this.state = state;
       this.offset = offset;
       this.argumentsIterator = arguments.iterator();
@@ -416,7 +415,7 @@ public final class Comments {
     }
 
     void advance() {
-      ExpressionTree nextArgument = argumentsIterator.next();
+      Tree nextArgument = argumentsIterator.next();
 
       currentArgumentEndPosition = state.getEndPosition(nextArgument) - offset;
       previousArgumentEndPosition = currentArgumentStartPosition;
@@ -426,11 +425,11 @@ public final class Comments {
         resultBuilder.add(previousCommentedResultBuilder.build());
       }
       previousCommentedResultBuilder = currentCommentedResultBuilder;
-      currentCommentedResultBuilder = Commented.<ExpressionTree>builder().setTree(nextArgument);
+      currentCommentedResultBuilder = Commented.builder().setTree(nextArgument);
     }
 
     /** Returns the final result. The object should not be used after calling this method */
-    ImmutableList<Commented<ExpressionTree>> build() {
+    ImmutableList<Commented> build() {
       if (previousCommentedResultBuilder != null) {
         resultBuilder.add(previousCommentedResultBuilder.build());
       }
@@ -447,15 +446,15 @@ public final class Comments {
           == lineMap.getLineNumber(currentArgumentStartPosition) - 1;
     }
 
-    void addCommentToPreviousArgument(Comment c, Position position) {
+    void addCommentToPreviousArgument(ErrorProneComment c, Position position) {
       previousCommentedResultBuilder.addComment(c, previousArgumentEndPosition, offset, position);
     }
 
-    void addCommentToCurrentArgument(Comment c, Position position) {
+    void addCommentToCurrentArgument(ErrorProneComment c, Position position) {
       currentCommentedResultBuilder.addComment(c, currentArgumentStartPosition, offset, position);
     }
 
-    void addAllCommentsToCurrentArgument(Iterable<Comment> comments, Position position) {
+    void addAllCommentsToCurrentArgument(Iterable<ErrorProneComment> comments, Position position) {
       currentCommentedResultBuilder.addAllComment(
           comments, currentArgumentStartPosition, offset, position);
     }

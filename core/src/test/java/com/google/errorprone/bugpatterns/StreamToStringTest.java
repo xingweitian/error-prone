@@ -33,19 +33,22 @@ public class StreamToStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "class Test {",
-            "  public static void main(String[] args) {",
-            "    // BUG: Diagnostic contains:",
-            "    System.err.println(Arrays.asList(42).stream());",
-            "    // BUG: Diagnostic contains:",
-            "    Arrays.asList(42).stream().toString();",
-            "    // BUG: Diagnostic contains:",
-            "    String.valueOf(Arrays.asList(42).stream());",
-            "    // BUG: Diagnostic contains:",
-            "    String s = \"\" + Arrays.asList(42).stream();",
-            "  }",
-            "}")
+            """
+            import java.util.Arrays;
+
+            class Test {
+              public static void main(String[] args) {
+                // BUG: Diagnostic contains:
+                System.err.println(Arrays.asList(42).stream());
+                // BUG: Diagnostic contains:
+                Arrays.asList(42).stream().toString();
+                // BUG: Diagnostic contains:
+                String.valueOf(Arrays.asList(42).stream());
+                // BUG: Diagnostic contains:
+                String s = "" + Arrays.asList(42).stream();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -54,19 +57,22 @@ public class StreamToStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "import java.util.stream.Collectors;",
-            "class Test {",
-            "  public static void main(String[] args) {",
-            "    System.err.println(Arrays.asList(42).stream()",
-            "      .map(String::valueOf).collect(Collectors.joining(\", \")));",
-            "    String.valueOf(Arrays.asList(42).stream()",
-            "      .map(String::valueOf).collect(Collectors.joining(\", \")));",
-            "    String s = \"\" + Arrays.asList(42).stream()",
-            "      .map(String::valueOf).collect(Collectors.joining(\", \"));",
-            "    String.format(\"%s %s\", null, null);",
-            "  }",
-            "}")
+"""
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
+class Test {
+  public static void main(String[] args) {
+    System.err.println(
+        Arrays.asList(42).stream().map(String::valueOf).collect(Collectors.joining(", ")));
+    String.valueOf(
+        Arrays.asList(42).stream().map(String::valueOf).collect(Collectors.joining(", ")));
+    String s =
+        "" + Arrays.asList(42).stream().map(String::valueOf).collect(Collectors.joining(", "));
+    String.format("%s %s", null, null);
+  }
+}
+""")
         .doTest();
   }
 
@@ -75,11 +81,54 @@ public class StreamToStringTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public abstract class Test implements java.util.stream.Stream {",
-            "  public String s() {",
-            "    return toString();",
-            "  }",
-            "}")
+            """
+            public abstract class Test implements java.util.stream.Stream {
+              public String s() {
+                return toString();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void viaJoiner() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.base.Joiner;
+            import java.util.stream.Stream;
+
+            class Test {
+              public void s(Stream<String> xs) {
+                // BUG: Diagnostic contains:
+                var x = Joiner.on("foo").join(xs, xs);
+                // BUG: Diagnostic contains:
+                var y = Joiner.on("foo").join(null, null, new Stream[] {xs});
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void joinerIterable() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.base.Joiner;
+            import java.util.List;
+            import java.util.stream.Stream;
+
+            class Test {
+              String test(Joiner j, List<Stream<String>> a) {
+                // BUG: Diagnostic contains: StreamToString
+                return j.join(a);
+              }
+            }
+            """)
         .doTest();
   }
 }

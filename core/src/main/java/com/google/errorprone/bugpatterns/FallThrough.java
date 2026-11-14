@@ -33,17 +33,12 @@ import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.CaseTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.SwitchTree;
-import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Position;
 import java.util.List;
-import java.util.regex.Pattern;
+import org.safere.Pattern;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "FallThrough",
-    altNames = "fallthrough",
-    summary = "Switch case may fall through",
-    severity = WARNING)
+@BugPattern(altNames = "fallthrough", summary = "Switch case may fall through", severity = WARNING)
 public class FallThrough extends BugChecker implements SwitchTreeMatcher {
 
   private static final Pattern FALL_THROUGH_PATTERN =
@@ -70,12 +65,7 @@ public class FallThrough extends BugChecker implements SwitchTreeMatcher {
       if (endPos == Position.NOPOS) {
         break;
       }
-      String comments =
-          state
-              .getSourceCode()
-              .subSequence(endPos, ((JCTree) next).getStartPosition())
-              .toString()
-              .trim();
+      String comments = state.getSourceCode(endPos, getStartPosition(next)).toString().trim();
       if (completes && !FALL_THROUGH_PATTERN.matcher(comments).find()) {
         state.reportMatch(
             buildDescription(next)
@@ -100,8 +90,7 @@ public class FallThrough extends BugChecker implements SwitchTreeMatcher {
     // end of the block
     if (caseTree.getStatements().size() == 1) {
       StatementTree only = getOnlyElement(caseTree.getStatements());
-      if (only instanceof BlockTree) {
-        BlockTree blockTree = (BlockTree) only;
+      if (only instanceof BlockTree blockTree) {
         return blockTree.getStatements().isEmpty()
             ? getStartPosition(blockTree)
             : state.getEndPosition(getLast(blockTree.getStatements()));

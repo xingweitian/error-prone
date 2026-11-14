@@ -17,22 +17,24 @@
 package com.google.errorprone.refaster;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ImportTree;
 import com.sun.tools.javac.code.Symbol.PackageSymbol;
+import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
-import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCImport;
 import com.sun.tools.javac.tree.TreeMaker;
-import com.sun.tools.javac.util.Context;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Policy specifying when and how to import classes when inlining types.
@@ -46,8 +48,15 @@ public enum ImportPolicy {
    * Import the outermost class and explicitly qualify references below that. For example, to
    * reference {@code com.google.Foo.Bar}, we import {@code com.google.Foo} and explicitly qualify
    * {@code Foo.Bar}.
+   *
+   * <p><b>Note:</b> static methods named {@code assertThat}, {@code assertWithMessage} and {@code
+   * assertAbout} are always statically imported.
    */
   IMPORT_TOP_LEVEL {
+
+    private static final ImmutableSet<String> METHOD_NAMES_TO_STATICALLY_IMPORT =
+        ImmutableSet.of("assertThat", "assertAbout", "assertWithMessage");
+
     @Override
     public JCExpression classReference(
         Inliner inliner, CharSequence topLevelClazz, CharSequence fullyQualifiedClazz) {
@@ -55,7 +64,7 @@ public enum ImportPolicy {
         // Special handling to ensure that the pretty-printer always recognizes Refaster references
         return inliner.maker().Ident(inliner.asName("Refaster"));
       }
-      List<String> allImports = getAllImports(inliner);
+      ImmutableSet<String> allImports = getAllImports(inliner, WhichImports.NON_STATIC);
       /*
        * Check if topLevelClazz or fullyQualifiedClazz is already imported.
        * If fullyQualifiedClazz is imported, return the class name.
@@ -92,8 +101,8 @@ public enum ImportPolicy {
       }
       // No conflicts
       String packge = Joiner.on('.').join(topLevelPath.subList(0, topLevelPath.size() - 1));
-      PackageSymbol currentPackage = inliner.getContext().get(PackageSymbol.class);
-      if (currentPackage == null || !currentPackage.getQualifiedName().contentEquals(packge)) {
+      PackageSymbol currentPackage = inliner.packageSymbol();
+      if (!currentPackage.getQualifiedName().contentEquals(packge)) {
         // don't import classes from the same package as the class we're refactoring
         inliner.addImport(topLevelClazz.toString());
       }
@@ -106,23 +115,15 @@ public enum ImportPolicy {
         CharSequence topLevelClazz,
         CharSequence fullyQualifiedClazz,
         CharSequence member) {
+      // NOTE(b/17121704): we always statically import certain method names
+      if (METHOD_NAMES_TO_STATICALLY_IMPORT.contains(member.toString())) {
+        return STATIC_IMPORT_ALWAYS.staticReference(
+            inliner, topLevelClazz, fullyQualifiedClazz, member);
+      }
       return inliner
           .maker()
           .Select(
               classReference(inliner, topLevelClazz, fullyQualifiedClazz), inliner.asName(member));
-    }
-
-    /* Returns a combined list of strings from importsInSource and importsToAdd. */
-    private List<String> getAllImports(Inliner inliner) {
-      List<String> allImports = new ArrayList<>(inliner.getImportsToAdd());
-      if (inliner.getContext() != null
-          && inliner.getContext().get(JCCompilationUnit.class) != null) {
-        for (JCImport jcImport : inliner.getContext().get(JCCompilationUnit.class).getImports()) {
-          JCFieldAccess qualified = (JCFieldAccess) jcImport.getQualifiedIdentifier();
-          allImports.add(qualified.toString());
-        }
-      }
-      return allImports;
     }
 
     private JCExpression makeSelectExpression(
@@ -148,9 +149,8 @@ public enum ImportPolicy {
       String packge = topLevelClazz.toString();
       int lastDot = packge.lastIndexOf('.');
       packge = (lastDot >= 0) ? packge.substring(0, lastDot) : "";
-      PackageSymbol currentPackage = inliner.getContext().get(PackageSymbol.class);
-      if (currentPackage == null
-          || !currentPackage.getQualifiedName().contentEquals(packge)
+      PackageSymbol currentPackage = inliner.packageSymbol();
+      if (!currentPackage.getQualifiedName().contentEquals(packge)
           || !topLevelClazz.toString().contentEquals(fullyQualifiedClazz)) {
         // don't import classes from the same package as the class we're refactoring
         inliner.addImport(fullyQualifiedClazz.toString());
@@ -207,20 +207,14 @@ public enum ImportPolicy {
         return IMPORT_TOP_LEVEL.staticReference(
             inliner, topLevelClazz, fullyQualifiedClazz, member);
       }
-      inliner.addStaticImport(fullyQualifiedClazz + "." + member);
+      // Check to see if the reference is already static-imported.
+      String importableName = fullyQualifiedClazz + "." + member;
+      if (!getAllImports(inliner, WhichImports.STATIC).contains(importableName)) {
+        inliner.addStaticImport(importableName);
+      }
       return inliner.maker().Ident(inliner.asName(member));
     }
   };
-
-  public static void bind(Context context, ImportPolicy policy) {
-    context.put(ImportPolicy.class, checkNotNull(policy));
-  }
-
-  public static ImportPolicy instance(Context context) {
-    ImportPolicy result = context.get(ImportPolicy.class);
-    checkState(result != null, "No ImportPolicy bound in this context");
-    return result;
-  }
 
   public abstract JCExpression classReference(
       Inliner inliner, CharSequence topLevelClazz, CharSequence fullyQualifiedClazz);
@@ -230,4 +224,64 @@ public enum ImportPolicy {
       CharSequence topLevelClazz,
       CharSequence fullyQualifiedClazz,
       CharSequence member);
+
+  private enum WhichImports {
+    STATIC {
+      @Override
+      Stream<String> getExistingImports(Inliner inliner) {
+        return inliner.getStaticImportsToAdd().stream();
+      }
+
+      @Override
+      boolean existingImportMatches(JCImport jcImport) {
+        return jcImport.isStatic();
+      }
+    },
+    NON_STATIC {
+      @Override
+      Stream<String> getExistingImports(Inliner inliner) {
+        return inliner.getImportsToAdd().stream();
+      }
+
+      @Override
+      boolean existingImportMatches(JCImport jcImport) {
+        // An inner type can be imported non-statically or statically
+        return true;
+      }
+    };
+
+    abstract Stream<String> getExistingImports(Inliner inliner);
+
+    abstract boolean existingImportMatches(JCImport jcImport);
+  }
+
+  /**
+   * Returns the set of imports that already exist of the import type (both in the source file and
+   * in the pending list of imports to add).
+   */
+  private static ImmutableSet<String> getAllImports(Inliner inliner, WhichImports whichImports) {
+    return Streams.concat(
+            whichImports.getExistingImports(inliner),
+            getImports(inliner.compilationUnit()).stream()
+                .filter(JCImport.class::isInstance)
+                .map(JCImport.class::cast)
+                .filter(whichImports::existingImportMatches)
+                .map(imp -> getQualifiedIdentifier(imp).toString()))
+        .collect(toImmutableSet());
+  }
+
+  // The return type of JCCompilationUnit#getImports changed for 'import module' in JDK 23
+  @SuppressWarnings("UnnecessaryCast")
+  private static List<? extends ImportTree> getImports(JCCompilationUnit unit) {
+    return ((CompilationUnitTree) unit).getImports();
+  }
+
+  // Added for 'module import' declarations in JDK 23
+  private static JCTree getQualifiedIdentifier(JCImport i) {
+    try {
+      return (JCTree) JCImport.class.getMethod("getQualifiedIdentifier").invoke(i);
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError(e.getMessage(), e);
+    }
+  }
 }

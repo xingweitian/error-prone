@@ -33,13 +33,15 @@ import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 import static java.time.temporal.ChronoField.SECOND_OF_DAY;
 import static java.time.temporal.ChronoField.SECOND_OF_MINUTE;
 import static java.time.temporal.ChronoField.YEAR;
+import static java.util.Arrays.stream;
 
-import com.google.auto.value.AutoValue;
+import com.google.auto.value.AutoBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
@@ -50,7 +52,6 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Type;
 import java.time.DateTimeException;
 import java.time.temporal.ChronoField;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -60,7 +61,6 @@ import java.util.List;
  * @author kak@google.com (Kurt Alfred Kluever)
  */
 @BugPattern(
-    name = "InvalidJavaTimeConstant",
     summary =
         "This checker errors on calls to java.time methods using values that are guaranteed to "
             + "throw a DateTimeException.",
@@ -68,43 +68,28 @@ import java.util.List;
 public final class InvalidJavaTimeConstant extends BugChecker
     implements MethodInvocationTreeMatcher {
 
-  @AutoValue
-  abstract static class MatcherWithUnits {
-    abstract Matcher<ExpressionTree> matcher();
+  record MatcherWithUnits(Matcher<ExpressionTree> matcher, ImmutableList<ChronoField> units) {}
 
-    abstract ImmutableList<ChronoField> units();
-  }
-
-  @AutoValue
-  abstract static class Param {
-    abstract String type();
-
-    abstract ChronoField unit();
-  }
+  record Param(String type, ChronoField unit) {}
 
   private static Param intP(ChronoField unit) {
-    return new AutoValue_InvalidJavaTimeConstant_Param("int", unit);
+    return new Param("int", unit);
   }
 
   private static Param longP(ChronoField unit) {
-    return new AutoValue_InvalidJavaTimeConstant_Param("long", unit);
+    return new Param("long", unit);
   }
 
   private static Param monthP(ChronoField unit) {
-    return new AutoValue_InvalidJavaTimeConstant_Param("java.time.Month", unit);
+    return new Param("java.time.Month", unit);
   }
 
-  @AutoValue
-  abstract static class JavaTimeType {
-    abstract String className();
-
-    abstract ImmutableList<MatcherWithUnits> methods();
-
+  record JavaTimeType(String className, ImmutableList<MatcherWithUnits> methods) {
     public static Builder builder() {
-      return new AutoValue_InvalidJavaTimeConstant_JavaTimeType.Builder();
+      return new AutoBuilder_InvalidJavaTimeConstant_JavaTimeType_Builder();
     }
 
-    @AutoValue.Builder
+    @AutoBuilder
     public abstract static class Builder {
       public abstract Builder setClassName(String className);
 
@@ -112,10 +97,11 @@ public final class InvalidJavaTimeConstant extends BugChecker
 
       abstract ImmutableList.Builder<MatcherWithUnits> methodsBuilder();
 
+      @CanIgnoreReturnValue
       public Builder addStaticMethod(String methodName, Param... params) {
         methodsBuilder()
             .add(
-                new AutoValue_InvalidJavaTimeConstant_MatcherWithUnits(
+                new MatcherWithUnits(
                     staticMethod()
                         .onClass(className())
                         .named(methodName)
@@ -124,10 +110,11 @@ public final class InvalidJavaTimeConstant extends BugChecker
         return this;
       }
 
+      @CanIgnoreReturnValue
       public Builder addInstanceMethod(String methodName, Param... params) {
         methodsBuilder()
             .add(
-                new AutoValue_InvalidJavaTimeConstant_MatcherWithUnits(
+                new MatcherWithUnits(
                     instanceMethod()
                         .onExactClass(className())
                         .named(methodName)
@@ -137,11 +124,11 @@ public final class InvalidJavaTimeConstant extends BugChecker
       }
 
       private static ImmutableList<ChronoField> getParameterUnits(Param... params) {
-        return Arrays.stream(params).map(p -> p.unit()).collect(toImmutableList());
+        return stream(params).map(p -> p.unit()).collect(toImmutableList());
       }
 
-      private static String[] getParameterTypes(Param... params) {
-        return Arrays.stream(params).map(p -> p.type()).toArray(String[]::new);
+      private static ImmutableList<String> getParameterTypes(Param... params) {
+        return stream(params).map(p -> p.type()).collect(toImmutableList());
       }
 
       public abstract JavaTimeType build();

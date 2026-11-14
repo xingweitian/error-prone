@@ -17,17 +17,19 @@
 package com.google.errorprone.bugpatterns.collectionincompatibletype;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
-import static com.google.errorprone.bugpatterns.collectionincompatibletype.AbstractCollectionIncompatibleTypeMatcher.extractTypeArgAsMemberOfSupertype;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
+import static com.google.errorprone.util.ASTHelpers.extractTypeArgAsMemberOfSupertype;
+import static com.google.errorprone.util.AnnotationNames.COMPATIBLE_WITH_ANNOTATION;
+import static com.google.errorprone.util.MoreAnnotations.getStringValue;
 
-import com.google.auto.value.AutoValue;
+import com.google.common.collect.ImmutableListMultimap;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.annotations.CheckReturnValue;
-import com.google.errorprone.annotations.CompatibleWith;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
-import com.google.errorprone.bugpatterns.TypeCompatibilityUtils;
-import com.google.errorprone.bugpatterns.TypeCompatibilityUtils.TypeCompatibilityReport;
+import com.google.errorprone.bugpatterns.TypeCompatibility;
+import com.google.errorprone.bugpatterns.TypeCompatibility.TypeCompatibilityReport;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.Signatures;
@@ -35,33 +37,39 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import javax.annotation.Nullable;
+import java.util.Map;
+import javax.inject.Inject;
 import javax.lang.model.element.Parameterizable;
 import javax.lang.model.element.TypeParameterElement;
+import org.jspecify.annotations.Nullable;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @BugPattern(
-    name = "IncompatibleArgumentType",
     summary = "Passing argument to a generic method with an incompatible type.",
     severity = ERROR)
 public class IncompatibleArgumentType extends BugChecker implements MethodInvocationTreeMatcher {
 
+  private final TypeCompatibility typeCompatibility;
+
+  @Inject
+  IncompatibleArgumentType(TypeCompatibility typeCompatibility) {
+    this.typeCompatibility = typeCompatibility;
+  }
+
   // Nonnull requiredType: The type I need is bound, in requiredType
   // null requiredType: I found the type variable, but I can't bind it to any type
-  @AutoValue
-  abstract static class RequiredType {
-    @Nullable
-    abstract Type type();
-
-    static RequiredType create(Type type) {
-      return new AutoValue_IncompatibleArgumentType_RequiredType(type);
+  private record RequiredType(@Nullable Type type) {
+    static RequiredType create(@Nullable Type type) {
+      return new RequiredType(type);
     }
   }
 
@@ -82,7 +90,7 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
     List<? extends ExpressionTree> arguments = methodInvocationTree.getArguments();
     // The unbound MethodSymbol for bar(), with type parameters <A> and <B>
     MethodSymbol declaredMethod = ASTHelpers.getSymbol(methodInvocationTree);
-    if (arguments.isEmpty() || declaredMethod == null) {
+    if (arguments.isEmpty()) {
       return Description.NO_MATCH;
     }
 
@@ -122,8 +130,8 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
       if (requiredType.type() != null) {
         // Report a violation for this type
         TypeCompatibilityReport report =
-            TypeCompatibilityUtils.compatibilityOfTypes(requiredType.type(), argType, state);
-        if (!report.compatible()) {
+            typeCompatibility.compatibilityOfTypes(requiredType.type(), argType, state);
+        if (!report.isCompatible()) {
           state.reportMatch(
               describeViolation(argument, argType, requiredType.type(), types, state));
         }
@@ -164,15 +172,15 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
     List<VarSymbol> params = declaredMethod.params();
     for (int i = 0; i < params.size(); i++) {
       VarSymbol varSymbol = params.get(i);
-      CompatibleWith anno = ASTHelpers.getAnnotation(varSymbol, CompatibleWith.class);
-      if (anno != null) {
+      var anno = getStringValue(varSymbol, COMPATIBLE_WITH_ANNOTATION);
+      if (anno.isPresent()) {
         foundAnyTypeToEnforce = true;
 
         // Now we try and resolve the generic type argument in the annotation against the current
         // method call's projection of this generic type.
         RequiredType requiredType =
             resolveRequiredTypeForThisCall(
-                state, calledMethodType, calledReceiverType, declaredMethod, anno.value());
+                state, calledMethodType, calledReceiverType, declaredMethod, anno.get());
 
         // @CW is on the varags parameter
         if (declaredMethod.isVarArgs() && i == params.size() - 1) {
@@ -195,10 +203,9 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
     return foundAnyTypeToEnforce;
   }
 
-  @Nullable
-  @CheckReturnValue
   // From calledReceiverType
-  private static RequiredType resolveRequiredTypeForThisCall(
+  @CheckReturnValue
+  private static @Nullable RequiredType resolveRequiredTypeForThisCall(
       VisitorState state,
       Type calledMethodType,
       Type calledReceiverType,
@@ -215,47 +222,33 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
     return requiredType;
   }
 
-  private static RequiredType resolveTypeFromGenericMethod(
+  private static @Nullable RequiredType resolveTypeFromGenericMethod(
       Type calledMethodType, MethodSymbol declaredMethod, String typeArgName) {
     int tyargIndex = findTypeArgInList(declaredMethod, typeArgName);
     return tyargIndex == -1
         ? null
-        : RequiredType.create(getTypeFromTypeMapping(calledMethodType, typeArgName));
+        : RequiredType.create(
+            getTypeFromTypeMapping(calledMethodType, declaredMethod, typeArgName));
   }
 
-  @SuppressWarnings("unchecked")
   // Plumb through a type which is supposed to be a Types.Subst, then find the replacement
   // type that the compiler resolved.
-  private static Type getTypeFromTypeMapping(Type m, String namedTypeArg) {
-    try {
-      // Reflectively extract the mapping from an enclosing instance of Types.Subst
-      Field substField = m.getClass().getDeclaredField("this$0");
-      substField.setAccessible(true);
-      Object subst = substField.get(m);
-      Field fromField = subst.getClass().getDeclaredField("from");
-      Field toField = subst.getClass().getDeclaredField("to");
-      fromField.setAccessible(true);
-      toField.setAccessible(true);
-
-      // Search for `namedTypeArg` in `from`, and return the parallel instance in `to`.
-      List<Type> types = (List<Type>) fromField.get(subst);
-      List<Type> calledTypes = (List<Type>) toField.get(subst);
-      for (int i = 0; i < types.size(); i++) {
-        Type type = types.get(i);
-        if (type.toString().equals(namedTypeArg)) {
-          return calledTypes.get(i);
-        }
+  private static @Nullable Type getTypeFromTypeMapping(
+      Type m, MethodSymbol declaredMethod, String namedTypeArg) {
+    ImmutableListMultimap<TypeVariableSymbol, Type> substitutions =
+        ASTHelpers.getTypeSubstitution(m, declaredMethod);
+    for (Map.Entry<TypeVariableSymbol, Type> e : substitutions.entries()) {
+      if (e.getKey().getSimpleName().contentEquals(namedTypeArg)) {
+        return e.getValue();
       }
-    } catch (ReflectiveOperationException ignored) {
-      // Nothing we can do here.
     }
+
     return null;
   }
 
   // class Foo<X> { void something(@CW("X") Object x); }
   // new Foo<String>().something(123);
-  @Nullable
-  private static RequiredType resolveTypeFromClass(
+  private static @Nullable RequiredType resolveTypeFromClass(
       Type calledType, ClassSymbol clazzSymbol, String typeArgName, VisitorState state) {
     // Try on the class
     int tyargIndex = findTypeArgInList(clazzSymbol, typeArgName);
@@ -271,7 +264,7 @@ public class IncompatibleArgumentType extends BugChecker implements MethodInvoca
       //    }
       // }
       // new Foo<String>().new Bar().something(123); // should fail, 123 needs to match String
-      ClassSymbol encloser = clazzSymbol.owner.enclClass();
+      ClassSymbol encloser = enclosingClass(clazzSymbol);
       calledType = calledType.getEnclosingType();
       tyargIndex = findTypeArgInList(encloser, typeArgName);
       if (tyargIndex != -1) {

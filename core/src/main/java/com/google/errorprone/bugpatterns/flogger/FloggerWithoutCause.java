@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns.flogger;
 
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 
 import com.google.common.collect.Lists;
 import com.google.errorprone.BugPattern;
@@ -29,17 +30,14 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Type;
-import java.util.concurrent.atomic.AtomicBoolean;
-import javax.annotation.Nullable;
 import javax.lang.model.type.TypeKind;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Detects Flogger log statements that pass Exceptions to the log method instead of using withCause.
  */
 @BugPattern(
-    name = "FloggerWithoutCause",
     summary = "Use withCause to associate Exceptions with log statements",
     severity = BugPattern.SeverityLevel.WARNING)
 public class FloggerWithoutCause extends BugChecker
@@ -52,7 +50,7 @@ public class FloggerWithoutCause extends BugChecker
       instanceMethod().onDescendantOf("com.google.common.flogger.LoggingApi").named("withCause");
 
   @Override
-  public Description matchMethodInvocation(MethodInvocationTree tree, final VisitorState state) {
+  public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!LOG_METHOD.matches(tree, state)) {
       return Description.NO_MATCH;
     }
@@ -62,19 +60,7 @@ public class FloggerWithoutCause extends BugChecker
       return Description.NO_MATCH;
     }
 
-    final AtomicBoolean withCause = new AtomicBoolean(false);
-    tree.accept(
-        new TreeScanner<Void, Void>() {
-          @Override
-          public Void visitMethodInvocation(MethodInvocationTree tree, Void unused) {
-            if (WITH_CAUSE.matches(tree, state)) {
-              withCause.set(true);
-            }
-            return super.visitMethodInvocation(tree, null);
-          }
-        },
-        null);
-    if (withCause.get()) {
+    if (streamReceivers(tree).anyMatch(receiver -> WITH_CAUSE.matches(receiver, state))) {
       return Description.NO_MATCH;
     }
 
@@ -85,8 +71,7 @@ public class FloggerWithoutCause extends BugChecker
             String.format(".withCause(%s)", state.getSourceForNode(exception))));
   }
 
-  @Nullable
-  private static Tree getExceptionArg(MethodInvocationTree tree, VisitorState state) {
+  private static @Nullable Tree getExceptionArg(MethodInvocationTree tree, VisitorState state) {
     for (Tree arg : Lists.reverse(tree.getArguments())) {
       try {
         Type argType = ASTHelpers.getType(arg);
@@ -95,7 +80,7 @@ public class FloggerWithoutCause extends BugChecker
             && ASTHelpers.isSubtype(argType, state.getSymtab().throwableType, state)) {
           return arg;
         }
-      } catch (Throwable t) {
+      } catch (RuntimeException t) {
         // ignore completion failures
       }
     }

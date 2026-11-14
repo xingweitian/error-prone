@@ -24,6 +24,9 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.findSuperMethods;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.ASTHelpers.isEffectivelyPrivate;
+import static com.google.errorprone.util.AnnotationNames.DEPRECATED_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.OVERRIDE_ANNOTATION;
 import static java.util.stream.Collectors.joining;
 
 import com.google.errorprone.BugPattern;
@@ -48,8 +51,8 @@ import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
 import java.util.List;
 import java.util.Set;
-import javax.annotation.Nullable;
 import javax.lang.model.element.Modifier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Matches Javadocs which are missing a required summary line.
@@ -57,7 +60,6 @@ import javax.lang.model.element.Modifier;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "MissingSummary",
     summary = "A summary line is required on public/protected Javadocs.",
     severity = WARNING,
     linkType = CUSTOM,
@@ -119,8 +121,8 @@ public final class MissingSummary extends BugChecker
     if (!modifiers.contains(Modifier.PUBLIC) && !modifiers.contains(Modifier.PROTECTED)) {
       return NO_MATCH;
     }
-    if (hasAnnotation(symbol, "java.lang.Override", state)
-        || hasAnnotation(symbol, "java.lang.Deprecated", state)) {
+    if (hasAnnotation(symbol, OVERRIDE_ANNOTATION, state)
+        || hasAnnotation(symbol, DEPRECATED_ANNOTATION, state)) {
       return NO_MATCH;
     }
     return buildDescription(diagnosticPosition(docTreePath, state)).build();
@@ -134,8 +136,7 @@ public final class MissingSummary extends BugChecker
       return NO_MATCH;
     }
     SuggestedFix fix =
-        SuggestedFix.builder()
-            .merge(Utils.replace(returnTree, "", state))
+        Utils.replace(returnTree, "", state).toBuilder()
             .replace(
                 pos,
                 pos,
@@ -144,7 +145,7 @@ public final class MissingSummary extends BugChecker
                     lowerFirstLetter(description), description.endsWith(".") ? "" : "."))
             .build();
     return buildDescription(diagnosticPosition(docTreePath, state))
-        .setMessage(String.format(CONSIDER_USING_MESSAGE, "return"))
+        .setMessage(CONSIDER_USING_MESSAGE, "return")
         .addFix(fix)
         .build();
   }
@@ -156,8 +157,7 @@ public final class MissingSummary extends BugChecker
     SuggestedFix fix =
         replacement.isEmpty()
             ? replacement
-            : SuggestedFix.builder()
-                .merge(replacement)
+            : replacement.toBuilder()
                 .replace(
                     pos,
                     pos,
@@ -168,13 +168,12 @@ public final class MissingSummary extends BugChecker
                             .collect(joining(" "))))
                 .build();
     return buildDescription(diagnosticPosition(docTreePath, state))
-        .setMessage(String.format(CONSIDER_USING_MESSAGE, "see"))
+        .setMessage(CONSIDER_USING_MESSAGE, "see")
         .addFix(fix)
         .build();
   }
 
-  @Nullable
-  private static <T> T findFirst(DocTreePath docTreePath, Class<T> clazz) {
+  private static <T> @Nullable T findFirst(DocTreePath docTreePath, Class<T> clazz) {
     return new DocTreeScanner<T, Void>() {
       @Override
       public T scan(DocTree docTree, Void unused) {
@@ -195,12 +194,10 @@ public final class MissingSummary extends BugChecker
       return false;
     }
     Symbol symbol = getSymbol(tree);
-    if (symbol instanceof MethodSymbol
-        && !findSuperMethods((MethodSymbol) symbol, state.getTypes()).isEmpty()) {
+    if (symbol instanceof MethodSymbol methodSymbol
+        && !findSuperMethods(methodSymbol, state.getTypes()).isEmpty()) {
       return false;
     }
-    return symbol != null
-        && (symbol.getModifiers().contains(Modifier.PUBLIC)
-            || symbol.getModifiers().contains(Modifier.PROTECTED));
+    return symbol != null && !isEffectivelyPrivate(symbol);
   }
 }

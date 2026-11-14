@@ -20,18 +20,20 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.stripParentheses;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.IfTreeMatcher;
+import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BinaryTree;
 import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IfTree;
 import com.sun.source.tree.StatementTree;
@@ -44,14 +46,12 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCAssign;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
-import com.sun.tools.javac.tree.JCTree.JCExpressionStatement;
 import java.util.List;
 import java.util.Objects;
-import javax.annotation.Nullable;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 // TODO(cushon): allow @LazyInit on fields as a suppression mechanism?
@@ -63,18 +63,15 @@ import javax.lang.model.element.Modifier;
 public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
   @Override
   public Description matchIf(IfTree outerIf, VisitorState state) {
-    DCLInfo info = findDCL(outerIf);
+    DclInfo info = findDcl(outerIf);
     if (info == null) {
       return Description.NO_MATCH;
     }
-    switch (info.sym().getKind()) {
-      case FIELD:
-        return handleField(info.outerIf(), info.sym(), state);
-      case LOCAL_VARIABLE:
-        return handleLocal(info, state);
-      default:
-        return Description.NO_MATCH;
-    }
+    return switch (info.sym().getKind()) {
+      case FIELD -> handleField(info.outerIf(), info.sym(), state);
+      case LOCAL_VARIABLE -> handleLocal(info, state);
+      default -> Description.NO_MATCH;
+    };
   }
 
   /**
@@ -93,7 +90,9 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
     Description.Builder builder = buildDescription(outerIf);
     JCTree fieldDecl = findFieldDeclaration(state.getPath(), sym);
     if (fieldDecl != null) {
-      builder.addFix(SuggestedFixes.addModifiers(fieldDecl, state, Modifier.VOLATILE));
+      builder.addFix(
+          SuggestedFixes.addModifiers(fieldDecl, state, Modifier.VOLATILE)
+              .orElse(SuggestedFix.emptyFix()));
     }
     return builder.build();
   }
@@ -114,19 +113,14 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
    */
   private static boolean isImmutable(Type type, VisitorState state) {
     switch (type.getKind()) {
-      case BOOLEAN:
-      case BYTE:
-      case SHORT:
-      case INT:
-      case CHAR:
-      case FLOAT:
+      case BOOLEAN, BYTE, SHORT, INT, CHAR, FLOAT -> {
         return true;
-      case LONG:
-      case DOUBLE:
+      }
+      case LONG, DOUBLE -> {
         // double-width primitives aren't written atomically
         return true;
-      default:
-        break;
+      }
+      default -> {}
     }
     return IMMUTABLE_PRIMITIVES.contains(
         state.getTypes().erasure(type).tsym.getQualifiedName().toString());
@@ -151,50 +145,44 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
    * }
    * }</pre>
    */
-  private Description handleLocal(DCLInfo info, VisitorState state) {
-    JCExpressionStatement expr = getChild(info.synchTree().getBlock(), JCExpressionStatement.class);
+  private Description handleLocal(DclInfo info, VisitorState state) {
+    ExpressionStatementTree expr =
+        getChild(info.synchTree().getBlock(), ExpressionStatementTree.class);
     if (expr == null) {
       return Description.NO_MATCH;
     }
-    if (expr.getStartPosition() > getStartPosition(info.innerIf())) {
+    if (getStartPosition(expr) > getStartPosition(info.innerIf())) {
       return Description.NO_MATCH;
     }
-    if (!(expr.getExpression() instanceof JCAssign)) {
+    if (!(expr.getExpression() instanceof AssignmentTree assign)) {
       return Description.NO_MATCH;
     }
-    JCAssign assign = (JCAssign) expr.getExpression();
     if (!Objects.equals(ASTHelpers.getSymbol(assign.getVariable()), info.sym())) {
       return Description.NO_MATCH;
     }
-    Symbol sym = ASTHelpers.getSymbol(assign.getExpression());
-    if (!(sym instanceof VarSymbol)) {
+    if (!(ASTHelpers.getSymbol(assign.getExpression()) instanceof VarSymbol fvar)) {
       return Description.NO_MATCH;
     }
-    VarSymbol fvar = (VarSymbol) sym;
     if (fvar.getKind() != ElementKind.FIELD) {
       return Description.NO_MATCH;
     }
     return handleField(info.outerIf(), fvar, state);
   }
 
-  /** Information about an instance of DCL. */
-  @AutoValue
-  abstract static class DCLInfo {
-    /** The outer if statement */
-    abstract IfTree outerIf();
+  /**
+   * Information about an instance of DCL.
+   *
+   * @param outerIf The outer if statement
+   * @param synchTree The synchronized statement
+   * @param innerIf The inner if statement
+   * @param sym The variable (local or field) that is double-checked
+   */
+  private record DclInfo(
+      IfTree outerIf, SynchronizedTree synchTree, IfTree innerIf, VarSymbol sym) {
 
-    /** The synchronized statement */
-    abstract SynchronizedTree synchTree();
-
-    /** The inner if statement * */
-    abstract IfTree innerIf();
-
-    /** The variable (local or field) that is double-checked */
-    abstract VarSymbol sym();
-
-    static DCLInfo create(
+    static DclInfo create(
         IfTree outerIf, SynchronizedTree synchTree, IfTree innerIf, VarSymbol sym) {
-      return new AutoValue_DoubleCheckedLocking_DCLInfo(outerIf, synchTree, innerIf, sym);
+      return new DclInfo(outerIf, synchTree, innerIf, sym);
     }
   }
 
@@ -215,8 +203,7 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
    * Gaps before the synchronized or inner 'if' statement are ignored, and the operands in the
    * null-checks are accepted in either order.
    */
-  @Nullable
-  static DCLInfo findDCL(IfTree outerIf) {
+  private static @Nullable DclInfo findDcl(IfTree outerIf) {
     // TODO(cushon): Optional.ifPresent...
     ExpressionTree outerIfTest = getNullCheckedExpression(outerIf.getCondition());
     if (outerIfTest == null) {
@@ -238,22 +225,20 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
     if (!Objects.equals(outerSym, ASTHelpers.getSymbol(innerIfTest))) {
       return null;
     }
-    if (!(outerSym instanceof VarSymbol)) {
+    if (!(outerSym instanceof VarSymbol var)) {
       return null;
     }
-    VarSymbol var = (VarSymbol) outerSym;
-    return DCLInfo.create(outerIf, synchTree, innerIf, var);
+    return DclInfo.create(outerIf, synchTree, innerIf, var);
   }
 
   /**
    * Matches comparisons to null (e.g. {@code foo == null}) and returns the expression being tested.
    */
-  private static ExpressionTree getNullCheckedExpression(ExpressionTree condition) {
+  private static @Nullable ExpressionTree getNullCheckedExpression(ExpressionTree condition) {
     condition = stripParentheses(condition);
-    if (!(condition instanceof BinaryTree)) {
+    if (!(condition instanceof BinaryTree bin)) {
       return null;
     }
-    BinaryTree bin = (BinaryTree) condition;
     ExpressionTree other;
     if (bin.getLeftOperand().getKind() == Kind.NULL_LITERAL) {
       other = bin.getRightOperand();
@@ -269,7 +254,7 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
    * Visits (possibly nested) block statements and returns the first child statement with the given
    * class.
    */
-  private static <T> T getChild(StatementTree tree, final Class<T> clazz) {
+  private static <T> T getChild(StatementTree tree, Class<T> clazz) {
     return tree.accept(
         new SimpleTreeVisitor<T, Void>() {
           @Override
@@ -305,14 +290,13 @@ public class DoubleCheckedLocking extends BugChecker implements IfTreeMatcher {
    * Since double-checked locking should always be used on a private field, this should be
    * reasonably effective.
    */
-  @Nullable
-  private static JCTree findFieldDeclaration(TreePath path, VarSymbol var) {
+  private static @Nullable JCTree findFieldDeclaration(TreePath path, VarSymbol var) {
     for (TreePath curr = path; curr != null; curr = curr.getParentPath()) {
       Tree leaf = curr.getLeaf();
-      if (!(leaf instanceof JCClassDecl)) {
+      if (!(leaf instanceof JCClassDecl classTree)) {
         continue;
       }
-      for (JCTree tree : ((JCClassDecl) leaf).getMembers()) {
+      for (JCTree tree : classTree.getMembers()) {
         if (Objects.equals(var, ASTHelpers.getSymbol(tree))) {
           return tree;
         }

@@ -19,9 +19,9 @@ package com.google.errorprone.bugpatterns.apidiff;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.sun.tools.javac.file.JavacFileManager;
 import java.io.File;
 import java.io.IOException;
@@ -60,6 +60,7 @@ public final class CompilationBuilderHelpers {
       this.tempFolder = tempFolder;
     }
 
+    @CanIgnoreReturnValue
     public SourceBuilder addSourceLines(String name, String... lines) throws IOException {
       Path filePath = Paths.get(tempFolder.getAbsolutePath(), name);
       sources.add(filePath);
@@ -90,16 +91,19 @@ public final class CompilationBuilderHelpers {
       this.fileManager = fileManager;
     }
 
+    @CanIgnoreReturnValue
     public CompilationBuilder setSources(Collection<Path> sources) {
       this.sources = sources;
       return this;
     }
 
+    @CanIgnoreReturnValue
     public CompilationBuilder setClasspath(Collection<Path> classpath) {
       this.classpath = classpath;
       return this;
     }
 
+    @CanIgnoreReturnValue
     CompilationBuilder setJavacopts(Iterable<String> javacopts) {
       this.javacopts = javacopts;
       return this;
@@ -125,8 +129,8 @@ public final class CompilationBuilderHelpers {
                   fileManager,
                   diagnosticCollector,
                   javacopts,
-                  /*classes=*/ Collections.<String>emptyList(),
-                  fileManager.getJavaFileObjectsFromPaths(sources))
+                  /* classes= */ Collections.<String>emptyList(),
+                  fileManager.getJavaFileObjects(sources.toArray(new Path[0])))
               .call();
 
       return CompilationResult.create(
@@ -143,10 +147,10 @@ public final class CompilationBuilderHelpers {
     }
 
     public Path compileOutputToJarOrDie() throws IOException {
-      final Path outputDir = compileOrDie().classOutput();
-      final Path outputJar = outputDir.resolve("output.jar");
+      Path outputDir = compileOrDie().classOutput();
+      Path outputJar = outputDir.resolve("output.jar");
       try (OutputStream os = Files.newOutputStream(outputJar);
-          final JarOutputStream jos = new JarOutputStream(os)) {
+          JarOutputStream jos = new JarOutputStream(os)) {
         Files.walkFileTree(
             outputDir,
             new SimpleFileVisitor<Path>() {
@@ -167,23 +171,17 @@ public final class CompilationBuilderHelpers {
   }
 
   /** The output from a compilation. */
-  @AutoValue
-  abstract static class CompilationResult {
-    abstract boolean ok();
-
-    abstract ImmutableList<Diagnostic<? extends JavaFileObject>> diagnostics();
-
-    abstract String errorOutput();
-
-    abstract Path classOutput();
-
+  record CompilationResult(
+      boolean ok,
+      ImmutableList<Diagnostic<? extends JavaFileObject>> diagnostics,
+      String errorOutput,
+      Path classOutput) {
     static CompilationResult create(
         boolean ok,
         Iterable<Diagnostic<? extends JavaFileObject>> diagnostics,
         String errorOutput,
         Path classOutput) {
-      return new AutoValue_CompilationBuilderHelpers_CompilationResult(
-          ok, ImmutableList.copyOf(diagnostics), errorOutput, classOutput);
+      return new CompilationResult(ok, ImmutableList.copyOf(diagnostics), errorOutput, classOutput);
     }
   }
 

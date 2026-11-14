@@ -17,13 +17,16 @@
 package com.google.errorprone.bugpatterns.threadsafety;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.errorprone.matchers.ProtobufMatchers.ENUM_LITE;
+import static com.google.errorprone.matchers.ProtobufMatchers.MESSAGE_LITE;
+import static com.google.errorprone.matchers.ProtobufMatchers.MUTABLE_MESSAGE_LITE;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import com.google.common.collect.Sets.SetView;
 import com.google.common.primitives.Primitives;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.annotations.Immutable;
@@ -31,99 +34,71 @@ import com.google.errorprone.bugpatterns.ImmutableCollections;
 import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.suppliers.Suppliers;
 import com.sun.tools.javac.code.Type;
-import java.lang.reflect.TypeVariable;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.stream.Stream;
+import javax.inject.Inject;
 
 /** A collection of types with known mutability. */
 @Immutable
-public final class WellKnownMutability implements ThreadSafety.KnownTypes {
+public final class WellKnownMutability implements ThreadSafetyKnownTypes {
 
   /** Types that are known to be immutable. */
   private final ImmutableMap<String, AnnotationInfo> knownImmutableClasses;
 
   /** Types that are known to be mutable. */
-  private final ImmutableSet<String> knownUnsafeClasses;
+  private final ImmutableSet<String> knownMutableClasses;
 
-  private WellKnownMutability(List<String> knownImmutable, List<String> knownUnsafe) {
-    knownImmutableClasses = buildImmutableClasses(knownImmutable);
-    knownUnsafeClasses = buildUnsafeClasses(knownUnsafe);
+  @Inject
+  WellKnownMutability(ErrorProneFlags flags) {
+    ImmutableList<String> immutable = flags.getListOrEmpty("Immutable:KnownImmutable");
+    ImmutableList<String> mutable =
+        // Please use "KnownMutable", as it's a bit clearer what we mean. "KnownUnsafe" is kept
+        // for a while for backwards compatibility.
+        Stream.of("Immutable:KnownMutable", "Immutable:KnownUnsafe")
+            .flatMap(f -> flags.getListOrEmpty(f).stream())
+            .collect(toImmutableList());
+    this.knownImmutableClasses = buildImmutableClasses(immutable);
+    this.knownMutableClasses = buildMutableClasses(mutable);
   }
 
   public static WellKnownMutability fromFlags(ErrorProneFlags flags) {
-    List<String> immutable = flags.getList("Immutable:KnownImmutable").orElse(ImmutableList.of());
-    List<String> unsafe = flags.getList("Immutable:KnownUnsafe").orElse(ImmutableList.of());
-    return new WellKnownMutability(immutable, unsafe);
+    return new WellKnownMutability(flags);
   }
 
-  public Map<String, AnnotationInfo> getKnownImmutableClasses() {
+  public ImmutableMap<String, AnnotationInfo> getKnownImmutableClasses() {
     return knownImmutableClasses;
   }
 
+  /**
+   * @deprecated {@link #getKnownImmutableClasses()} is clearer if you're dealing with this specific
+   *     class.
+   */
   @Override
-  public Map<String, AnnotationInfo> getKnownSafeClasses() {
+  @Deprecated
+  public ImmutableMap<String, AnnotationInfo> getKnownSafeClasses() {
     return getKnownImmutableClasses();
   }
 
-  @Override
-  public Set<String> getKnownUnsafeClasses() {
-    return knownUnsafeClasses;
+  public ImmutableSet<String> getKnownMutableClasses() {
+    return knownMutableClasses;
   }
 
-  static class Builder {
-    final ImmutableMap.Builder<String, AnnotationInfo> mapBuilder = ImmutableMap.builder();
-
-    public Builder addClasses(Set<Class<?>> clazzs) {
-      for (Class<?> clazz : clazzs) {
-        add(clazz);
-      }
-      return this;
-    }
-
-    public Builder addStrings(List<String> classNames) {
-      for (String className : classNames) {
-        add(className);
-      }
-      return this;
-    }
-
-    public Builder add(Class<?> clazz, String... containerOf) {
-      ImmutableSet<String> containerTyParams = ImmutableSet.copyOf(containerOf);
-      HashSet<String> actualTyParams = new HashSet<>();
-      for (TypeVariable<?> x : clazz.getTypeParameters()) {
-        actualTyParams.add(x.getName());
-      }
-      SetView<String> difference = Sets.difference(containerTyParams, actualTyParams);
-      if (!difference.isEmpty()) {
-        throw new AssertionError(
-            String.format(
-                "For %s, please update the type parameter(s) from %s to %s",
-                clazz, difference, actualTyParams));
-      }
-      mapBuilder.put(
-          clazz.getName(),
-          AnnotationInfo.create(clazz.getName(), ImmutableList.copyOf(containerOf)));
-      return this;
-    }
-
-    public Builder add(String className, String... containerOf) {
-      mapBuilder.put(
-          className, AnnotationInfo.create(className, ImmutableList.copyOf(containerOf)));
-      return this;
-    }
-
-    public ImmutableMap<String, AnnotationInfo> build() {
-      return mapBuilder.build();
-    }
+  /**
+   * @deprecated {@link #getKnownMutableClasses()} is clearer if you're dealing with this specific
+   *     class.
+   */
+  @Override
+  @Deprecated
+  public ImmutableSet<String> getKnownUnsafeClasses() {
+    return getKnownMutableClasses();
   }
 
   // TODO(b/35724557): share this list with other code analyzing types for immutability
   // TODO(cushon): generate this at build-time to get type-safety without added compile-time deps
+  @SuppressWarnings("UnnecessarilyFullyQualified") // intentional
   private static ImmutableMap<String, AnnotationInfo> buildImmutableClasses(
       List<String> extraKnownImmutables) {
-    return new Builder()
+    return new MapBuilder()
         .addStrings(extraKnownImmutables)
         .addClasses(Primitives.allPrimitiveTypes())
         .addClasses(Primitives.allWrapperTypes())
@@ -142,7 +117,9 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         // checking whether classes are immutable. Within error prone, protos are verified
         // using isProto2MessageClass from this class.
         .add("com.google.protobuf.GeneratedMessage")
+        .add("com.google.protobuf.Parser")
         .add("com.google.re2j.Pattern")
+        .add("com.google.gson.reflect.TypeToken")
         .add("com.google.inject.TypeLiteral")
         .add("com.google.inject.Key")
         .add(com.google.common.base.CharMatcher.class)
@@ -176,6 +153,7 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add(com.google.common.net.MediaType.class)
         .add(com.google.common.primitives.UnsignedInteger.class)
         .add(com.google.common.primitives.UnsignedLong.class)
+        .add("com.google.common.reflect.TypeToken")
         .add("com.ibm.icu.number.LocalizedNumberFormatter")
         .add("com.ibm.icu.number.LocalizedNumberRangeFormatter")
         .add("com.ibm.icu.number.UnlocalizedNumberFormatter")
@@ -183,6 +161,7 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add("com.ibm.icu.util.Currency")
         .add("com.ibm.icu.util.ULocale")
         .add(java.lang.Class.class)
+        .add(java.lang.Enum.class)
         .add(java.lang.String.class)
         .add(java.lang.annotation.Annotation.class)
         .add(java.math.BigDecimal.class)
@@ -191,6 +170,7 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add(java.net.Inet6Address.class)
         .add(java.net.InetAddress.class)
         .add(java.net.URI.class)
+        .add("java.net.http.HttpClient")
         .add(java.nio.ByteOrder.class)
         .add(java.nio.charset.Charset.class)
         .add(java.nio.file.Path.class)
@@ -201,7 +181,9 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add(java.util.Locale.class)
         .add(java.util.regex.Pattern.class)
         .add("android.net.Uri")
+        .add("android.util.Size")
         .add("java.awt.Color")
+        .add("java.lang.invoke.MethodHandle")
         .add("java.util.AbstractMap$SimpleImmutableEntry", "K", "V")
         .add("java.util.Optional", "T")
         .add("java.util.OptionalDouble")
@@ -249,6 +231,51 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add("java.time.zone.ZoneOffsetTransitionRule")
         .add("java.time.zone.ZoneRules")
         .add("java.time.zone.ZoneRulesProvider")
+        .add("kotlin.Lazy", "T")
+        .add("kotlin.Pair", "A", "B")
+        .add("kotlin.Result", "T")
+        .add("kotlin.Triple", "A", "B", "C")
+        .add("kotlin.UByte")
+        .add("kotlin.UInt")
+        .add("kotlin.ULong")
+        .add("kotlin.UShort")
+        .add("kotlin.Unit")
+        .add("kotlin.coroutines.CoroutineContext$Key")
+        .add("kotlin.coroutines.EmptyCoroutineContext")
+        .add("kotlin.enums.EnumEntries", "E")
+        .add("kotlin.ranges.CharProgression")
+        .add("kotlin.ranges.CharRange")
+        .add("kotlin.ranges.ClosedFloatingPointRange", "T")
+        .add("kotlin.ranges.ClosedRange", "T")
+        .add("kotlin.ranges.IntProgression")
+        .add("kotlin.ranges.IntRange")
+        .add("kotlin.ranges.LongProgression")
+        .add("kotlin.ranges.LongRange")
+        .add("kotlin.ranges.OpenEndRange", "T")
+        .add("kotlin.ranges.UIntProgression")
+        .add("kotlin.ranges.UIntRange")
+        .add("kotlin.ranges.ULongProgression")
+        .add("kotlin.ranges.ULongRange")
+        .add("kotlin.reflect.KCallable")
+        .add("kotlin.reflect.KClass")
+        .add("kotlin.reflect.KFunction")
+        .add("kotlin.reflect.KParameter")
+        .add("kotlin.reflect.KProperty")
+        .add("kotlin.reflect.KType")
+        .add("kotlin.reflect.KTypeParameter")
+        .add("kotlin.reflect.KTypeProjection")
+        .add("kotlin.text.HexFormat")
+        .add("kotlin.text.HexFormat$BytesHexFormat")
+        .add("kotlin.text.HexFormat$NumberHexFormat")
+        .add("kotlin.text.MatchGroup")
+        .add("kotlin.text.Regex")
+        .add("kotlin.time.ComparableTimeMark")
+        .add("kotlin.time.Duration")
+        .add("kotlin.time.Instant")
+        .add("kotlin.time.TimeMark")
+        .add("kotlin.uuid.Uuid")
+        .add("kotlinx.coroutines.CoroutineName")
+        .add("kotlinx.coroutines.NonCancellable")
         .add("org.threeten.bp.Duration")
         .add("org.threeten.bp.Instant")
         .add("org.threeten.bp.LocalDate")
@@ -320,10 +347,11 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .build();
   }
 
-  private static ImmutableSet<String> buildUnsafeClasses(List<String> knownUnsafes) {
+  private static ImmutableSet<String> buildMutableClasses(List<String> knownMutables) {
     return ImmutableSet.<String>builder()
-        .addAll(knownUnsafes)
+        .addAll(knownMutables)
         .addAll(ImmutableCollections.MUTABLE_TO_IMMUTABLE_CLASS_NAME_MAP.keySet())
+        .add("com.google.common.util.concurrent.AtomicDouble")
         .add("com.google.protobuf.util.FieldMaskUtil.MergeOptions")
         .add(java.util.BitSet.class.getName())
         .add(java.util.Calendar.class.getName())
@@ -335,30 +363,35 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
         .add(java.util.EnumMap.class.getName())
         .add(java.util.EnumSet.class.getName())
         .add(java.util.List.class.getName())
+        .add(java.util.logging.Logger.class.getName())
         .add(java.util.Map.class.getName())
         .add(java.util.HashMap.class.getName())
         .add(java.util.HashSet.class.getName())
         .add(java.util.NavigableMap.class.getName())
         .add(java.util.NavigableSet.class.getName())
+        .add(java.util.Random.class.getName())
         .add(java.util.TreeMap.class.getName())
         .add(java.util.TreeSet.class.getName())
         .add(java.util.Vector.class.getName())
         .add(java.util.Set.class.getName())
+        .add(java.util.concurrent.atomic.AtomicBoolean.class.getName())
+        .add(java.util.concurrent.atomic.AtomicReference.class.getName())
+        .add(java.util.concurrent.atomic.AtomicLong.class.getName())
         .build();
   }
 
-  // ProtocolSupport matches Message (not MessageLite) for legacy reasons
-  private static final Supplier<Type> MESSAGE_TYPE =
-      Suppliers.typeFromString("com.google.protobuf.MessageLite");
+  private static final ClassName PROTOCOL_MESSAGE_TYPE =
+      ClassName.of("com.google.io.protocol.ProtocolMessage");
 
-  private static final Supplier<Type> MUTABLE_MESSAGE_TYPE =
-      Suppliers.typeFromString("com.google.protobuf.MutableMessageLite");
-
-  private static final Supplier<Type> PROTOCOL_MESSAGE_TYPE =
-      Suppliers.typeFromString("com.google.io.protocol.ProtocolMessage");
+  private static boolean isAssignableTo(Type type, ClassName className, VisitorState state) {
+    return isAssignableTo(type, className.type(state), state);
+  }
 
   private static boolean isAssignableTo(Type type, Supplier<Type> supplier, VisitorState state) {
-    Type to = supplier.get(state);
+    return isAssignableTo(type, supplier.get(state), state);
+  }
+
+  private static boolean isAssignableTo(Type type, Type to, VisitorState state) {
     if (to == null) {
       // the type couldn't be loaded
       return false;
@@ -372,7 +405,7 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
    */
   public static boolean isProto2MessageClass(VisitorState state, Type type) {
     checkNotNull(type);
-    return isAssignableTo(type, MESSAGE_TYPE, state)
+    return isAssignableTo(type, MESSAGE_LITE, state)
         && !isAssignableTo(type, PROTOCOL_MESSAGE_TYPE, state);
   }
 
@@ -382,8 +415,13 @@ public final class WellKnownMutability implements ThreadSafety.KnownTypes {
    */
   public static boolean isProto2MutableMessageClass(VisitorState state, Type type) {
     checkNotNull(type);
-    return isAssignableTo(type, MUTABLE_MESSAGE_TYPE, state)
+    return isAssignableTo(type, MUTABLE_MESSAGE_LITE, state)
         && !isAssignableTo(type, PROTOCOL_MESSAGE_TYPE, state);
+  }
+
+  public static boolean isProtoEnum(VisitorState state, Type type) {
+    checkNotNull(type);
+    return isAssignableTo(type, ENUM_LITE, state);
   }
 
   /** Returns true if the type is an annotation. */

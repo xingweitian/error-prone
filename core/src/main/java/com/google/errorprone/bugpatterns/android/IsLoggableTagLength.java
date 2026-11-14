@@ -46,13 +46,12 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
-/** @author epmjohnston@google.com (Emily P.M. Johnston) */
-@BugPattern(
-    name = "IsLoggableTagLength",
-    summary = "Log tag too long, cannot exceed 23 characters.",
-    severity = ERROR)
+/**
+ * @author epmjohnston@google.com (Emily P.M. Johnston)
+ */
+@BugPattern(summary = "Log tag too long, cannot exceed 23 characters.", severity = ERROR)
 public class IsLoggableTagLength extends BugChecker implements MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> IS_LOGGABLE_CALL =
@@ -71,7 +70,7 @@ public class IsLoggableTagLength extends BugChecker implements MethodInvocationT
       return NO_MATCH;
     }
 
-    ExpressionTree tagArg = tree.getArguments().get(0);
+    ExpressionTree tagArg = tree.getArguments().getFirst();
 
     // Check for constant value.
     String tagConstantValue = ASTHelpers.constValue(tagArg, String.class);
@@ -102,8 +101,7 @@ public class IsLoggableTagLength extends BugChecker implements MethodInvocationT
     return Utf8.encodedLength(tag) <= 23;
   }
 
-  @Nullable
-  private static VariableTree findEnclosingIdentifier(
+  private static @Nullable VariableTree findEnclosingIdentifier(
       IdentifierTree originalNode, VisitorState state) {
     Symbol identifierSymbol = getSymbol(originalNode);
     if (!(identifierSymbol instanceof VarSymbol)) {
@@ -114,7 +112,7 @@ public class IsLoggableTagLength extends BugChecker implements MethodInvocationT
         .accept(
             new TreeScanner<VariableTree, Void>() {
               @Override
-              public VariableTree visitVariable(VariableTree node, Void p) {
+              public @Nullable VariableTree visitVariable(VariableTree node, Void p) {
                 return getSymbol(node).equals(identifierSymbol) ? node : null;
               }
 

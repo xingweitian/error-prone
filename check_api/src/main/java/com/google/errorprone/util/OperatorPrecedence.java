@@ -17,15 +17,17 @@
 package com.google.errorprone.util;
 
 import com.sun.source.tree.Tree;
+import java.util.Optional;
 
 /**
  * The precedence for an operator kind in the {@link com.sun.source.tree} API.
  *
- * <p>As documented at: http://docs.oracle.com/javase/tutorial/java/nutsandbolts/operators.html
+ * <p>As documented at: https://docs.oracle.com/javase/tutorial/java/nutsandbolts/operators.html
  */
 public enum OperatorPrecedence {
-  POSTFIX(13),
-  UNARY(12),
+  POSTFIX(14),
+  UNARY(13),
+  CAST(12),
   MULTIPLICATIVE(11),
   ADDITIVE(10),
   SHIFT(9),
@@ -41,7 +43,7 @@ public enum OperatorPrecedence {
 
   private final int precedence;
 
-  private OperatorPrecedence(int precedence) {
+  OperatorPrecedence(int precedence) {
     this.precedence = precedence;
   }
 
@@ -50,58 +52,40 @@ public enum OperatorPrecedence {
   }
 
   public static OperatorPrecedence from(Tree.Kind kind) {
-    switch (kind) {
-      case POSTFIX_DECREMENT:
-      case POSTFIX_INCREMENT:
-        return OperatorPrecedence.POSTFIX;
-      case PREFIX_DECREMENT:
-      case PREFIX_INCREMENT:
-        return OperatorPrecedence.UNARY;
-      case MULTIPLY:
-      case DIVIDE:
-      case REMAINDER:
-        return OperatorPrecedence.MULTIPLICATIVE;
-      case PLUS:
-      case MINUS:
-        return OperatorPrecedence.ADDITIVE;
-      case RIGHT_SHIFT:
-      case UNSIGNED_RIGHT_SHIFT:
-      case LEFT_SHIFT:
-        return OperatorPrecedence.SHIFT;
-      case LESS_THAN:
-      case LESS_THAN_EQUAL:
-      case GREATER_THAN:
-      case GREATER_THAN_EQUAL:
-      case INSTANCE_OF:
-        return OperatorPrecedence.RELATIONAL;
-      case EQUAL_TO:
-      case NOT_EQUAL_TO:
-        return OperatorPrecedence.EQUALITY;
-      case AND:
-        return OperatorPrecedence.AND;
-      case XOR:
-        return OperatorPrecedence.XOR;
-      case OR:
-        return OperatorPrecedence.OR;
-      case CONDITIONAL_AND:
-        return OperatorPrecedence.CONDITIONAL_AND;
-      case CONDITIONAL_OR:
-        return OperatorPrecedence.CONDITIONAL_OR;
-      case ASSIGNMENT:
-      case MULTIPLY_ASSIGNMENT:
-      case DIVIDE_ASSIGNMENT:
-      case REMAINDER_ASSIGNMENT:
-      case PLUS_ASSIGNMENT:
-      case MINUS_ASSIGNMENT:
-      case LEFT_SHIFT_ASSIGNMENT:
-      case AND_ASSIGNMENT:
-      case XOR_ASSIGNMENT:
-      case OR_ASSIGNMENT:
-      case RIGHT_SHIFT_ASSIGNMENT:
-      case UNSIGNED_RIGHT_SHIFT_ASSIGNMENT:
-        return OperatorPrecedence.ASSIGNMENT;
-      default:
-        throw new IllegalArgumentException("Unexpected operator kind: " + kind);
-    }
+    return optionallyFrom(kind)
+        .orElseThrow(() -> new IllegalArgumentException("Unexpected operator kind: " + kind));
+  }
+
+  public static Optional<OperatorPrecedence> optionallyFrom(Tree.Kind kind) {
+    return switch (kind) {
+      case POSTFIX_DECREMENT, POSTFIX_INCREMENT -> Optional.of(OperatorPrecedence.POSTFIX);
+      case PREFIX_DECREMENT, PREFIX_INCREMENT -> Optional.of(OperatorPrecedence.UNARY);
+      case TYPE_CAST -> Optional.of(OperatorPrecedence.CAST);
+      case MULTIPLY, DIVIDE, REMAINDER -> Optional.of(OperatorPrecedence.MULTIPLICATIVE);
+      case PLUS, MINUS -> Optional.of(OperatorPrecedence.ADDITIVE);
+      case RIGHT_SHIFT, UNSIGNED_RIGHT_SHIFT, LEFT_SHIFT -> Optional.of(OperatorPrecedence.SHIFT);
+      case LESS_THAN, LESS_THAN_EQUAL, GREATER_THAN, GREATER_THAN_EQUAL, INSTANCE_OF ->
+          Optional.of(OperatorPrecedence.RELATIONAL);
+      case EQUAL_TO, NOT_EQUAL_TO -> Optional.of(OperatorPrecedence.EQUALITY);
+      case AND -> Optional.of(OperatorPrecedence.AND);
+      case XOR -> Optional.of(OperatorPrecedence.XOR);
+      case OR -> Optional.of(OperatorPrecedence.OR);
+      case CONDITIONAL_AND -> Optional.of(OperatorPrecedence.CONDITIONAL_AND);
+      case CONDITIONAL_OR -> Optional.of(OperatorPrecedence.CONDITIONAL_OR);
+      case ASSIGNMENT,
+          MULTIPLY_ASSIGNMENT,
+          DIVIDE_ASSIGNMENT,
+          REMAINDER_ASSIGNMENT,
+          PLUS_ASSIGNMENT,
+          MINUS_ASSIGNMENT,
+          LEFT_SHIFT_ASSIGNMENT,
+          AND_ASSIGNMENT,
+          XOR_ASSIGNMENT,
+          OR_ASSIGNMENT,
+          RIGHT_SHIFT_ASSIGNMENT,
+          UNSIGNED_RIGHT_SHIFT_ASSIGNMENT ->
+          Optional.of(OperatorPrecedence.ASSIGNMENT);
+      default -> Optional.empty();
+    };
   }
 }

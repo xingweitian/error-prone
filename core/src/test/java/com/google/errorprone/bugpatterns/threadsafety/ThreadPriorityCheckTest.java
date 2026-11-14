@@ -38,19 +38,23 @@ public final class ThreadPriorityCheckTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public void foo() {",
-            "    Thread myThread = new Thread(new Runnable() {",
-            "      @Override",
-            "      public void run() {",
-            "        System.out.println(\"Run, thread, run!\");",
-            "      }",
-            "    });",
-            "    myThread.start();",
-            "    // BUG: Diagnostic contains: ThreadPriorityCheck",
-            "    Thread.yield();",
-            "  }",
-            "}")
+            """
+            class Test {
+              public void foo() {
+                Thread myThread =
+                    new Thread(
+                        new Runnable() {
+                          @Override
+                          public void run() {
+                            System.out.println("Run, thread, run!");
+                          }
+                        });
+                myThread.start();
+                // BUG: Diagnostic contains: ThreadPriorityCheck
+                Thread.yield();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -59,19 +63,57 @@ public final class ThreadPriorityCheckTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public void foo() {",
-            "    Thread thread = new Thread(new Runnable() {",
-            "      @Override",
-            "      public void run() {",
-            "        System.out.println(\"Run, thread, run!\");",
-            "      }",
-            "    });",
-            "    thread.start();",
-            "    // BUG: Diagnostic contains: ThreadPriorityCheck",
-            "    thread.setPriority(Thread.MAX_PRIORITY);",
-            "  }",
-            "}")
+            """
+            class Test {
+              public void foo() {
+                Thread thread =
+                    new Thread(
+                        new Runnable() {
+                          @Override
+                          public void run() {
+                            System.out.println("Run, thread, run!");
+                          }
+                        });
+                thread.start();
+                // BUG: Diagnostic contains: ThreadPriorityCheck
+                thread.setPriority(Thread.MAX_PRIORITY);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ofPlatformPriority() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              public void foo() {
+                // BUG: Diagnostic contains: ThreadPriorityCheck
+                Thread.ofPlatform().priority(Thread.MAX_PRIORITY);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void threadFactoryBuilderSetPriority() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+            class Test {
+              public void foo() {
+                // BUG: Diagnostic contains: ThreadPriorityCheck
+                new ThreadFactoryBuilder().setPriority(Thread.MAX_PRIORITY);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -80,17 +122,21 @@ public final class ThreadPriorityCheckTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public void foo() {",
-            "    Thread thread = new Thread(new Runnable() {",
-            "      @Override",
-            "      public void run() {",
-            "        System.out.println(\"Run, thread, run!\");",
-            "      }",
-            "    });",
-            "    thread.start();",
-            "  }",
-            "}")
+            """
+            class Test {
+              public void foo() {
+                Thread thread =
+                    new Thread(
+                        new Runnable() {
+                          @Override
+                          public void run() {
+                            System.out.println("Run, thread, run!");
+                          }
+                        });
+                thread.start();
+              }
+            }
+            """)
         .doTest();
   }
 }

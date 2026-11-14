@@ -30,7 +30,15 @@ public class EmptyTopLevelDeclarationTest {
 
   @Test
   public void negative() {
-    compilationHelper.addSourceLines("a/A.java", "package a;", "class One {}").doTest();
+    compilationHelper
+        .addSourceLines(
+            "a/A.java",
+            """
+            package a;
+
+            class One {}
+            """)
+        .doTest();
   }
 
   @Test
@@ -38,9 +46,29 @@ public class EmptyTopLevelDeclarationTest {
     compilationHelper
         .addSourceLines(
             "a/A.java",
-            "package a;",
-            "// BUG: Diagnostic contains: Did you mean 'class One {}'?",
-            "class One {};")
+            """
+            package a;
+
+            class One {}
+            // BUG: Diagnostic contains: remove
+            ;
+            """)
+        .doTest();
+  }
+
+  // https://github.com/google/error-prone/issues/4245
+  @Test
+  public void noImports() {
+    compilationHelper
+        .addSourceLines(
+            "ReproFile.java",
+            """
+            package errorpronecrash;
+            // BUG: Diagnostic contains: Did you mean to remove this line?
+            ;
+
+            public class ReproFile {}
+            """)
         .doTest();
   }
 }

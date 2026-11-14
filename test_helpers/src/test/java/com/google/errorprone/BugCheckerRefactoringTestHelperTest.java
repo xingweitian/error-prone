@@ -17,22 +17,22 @@
 package com.google.errorprone;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.TruthJUnit.assume;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.AnnotationTreeMatcher;
-import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.ReturnTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.AnnotationTree;
-import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ReturnTree;
-import org.junit.Before;
+import com.sun.source.tree.Tree;
+import com.sun.source.tree.VariableTree;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -41,15 +41,11 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class BugCheckerRefactoringTestHelperTest {
 
-  private BugCheckerRefactoringTestHelper helper;
-
-  @Before
-  public void setUp() {
-    helper = BugCheckerRefactoringTestHelper.newInstance(ReturnNullRefactoring.class, getClass());
-  }
+  private final BugCheckerRefactoringTestHelper helper =
+      BugCheckerRefactoringTestHelper.newInstance(ReturnNullRefactoring.class, getClass());
 
   @Test
-  public void testNoMatch() {
+  public void noMatch() {
     helper
         .addInputLines("in/Test.java", "public class Test {}")
         .addOutputLines("out/Test.java", "public class Test {}")
@@ -57,110 +53,139 @@ public class BugCheckerRefactoringTestHelperTest {
   }
 
   @Test
-  public void testReplace() {
+  public void replace() {
     helper
         .addInputLines(
             "in/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return i;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 1 + 2;
+                return i;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "  return null;",
-            "  }",
-            "}")
-        .doTest();
-  }
-
-  @Test(expected = AssertionError.class)
-  public void testReplaceFail() {
-    helper
-        .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return i;",
-            "  }",
-            "}")
-        .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return i;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 1 + 2;
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testReplaceTextMatch() {
-    helper
-        .addInputLines(
-            "in/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return i;",
-            "  }",
-            "}")
-        .addOutputLines(
-            "out/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return null;",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+  public void replaceFail() {
+    assertThrows(
+        AssertionError.class,
+        () ->
+            helper
+                .addInputLines(
+                    "in/Test.java",
+                    """
+                    public class Test {
+                      public Object foo() {
+                        Integer i = 1 + 2;
+                        return i;
+                      }
+                    }
+                    """)
+                .addOutputLines(
+                    "out/Test.java",
+                    """
+                    public class Test {
+                      public Object foo() {
+                        Integer i = 1 + 2;
+                        return i;
+                      }
+                    }
+                    """)
+                .doTest());
   }
 
   @Test
-  public void testIgnoreWhitespace() {
+  public void replaceTextMatch() {
     helper
         .addInputLines(
             "in/Test.java",
-            "public class Test {",
-            "  public Object foo() { Integer i = 2 + 1; return i; }",
-            "}")
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 1 + 2;
+                return i;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 2 + 1;",
-            "  return null;",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 1 + 2;
+                return null;
+              }
+            }
+            """)
+        .doTest();
   }
 
-  @Test(expected = AssertionError.class)
-  public void testReplaceTextMatchFail() {
+  @Test
+  public void ignoreWhitespace() {
     helper
         .addInputLines(
             "in/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 1 + 2;",
-            "    return i;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 2 + 1;
+                return i;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "public class Test {",
-            "  public Object foo() {",
-            "    Integer i = 2 + 1;",
-            "  return null;",
-            "  }",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            public class Test {
+              public Object foo() {
+                Integer i = 2 + 1;
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void replaceTextMatchFail() {
+    assertThrows(
+        AssertionError.class,
+        () ->
+            helper
+                .addInputLines(
+                    "in/Test.java",
+                    """
+                    public class Test {
+                      public Object foo() {
+                        Integer i = 1 + 2;
+                        return i;
+                      }
+                    }
+                    """)
+                .addOutputLines(
+                    "out/Test.java",
+                    """
+                    public class Test {
+                      public Object foo() {
+                        Integer i = 2 + 1;
+                        return null;
+                      }
+                    }
+                    """)
+                .doTest());
   }
 
   @Test
@@ -178,17 +203,33 @@ public class BugCheckerRefactoringTestHelperTest {
   }
 
   @Test
-  public void testAnnotationFullName() {
+  public void annotationFullName() {
     BugCheckerRefactoringTestHelper.newInstance(RemoveAnnotationRefactoring.class, getClass())
-        .addInputLines("bar/Foo.java", "package bar;", "public @interface Foo {", "};")
+        .addInputLines(
+            "bar/Foo.java",
+            """
+            package bar;
+
+            public @interface Foo {};
+            """)
         .expectUnchanged()
-        .addInputLines("foo/Bar.java", "import bar.Foo;", "public @Foo class Bar {", "}")
-        .addOutputLines("out/foo/Bar.java", "import bar.Foo;", "public  class Bar {", "}")
-        .doTest(TestMode.TEXT_MATCH);
+        .addInputLines(
+            "foo/Bar.java",
+            """
+            import bar.Foo;
+
+            public @Foo class Bar {}
+            """)
+        .addOutputLines(
+            "out/foo/Bar.java",
+            """
+            public class Bar {}
+            """)
+        .doTest();
   }
+
   /** Mock {@link BugChecker} for testing only. */
   @BugPattern(
-      name = "ReturnNullRefactoring",
       summary = "Mock refactoring that replaces all returns with 'return null;' statement.",
       explanation = "For test purposes only.",
       severity = SUGGESTION)
@@ -198,9 +239,9 @@ public class BugCheckerRefactoringTestHelperTest {
       return describeMatch(tree, SuggestedFix.replace(tree, "return null;"));
     }
   }
+
   /** Mock {@link BugChecker} for testing only. */
   @BugPattern(
-      name = "RemoveAnnotationRefactoring",
       summary = "Mock refactoring that removes all annotations declared in package bar ",
       explanation = "For test purposes only.",
       severity = SUGGESTION)
@@ -232,31 +273,50 @@ public class BugCheckerRefactoringTestHelperTest {
 
   @Test
   public void staticLastImportOrder() {
-    BugCheckerRefactoringTestHelper.newInstance(ImportArrayList.class, getClass())
+    BugCheckerRefactoringTestHelper.newInstance(SimplifyArrayList.class, getClass())
         .setImportOrder("static-last")
-        .addInputLines("pkg/A.java", "import static java.lang.Math.min;", "class A {", "}")
+        .addInputLines(
+            "pkg/A.java",
+            """
+            import static java.lang.Math.min;
+
+            class A {
+              java.util.ArrayList list;
+              int x = min(1, 2);
+            }
+            """)
         .addOutputLines(
             "out/pkg/A.java",
-            "import java.util.ArrayList;",
-            "",
-            "import static java.lang.Math.min;",
-            "class A {",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            import java.util.ArrayList;
+
+            import static java.lang.Math.min;
+
+            class A {
+              ArrayList list;
+              int x = min(1, 2);
+            }
+            """)
+        .doTest();
   }
 
   /** Mock {@link BugChecker} for testing only. */
   @BugPattern(
-      name = "ImportArrayList",
-      summary = "Mock refactoring that imports an ArrayList",
+      summary = "Mock refactoring that replaces java.util.ArrayList with ArrayList",
       explanation = "For test purposes only.",
       severity = SUGGESTION)
-  public static class ImportArrayList extends BugChecker implements CompilationUnitTreeMatcher {
-
+  public static class SimplifyArrayList extends BugChecker implements VariableTreeMatcher {
     @Override
-    public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
-      SuggestedFix fix = SuggestedFix.builder().addImport("java.util.ArrayList").build();
-      return describeMatch(tree, fix);
+    public Description matchVariable(VariableTree tree, VisitorState state) {
+      if (state.getSourceForNode(tree.getType()).equals("java.util.ArrayList")) {
+        SuggestedFix fix =
+            SuggestedFix.builder()
+                .replace(tree.getType(), "ArrayList")
+                .addImport("java.util.ArrayList")
+                .build();
+        return describeMatch(tree.getType(), fix);
+      }
+      return Description.NO_MATCH;
     }
   }
 
@@ -266,5 +326,191 @@ public class BugCheckerRefactoringTestHelperTest {
     IllegalStateException expected =
         assertThrows(IllegalStateException.class, () -> helper.doTest());
     assertThat(expected).hasMessageThat().contains("doTest");
+  }
+
+  @BugPattern(summary = "Replaces var types", severity = SUGGESTION)
+  public static class ReplaceVarTypes extends BugChecker implements VariableTreeMatcher {
+    @SuppressWarnings("TreeToString")
+    @Override
+    public Description matchVariable(VariableTree tree, VisitorState state) {
+      Tree type = tree.getType();
+      return describeMatch(type, SuggestedFix.replace(type, "Object"));
+    }
+  }
+
+  @SuppressWarnings("MissingTestCall") // used in a method reference in assertThrows
+  @Test
+  public void replaceVarTypes() {
+    // after JDK-8358604 in JDK 27, var types have source positions
+    // after JDK-8359383 in JDK 26, var type start and end positions are the same
+    assume().that(Runtime.version().feature()).isLessThan(26);
+    BugCheckerRefactoringTestHelper helper =
+        BugCheckerRefactoringTestHelper.newInstance(ReplaceVarTypes.class, getClass())
+            .addInputLines(
+                "Test.java",
+                """
+                public class Test {
+                  public void foo() {
+                    var x = 1 + 2;
+                    System.out.println(x);
+                  }
+                }
+                """)
+            .expectUnchanged();
+    AssertionError e = assertThrows(AssertionError.class, helper::doTest);
+    assertThat(e)
+        .hasMessageThat()
+        .contains(
+            """
+            Test.java:3: error: An unhandled exception was thrown by the Error Prone static analysis plugin.
+                var x = 1 + 2;
+            """);
+    assertThat(e).hasMessageThat().contains("BugPattern: ReplaceVarTypes");
+  }
+
+  @Test
+  public void varTypeSourcePositions() {
+    // after JDK-8358604 in JDK 27, var types have source positions
+    assume().that(Runtime.version().feature()).isAtLeast(27);
+    BugCheckerRefactoringTestHelper.newInstance(ReplaceVarTypes.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              public void foo() {
+                var x = 1 + 2;
+                System.out.println(x);
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/Test.java",
+            """
+            public class Test {
+              public void foo() {
+                Object x = 1 + 2;
+                System.out.println(x);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void reorderImports() {
+    helper
+        .addInputLines(
+            "in/Test.java",
+            """
+            import static java.lang.Math.min;
+
+            import java.util.List;
+
+            public class Test {
+              public Integer foo(List<Integer> xs) {
+                Integer i = null;
+                for (int x : xs) {
+                  if (i == null) {
+                    i = x;
+                  } else {
+                    i = min(i, x);
+                  }
+                }
+                return i;
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/Test.java",
+            """
+            import static java.lang.Math.min;
+
+            import java.util.List;
+
+            public class Test {
+              public Integer foo(List<Integer> xs) {
+                Integer i = null;
+                for (int x : xs) {
+                  if (i == null) {
+                    i = x;
+                  } else {
+                    i = min(i, x);
+                  }
+                }
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void emptyTestInput() {
+    BugCheckerRefactoringTestHelper bugCheckerRefactoringTestHelper =
+        BugCheckerRefactoringTestHelper.newInstance(ReplaceVarTypes.class, getClass())
+            .addInputLines(
+                "Test.java",
+                """
+                import java.util.List;
+                """)
+            .expectUnchanged();
+    IllegalArgumentException thrown =
+        assertThrows(
+            IllegalArgumentException.class, () -> bugCheckerRefactoringTestHelper.doTest());
+    assertThat(thrown)
+        .hasMessageThat()
+        .contains("Expected a class, package, or module declaration");
+  }
+
+  @BugPattern(summary = "Replaces return values if test-only", severity = SUGGESTION)
+  public static class TestOnlyRefactoring extends BugChecker implements ReturnTreeMatcher {
+    @Override
+    public Description matchReturn(ReturnTree tree, VisitorState state) {
+      if (state.errorProneOptions().isTestOnlyTarget()) {
+        return describeMatch(tree, SuggestedFix.replace(tree.getExpression(), "null"));
+      }
+      return Description.NO_MATCH;
+    }
+  }
+
+  @Test
+  public void testOnly_falseByDefault() {
+    BugCheckerRefactoringTestHelper.newInstance(TestOnlyRefactoring.class, getClass())
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              public Object foo() {
+                return "hello";
+              }
+            }
+            """)
+        .expectUnchanged()
+        .doTest();
+  }
+
+  @Test
+  public void testOnly_enabled() {
+    BugCheckerRefactoringTestHelper.newInstance(TestOnlyRefactoring.class, getClass())
+        .setTestOnly()
+        .addInputLines(
+            "Test.java",
+            """
+            public class Test {
+              public Object foo() {
+                return "hello";
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            public class Test {
+              public Object foo() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
   }
 }

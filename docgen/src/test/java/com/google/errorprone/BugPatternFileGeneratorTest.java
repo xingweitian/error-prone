@@ -26,6 +26,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -84,7 +85,12 @@ public class BugPatternFileGeneratorTest {
   public void regressionTest_frontmatter_pygments() throws Exception {
     BugPatternFileGenerator generator =
         new BugPatternFileGenerator(
-            wikiDir, explanationDirBase, true, null, input -> input.severity);
+            wikiDir,
+            explanationDirBase,
+            true,
+            null,
+            Collections.emptySet(),
+            input -> input.severity);
     generator.processLine(BUGPATTERN_LINE);
     String expected =
         CharStreams.toString(
@@ -104,6 +110,7 @@ public class BugPatternFileGeneratorTest {
             explanationDirBase,
             false,
             null,
+            Collections.emptySet(),
             input -> input.severity);
     generator.processLine(BUGPATTERN_LINE);
     String expected =
@@ -123,6 +130,7 @@ public class BugPatternFileGeneratorTest {
             explanationDirBase,
             false,
             null,
+            Collections.emptySet(),
             input -> input.severity);
     Files.write(
         explanationDirBase.resolve("DeadException.md"),
@@ -140,7 +148,7 @@ public class BugPatternFileGeneratorTest {
   }
 
   @Test
-  public void testEscapeAngleBracketsInSummary() throws Exception {
+  public void escapeAngleBracketsInSummary() throws Exception {
     // Create a BugPattern with angle brackets in the summary
     BugPatternInstance instance = new BugPatternInstance();
     instance.className = "com.google.errorprone.bugpatterns.DontDoThis";
@@ -159,6 +167,7 @@ public class BugPatternFileGeneratorTest {
             explanationDirBase,
             false,
             null,
+            Collections.emptySet(),
             input -> input.severity);
     generator.processLine(new Gson().toJson(instance));
     String expected =

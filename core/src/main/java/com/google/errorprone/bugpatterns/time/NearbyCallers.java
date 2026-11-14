@@ -16,6 +16,8 @@
 package com.google.errorprone.bugpatterns.time;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
+import static com.google.errorprone.matchers.Matchers.allOf;
+import static com.google.errorprone.matchers.Matchers.not;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 
 import com.google.common.collect.ImmutableList;
@@ -24,6 +26,7 @@ import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.protobuf.GeneratedMessage;
 import com.google.protobuf.GeneratedMessageLite;
+import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.LambdaExpressionTree;
@@ -35,22 +38,25 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import java.util.Optional;
-import java.util.regex.Pattern;
+import org.safere.Pattern;
 
 /**
  * Utility class to find calls "nearby" other calls.
  *
  * <p>TODO(glorioso): Coalesce this with ByteBufferBackingArray since they have similar aims?
  */
-public class NearbyCallers {
+public final class NearbyCallers {
   private NearbyCallers() {}
 
   // lifted from com.google.devtools.javatools.refactory.refaster.cleanups.proto.ProtoMatchers
   private static final Matcher<ExpressionTree> IS_IMMUTABLE_PROTO_GETTER =
-      instanceMethod()
-          .onDescendantOfAny(GeneratedMessage.class.getName(), GeneratedMessageLite.class.getName())
-          .withNameMatching(Pattern.compile("get(?!CachedSize$|SerializedSize$).+"))
-          .withParameters();
+      allOf(
+          instanceMethod()
+              .onDescendantOfAny(
+                  GeneratedMessage.class.getName(), GeneratedMessageLite.class.getName())
+              .withNameMatching(Pattern.compile("get.+"))
+              .withNoParameters(),
+          not(instanceMethod().anyClass().namedAnyOf("getCachedSize", "getSerializedSize")));
 
   /**
    * Returns whether or not there is a call matching {@code secondaryMethodMatcher} with the same
@@ -89,7 +95,7 @@ public class NearbyCallers {
 
           @Override
           public Boolean visitMethodInvocation(MethodInvocationTree secondaryMethod, Void unused) {
-            if (super.visitMethodInvocation(secondaryMethod, unused)) {
+            if (super.visitMethodInvocation(secondaryMethod, null)) {
               return true;
             }
             if (secondaryMethod == null
@@ -125,9 +131,8 @@ public class NearbyCallers {
 
             // build up a list of method invocations for both invocations
             return buildProtoGetterChain(primaryMethod, state)
-                .flatMap(
-                    primaryChain ->
-                        buildProtoGetterChain(secondaryMethod, state).map(primaryChain::equals))
+                .flatMap(primaryChain ->
+                    buildProtoGetterChain(secondaryMethod, state).map(primaryChain::equals))
                 .orElse(false);
           }
         };
@@ -151,8 +156,8 @@ public class NearbyCallers {
       if (!IS_IMMUTABLE_PROTO_GETTER.matches(expr, state)) {
         return Optional.empty();
       }
-      if (expr instanceof JCFieldAccess) {
-        expr = ((JCFieldAccess) expr).getExpression();
+      if (expr instanceof JCFieldAccess fieldAccess) {
+        expr = fieldAccess.getExpression();
       }
       symbolChain.add(ASTHelpers.getSymbol(expr));
     }
@@ -161,17 +166,15 @@ public class NearbyCallers {
 
   private static ImmutableList<Tree> getNearbyTreesToScan(VisitorState state) {
     for (Tree parent : state.getPath()) {
-      switch (parent.getKind()) {
-        case BLOCK:
+      switch (parent) {
+        case BlockTree blockTree -> {
           // if we reach a block tree, then _only_ scan that block
           return ImmutableList.of(parent);
-
-        case LAMBDA_EXPRESSION:
-          // if we reach a lambda tree, then don't scan anything since we don't know where/when that
-          // lambda will actually be executed.
+        }
+        case LambdaExpressionTree lambdaExpressionTree -> {
+          // if we reach a lambda tree, just scan the lambda body itself
           // TODO(glorioso): for simple expression lambdas, consider looking for use sites and scan
           // *those* sites, but binding the lambda variable to its use site might be rough :(
-
           // e.g.:
           //   Function<Duration, Long> NANOS = d -> d.getNano();
           //   Function<Duration, Long> SECONDS = d -> d.getSeconds();
@@ -179,24 +182,25 @@ public class NearbyCallers {
           //   long nanos = NANOS.apply(myDuration) + SECONDS.apply(myDuration) * 1_000_000L;
           //
           // how do we track myDuration through both layers?
-          return ImmutableList.of();
-
-        case CLASS:
+          return ImmutableList.of(lambdaExpressionTree.getBody());
+        }
+        case ClassTree classTree -> {
           // if we get all the way up to the class tree, then _only_ scan the other class-level
           // fields
           ImmutableList.Builder<Tree> treesToScan = ImmutableList.builder();
-          for (Tree member : ((ClassTree) parent).getMembers()) {
-            if (member instanceof VariableTree) {
-              ExpressionTree expressionTree = ((VariableTree) member).getInitializer();
+          for (Tree member : classTree.getMembers()) {
+            if (member instanceof VariableTree variableTree) {
+              ExpressionTree expressionTree = variableTree.getInitializer();
               if (expressionTree != null) {
                 treesToScan.add(expressionTree);
               }
             }
           }
           return treesToScan.build();
-
-        default:
-          // fall out, continue searching up the tree
+        }
+        default -> {
+          // continue searching up the tree
+        }
       }
     }
     return ImmutableList.of();

@@ -20,6 +20,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.matchers.method.MethodMatchers.anyMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.constructor;
 
 import com.google.errorprone.BugPattern;
@@ -31,6 +32,7 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.method.MethodMatchers;
 import com.google.errorprone.matchers.method.MethodMatchers.MethodNameMatcher;
+import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
@@ -44,7 +46,7 @@ import org.junit.runners.JUnit4;
 public class MethodMatchersTest {
 
   /** A bugchecker to test constructor matching. */
-  @BugPattern(name = "ConstructorDeleter", summary = "Deletes constructors", severity = ERROR)
+  @BugPattern(summary = "Deletes constructors", severity = ERROR)
   public static class ConstructorDeleter extends BugChecker
       implements BugChecker.MethodInvocationTreeMatcher,
           BugChecker.NewClassTreeMatcher,
@@ -81,14 +83,18 @@ public class MethodMatchersTest {
     CompilationTestHelper.newInstance(ConstructorDeleter.class, getClass())
         .addSourceLines(
             "test/Foo.java",
-            "package test;",
-            "public class Foo { ",
-            "  public Foo(String s) {}",
-            "  public Foo() {",
-            "    // BUG: Diagnostic contains:",
-            "    this(\"\");",
-            "  }",
-            "}")
+            """
+            package test;
+
+            public class Foo {
+              public Foo(String s) {}
+
+              public Foo() {
+                // BUG: Diagnostic contains:
+                this("");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -97,19 +103,25 @@ public class MethodMatchersTest {
     CompilationTestHelper.newInstance(ConstructorDeleter.class, getClass())
         .addSourceLines(
             "test/Foo.java",
-            "package test;",
-            "public class Foo { ",
-            "  public Foo(String s) {}",
-            "}")
+            """
+            package test;
+
+            public class Foo {
+              public Foo(String s) {}
+            }
+            """)
         .addSourceLines(
-            "test/Bar.java", //
-            "package test;",
-            "public class Bar extends Foo {",
-            "  public Bar() {",
-            "    // BUG: Diagnostic contains:",
-            "    super(\"\");",
-            "  }",
-            "}")
+            "test/Bar.java",
+            """
+            package test;
+
+            public class Bar extends Foo {
+              public Bar() {
+                // BUG: Diagnostic contains:
+                super("");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -118,13 +130,18 @@ public class MethodMatchersTest {
     CompilationTestHelper.newInstance(ConstructorDeleter.class, getClass())
         .addSourceLines(
             "test/Foo.java",
-            "package test;",
-            "import java.util.function.Function;",
-            "public class Foo { ",
-            "  public Foo(String s) {}",
-            "  // BUG: Diagnostic contains:",
-            "  private static final Function<String, Foo> make = Foo::new;",
-            "}")
+            """
+            package test;
+
+            import java.util.function.Function;
+
+            public class Foo {
+              public Foo(String s) {}
+
+              // BUG: Diagnostic contains:
+              private static final Function<String, Foo> make = Foo::new;
+            }
+            """)
         .doTest();
   }
 
@@ -133,19 +150,25 @@ public class MethodMatchersTest {
     CompilationTestHelper.newInstance(ConstructorDeleter.class, getClass())
         .addSourceLines(
             "test/Foo.java",
-            "package test;",
-            "public class Foo { ",
-            "  public Foo(String s) {}",
-            "}")
+            """
+            package test;
+
+            public class Foo {
+              public Foo(String s) {}
+            }
+            """)
         .addSourceLines(
-            "test/Test.java", //
-            "package test;",
-            "public class Test {",
-            "  public void f() {",
-            "    // BUG: Diagnostic contains:",
-            "    new Foo(\"\");",
-            "  }",
-            "}")
+            "test/Test.java",
+            """
+            package test;
+
+            public class Test {
+              public void f() {
+                // BUG: Diagnostic contains:
+                new Foo("");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -166,14 +189,22 @@ public class MethodMatchersTest {
   @Test
   public void varargsParameterMatcher() {
     CompilationTestHelper.newInstance(CrashyerMatcherTestChecker.class, getClass())
-        .addSourceLines("Lib.java", "abstract class Lib { ", "  void f(int x) {}", "}")
         .addSourceLines(
-            "test/Test.java", //
-            "class Test {",
-            "  void f(Lib l) {",
-            "    l.f(42);",
-            "  }",
-            "}")
+            "Lib.java",
+            """
+            abstract class Lib {
+              void f(int x) {}
+            }
+            """)
+        .addSourceLines(
+            "test/Test.java",
+            """
+            class Test {
+              void f(Lib l) {
+                l.f(42);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -212,29 +243,132 @@ public class MethodMatchersTest {
     CompilationTestHelper.newInstance(FlagMethodNamesChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void foo() {}",
-            "  void bar() {}",
-            "  static void fizz() {}",
-            "  static void buzz() {}",
-            "  void anotherMethod() {}",
-            "  static void yetAnother() {}",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: instance varargs",
-            "    this.foo();",
-            "    // BUG: Diagnostic contains: instance varargs",
-            "    this.bar();",
-            "    // BUG: Diagnostic contains: static varargs",
-            "    Test.fizz();",
-            "    // BUG: Diagnostic contains: static varargs",
-            "    Test.buzz();",
-            "    // BUG: Diagnostic contains: static varargs",
-            "    Runnable r = Test::fizz;",
-            "    // These ones are ok",
-            "    this.anotherMethod();",
-            "    Test.yetAnother();",
-            "  }",
-            "}")
+            """
+            class Test {
+              void foo() {}
+
+              void bar() {}
+
+              static void fizz() {}
+
+              static void buzz() {}
+
+              void anotherMethod() {}
+
+              static void yetAnother() {}
+
+              void f() {
+                // BUG: Diagnostic contains: instance varargs
+                this.foo();
+                // BUG: Diagnostic contains: instance varargs
+                this.bar();
+                // BUG: Diagnostic contains: static varargs
+                Test.fizz();
+                // BUG: Diagnostic contains: static varargs
+                Test.buzz();
+                // BUG: Diagnostic contains: static varargs
+                Runnable r = Test::fizz;
+                // These ones are ok
+                this.anotherMethod();
+                Test.yetAnother();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  /**
+   * BugChecker verifying that cheap constraints (staticness, exact name, arity) are checked before
+   * evaluating the class predicate.
+   */
+  @BugPattern(summary = "", severity = ERROR)
+  public static class ConstraintOrderChecker extends BugChecker
+      implements MethodInvocationTreeMatcher {
+    private static final Matcher<ExpressionTree> MATCHER =
+        instanceMethod()
+            .onClass((type, state) -> {
+              if (!type.tsym.getSimpleName().contentEquals("TargetOwner")) {
+                throw new AssertionError("Unexpected class check on " + type);
+              }
+              return true;
+            })
+            .named("target")
+            .withParameters("java.lang.String");
+
+    @Override
+    public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
+      return MATCHER.matches(tree, state) ? describeMatch(tree) : NO_MATCH;
+    }
+  }
+
+  @Test
+  public void constraintEvaluationOrder() {
+    CompilationTestHelper.newInstance(ConstraintOrderChecker.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            class OtherOwner {
+              void unrelated(String s) {}
+
+              void target() {}
+
+              void target(String a, String b) {}
+
+              static void target(String s) {}
+            }
+
+            class TargetOwner {
+              void target(String s) {}
+
+              void test(OtherOwner other) {
+                other.unrelated("a");
+                other.target();
+                other.target("a", "b");
+                OtherOwner.target("a");
+                // BUG: Diagnostic contains:
+                this.target("a");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  /** BugChecker verifying that method matchers return false for a null tree. */
+  @BugPattern(summary = "", severity = ERROR)
+  public static class NullReceiverChecker extends BugChecker
+      implements MethodInvocationTreeMatcher {
+    private static final Matcher<ExpressionTree> MATCHER =
+        Matchers.anyOf(
+            instanceMethod().anyClass().named("f"),
+            staticMethod().anyClass().named("f"),
+            anyMethod().anyClass().named("f"),
+            constructor().forClass("Test"));
+
+    @Override
+    public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
+      // getReceiver returns null for unqualified method invocations
+      return MATCHER.matches(ASTHelpers.getReceiver(tree), state) ? describeMatch(tree) : NO_MATCH;
+    }
+  }
+
+  @Test
+  public void nullTree() {
+    CompilationTestHelper.newInstance(NullReceiverChecker.class, getClass())
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              Test f() {
+                return this;
+              }
+
+              void test() {
+                f();
+                // BUG: Diagnostic contains:
+                f().f();
+              }
+            }
+            """)
         .doTest();
   }
 }

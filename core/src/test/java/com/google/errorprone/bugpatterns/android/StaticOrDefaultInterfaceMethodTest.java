@@ -22,7 +22,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author epmjohnston@google.com (Emily P.M. Johnston) */
+/**
+ * @author epmjohnston@google.com (Emily P.M. Johnston)
+ */
 @RunWith(JUnit4.class)
 public final class StaticOrDefaultInterfaceMethodTest {
 
@@ -31,38 +33,62 @@ public final class StaticOrDefaultInterfaceMethodTest {
           .setArgs(ImmutableList.of("-XDandroidCompatible=true"));
 
   @Test
-  public void testPositiveCaseDefault() {
+  public void positiveCaseDefault() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  // BUG: Diagnostic contains: StaticOrDefaultInterfaceMethod",
-            "  default void test() { System.out.println(); }",
-            "}")
+            """
+            interface Test {
+              // BUG: Diagnostic contains: StaticOrDefaultInterfaceMethod
+              default void test() {
+                System.out.println();
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCaseStatic() {
+  public void positiveCaseStatic() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "interface Test {",
-            "  // BUG: Diagnostic contains: StaticOrDefaultInterfaceMethod",
-            "  static void test() { System.out.println(); }",
-            "}")
+            """
+            interface Test {
+              // BUG: Diagnostic contains: StaticOrDefaultInterfaceMethod
+              static void test() {
+                System.out.println();
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseNoBody() {
-    compilationHelper.addSourceLines("Test.java", "interface Test { void test(); }").doTest();
+  public void negativeCaseNoBody() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            interface Test {
+              void test();
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCaseClass() {
+  public void negativeCaseClass() {
     compilationHelper
-        .addSourceLines("Test.java", "class Test {  static void test() { System.out.println(); } }")
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              static void test() {
+                System.out.println();
+              }
+            }
+            """)
         .doTest();
   }
 }

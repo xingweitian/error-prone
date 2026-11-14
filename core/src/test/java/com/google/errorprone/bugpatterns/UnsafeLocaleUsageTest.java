@@ -36,34 +36,78 @@ public class UnsafeLocaleUsageTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a) {",
-            "       locale = new Locale(a);",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh_hant_tw\");",
-            "",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = new Locale(a);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a) {",
-            "       locale = Locale.forLanguageTag(a.replace(\"_\", \"-\"));",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh_hant_tw\");",
-            "",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = Locale.forLanguageTag(a.replace('_', '-'));
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unsafeLocaleUsageCheck_localeOfUsageWithOneParam_shouldRefactorNonLiteralParam() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = Locale.of(a);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = Locale.forLanguageTag(a.replace('_', '-'));
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
         .doTest();
   }
 
@@ -72,18 +116,46 @@ public class UnsafeLocaleUsageTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  private static final Locale LOCALE = new Locale(\"zh_hant_tw\");",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE = new Locale("zh_hant_tw");
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  private static final Locale LOCALE = Locale.forLanguageTag(\"zh-hant-tw\");",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE = Locale.forLanguageTag("zh-hant-tw");
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unsafeLocaleUsageCheck_localeOfUsageWithOneParam_shouldRefactorLiteralParam() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE = Locale.of("zh_hant_tw");
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE = Locale.forLanguageTag("zh-hant-tw");
+            }
+            """)
         .doTest();
   }
 
@@ -92,34 +164,78 @@ public class UnsafeLocaleUsageTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a, String b) {",
-            "       locale = new Locale(a, b);",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh\", \"tw\");",
-            "",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b) {
+                  locale = new Locale(a, b);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw");
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a, String b) {",
-            "       locale = new Locale.Builder().setLanguage(a).setRegion(b).build();",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh\", \"tw\");",
-            "",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b) {
+                  locale = new Locale(a, b);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw");
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unsafeLocaleUsageCheck_localeOfUsageWithTwoParams_shouldRefactor() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b) {
+                  locale = Locale.of(a, b);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw");
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b) {
+                  locale = Locale.of(a, b);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw");
+            }
+            """)
         .doTest();
   }
 
@@ -128,20 +244,46 @@ public class UnsafeLocaleUsageTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a, String b, String c) {",
-            "       // BUG: Diagnostic contains: forLanguageTag(String)",
-            "       locale = new Locale(a, b, c);",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh\", \"tw\", \"hant\");",
-            "",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b, String c) {
+                  // BUG: Diagnostic contains: forLanguageTag(String)
+                  locale = new Locale(a, b, c);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw", "hant");
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unsafeLocaleUsageCheck_localeOfUsageWithThreeParams_shouldFlag() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a, String b, String c) {
+                  // BUG: Diagnostic contains: forLanguageTag(String)
+                  locale = Locale.of(a, b, c);
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh", "tw", "hant");
+            }
+            """)
         .doTest();
   }
 
@@ -150,55 +292,84 @@ public class UnsafeLocaleUsageTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a) {",
-            "       locale = Locale.forLanguageTag(a);",
-            "    }",
-            "",
-            "    String getLocaleDisplayString() {",
-            "       return locale.toString();",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh_hant_tw\");",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = Locale.forLanguageTag(a);
+                }
+
+                String getLocaleDisplayString() {
+                  return locale.toString();
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import java.util.Locale;",
-            "",
-            "class Test {",
-            "  static class Inner {",
-            "    private Locale locale;",
-            "    Inner(String a) {",
-            "       locale = Locale.forLanguageTag(a);",
-            "    }",
-            "",
-            "    String getLocaleDisplayString() {",
-            "       return locale.toLanguageTag();",
-            "    }",
-            "  }",
-            "",
-            "  private static final Test.Inner INNER_OBJ = new Inner(\"zh_hant_tw\");",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              static class Inner {
+                private Locale locale;
+
+                Inner(String a) {
+                  locale = Locale.forLanguageTag(a);
+                }
+
+                String getLocaleDisplayString() {
+                  return locale.toLanguageTag();
+                }
+              }
+
+              private static final Test.Inner INNER_OBJ = new Inner("zh_hant_tw");
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void unsafeLocaleUsageCheck_multipleErrors_shouldFlag() {
+  public void unsafeLocaleUsageCheck_multipleErrorsWithNew_shouldFlag() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Locale;",
-            "class Test {",
-            "    // BUG: Diagnostic contains: forLanguageTag(String)",
-            "    private static final Locale LOCALE = new Locale(",
-            "        // BUG: Diagnostic contains: toLanguageTag()",
-            "        Locale.TAIWAN.toString());",
-            "}")
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE =
+                  // BUG: Diagnostic contains: forLanguageTag(String)
+                  new Locale(
+                      // BUG: Diagnostic contains: toLanguageTag()
+                      Locale.TAIWAN.toString());
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void unsafeLocaleUsageCheck_multipleErrorsWithLocaleOf_shouldFlag() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.Locale;
+
+            class Test {
+              private static final Locale LOCALE =
+                  // BUG: Diagnostic contains: forLanguageTag(String)
+                  Locale.of(
+                      // BUG: Diagnostic contains: toLanguageTag()
+                      Locale.TAIWAN.toString());
+            }
+            """)
         .doTest();
   }
 
@@ -207,17 +378,20 @@ public class UnsafeLocaleUsageTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Locale;",
-            "import com.google.common.collect.ImmutableMap;",
-            "class Test {",
-            "  private static final ImmutableMap<String, Locale> INTERNAL_COUNTRY_CODE_TO_LOCALE =",
-            "    ImmutableMap.of(\"abc\", Locale.KOREAN);",
-            "  private static final String DISPLAY_NAME = getLocaleDisplayNameFromCode(\"abc\");",
-            "",
-            "  public static final String getLocaleDisplayNameFromCode(String code) {",
-            "    return INTERNAL_COUNTRY_CODE_TO_LOCALE.get(code).getDisplayName();",
-            "  }",
-            "}")
+            """
+            import com.google.common.collect.ImmutableMap;
+            import java.util.Locale;
+
+            class Test {
+              private static final ImmutableMap<String, Locale> INTERNAL_COUNTRY_CODE_TO_LOCALE =
+                  ImmutableMap.of("abc", Locale.KOREAN);
+              private static final String DISPLAY_NAME = getLocaleDisplayNameFromCode("abc");
+
+              public static final String getLocaleDisplayNameFromCode(String code) {
+                return INTERNAL_COUNTRY_CODE_TO_LOCALE.get(code).getDisplayName();
+              }
+            }
+            """)
         .doTest();
   }
 }

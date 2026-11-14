@@ -16,11 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static org.junit.Assume.assumeFalse;
-import static org.junit.Assume.assumeTrue;
-
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -35,101 +31,133 @@ public final class LiteEnumValueOfTest {
 
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(LiteEnumValueOf.class, getClass())
-          .addSourceFile("android/testdata/stubs/android/os/Parcel.java")
-          .addSourceFile("android/testdata/stubs/android/os/Parcelable.java")
           .addSourceLines(
               "FakeLiteEnum.java",
-              "enum FakeLiteEnum implements com.google.protobuf.Internal.EnumLite {",
-              "  FOO;",
-              "  @Override public int getNumber() {",
-              "    return 0;",
-              "  }",
-              "}");
+              """
+              package p;
+
+              public enum FakeLiteEnum implements com.google.protobuf.Internal.EnumLite {
+                FOO;
+
+                @Override
+                public int getNumber() {
+                  return 0;
+                }
+
+                public static FakeLiteEnum forNumber(int number) {
+                  return FOO;
+                }
+              }
+              """);
 
   @Test
-  public void testPositiveCase() {
+  public void positiveCase() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void test() {",
-            "    // BUG: Diagnostic contains:",
-            "    FakeLiteEnum.valueOf(\"FOO\");",
-            "    // BUG: Diagnostic contains:",
-            "    FakeLiteEnum.FOO.valueOf(\"FOO\");",
-            "  }",
-            "}")
+            """
+            class Test {
+              void test() {
+                // BUG: Diagnostic contains:
+                p.FakeLiteEnum.valueOf("FOO");
+                // BUG: Diagnostic contains:
+                p.FakeLiteEnum.FOO.valueOf("FOO");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
+  public void positiveCaseStaticImport() {
+    compilationHelper
+        .addSourceLines(
+            "TestStatic.java",
+            """
+            import static p.FakeLiteEnum.valueOf;
+
+            class TestStatic {
+              void test() {
+                // BUG: Diagnostic contains:
+                valueOf("FOO");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeCase() {
     compilationHelper
         .addSourceLines(
             "Usage.java",
-            "import com.google.errorprone.bugpatterns.proto.ProtoTest.TestEnum;",
-            "class Usage {",
-            "  private TestEnum testMethod() {",
-            "    return TestEnum.valueOf(\"FOO\");",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.bugpatterns.proto.ProtoTest.TestEnum;
+
+            class Usage {
+              private TestEnum testMethod() {
+                return TestEnum.valueOf("FOO");
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCaseJDK8OrEarlier() {
-    assumeFalse(RuntimeVersion.isAtLeast9());
-    testGeneratedAutoValueClass("javax.annotation.Generated");
+  public void negativeCaseNumericLookup() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void test() {
+                p.FakeLiteEnum.forNumber(0);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCaseJDK9OrAbove() {
-    assumeTrue(RuntimeVersion.isAtLeast9());
-    testGeneratedAutoValueClass("javax.annotation.processing.Generated");
-  }
-
-  private void testGeneratedAutoValueClass(String importClass) {
+  public void positiveCaseGeneratedByOther() {
     compilationHelper
         .addSourceLines(
-            "ProtoLiteEnum.java",
-            "enum ProtoLiteEnum {",
-            "  FOO(1),",
-            "  BAR(2);",
-            "  private final int number;",
-            "  private ProtoLiteEnum(int number) {",
-            "    this.number = number;",
-            "  }",
-            "  public int getNumber() {",
-            "    return number;",
-            "  }",
-            "}")
-        .addSourceLines("TestData.java", "class TestData {}")
-        .addSourceLines(
-            "$AutoValue_TestData.java",
-            "import " + importClass + ";",
-            "@Generated(\"com.google.auto.value.processor.AutoValueProcessor\")",
-            "class $AutoValue_TestData extends TestData {}")
+            "FakeGenerated.java",
+            """
+            import javax.annotation.processing.Generated;
+
+            @Generated("some.other.Generator")
+            class FakeGenerated {
+              void test() {
+                // BUG: Diagnostic contains:
+                p.FakeLiteEnum.valueOf("FOO");
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeGeneratedCaller() {
+    compilationHelper
         .addSourceLines(
             "AutoValue_TestData.java",
-            "import android.os.Parcel;",
-            "import android.os.Parcelable;",
-            "import com.google.errorprone.bugpatterns.proto.ProtoTest.TestEnum;",
-            "import " + importClass + ";",
-            "@Generated(\"com.ryanharter.auto.value.parcel.AutoValueParcelExtension\")",
-            "class AutoValue_TestData extends $AutoValue_TestData {",
-            "    AutoValue_TestData(ProtoLiteEnum protoLiteEnum) {}",
-            "    public static final Parcelable.Creator<AutoValue_TestData> CREATOR =",
-            "        new Parcelable.Creator<AutoValue_TestData>() {",
-            "          @Override",
-            "          public AutoValue_TestData createFromParcel(Parcel in) {",
-            "            return new AutoValue_TestData(ProtoLiteEnum.valueOf(\"FOO\"));",
-            "          }",
-            "          @Override",
-            "          public AutoValue_TestData[] newArray(int size) {",
-            "            return null;",
-            "          }",
-            "        };",
-            "}")
+            """
+            import javax.annotation.processing.Generated;
+
+            @Generated("com.ryanharter.auto.value.parcel.AutoValueParcelExtension")
+            class AutoValue_TestData {
+              void test() {
+                p.FakeLiteEnum.valueOf("FOO");
+              }
+
+              class Nested {
+                void test() {
+                  p.FakeLiteEnum.valueOf("FOO");
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

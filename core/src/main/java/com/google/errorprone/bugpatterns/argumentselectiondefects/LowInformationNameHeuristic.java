@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.VisitorState;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A heuristic for checking if a formal parameter matches a predefined set of words which have been
@@ -28,7 +29,7 @@ import com.sun.tools.javac.code.Symbol.MethodSymbol;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-class LowInformationNameHeuristic implements Heuristic {
+final class LowInformationNameHeuristic implements Heuristic {
 
   private static final ImmutableSet<String> DEFAULT_FORMAL_PARAMETER_EXCLUSION_REGEXS =
       ImmutableSet.of(
@@ -58,12 +59,10 @@ class LowInformationNameHeuristic implements Heuristic {
    * Return the first regular expression from the list of overloaded words which matches the
    * parameter name.
    */
-  protected String findMatch(Parameter parameter) {
-    for (String regex : overloadedNamesRegexs) {
-      if (parameter.name().matches(regex)) {
-        return regex;
-      }
-    }
-    return null;
+  protected @Nullable String findMatch(Parameter parameter) {
+    return overloadedNamesRegexs.stream()
+        .filter(r -> parameter.name().matches(r))
+        .findFirst()
+        .orElse(null);
   }
 }

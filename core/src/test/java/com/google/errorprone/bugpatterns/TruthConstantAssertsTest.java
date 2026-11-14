@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns;
 
 import com.google.errorprone.CompilationTestHelper;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -29,20 +28,128 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public final class TruthConstantAssertsTest {
-  CompilationTestHelper compilationHelper;
+  private final CompilationTestHelper compilationHelper =
+      CompilationTestHelper.newInstance(TruthConstantAsserts.class, getClass());
 
-  @Before
-  public void setUp() {
-    compilationHelper = CompilationTestHelper.newInstance(TruthConstantAsserts.class, getClass());
+  @Test
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "TruthConstantAssertsPositiveCases.java",
+"""
+package com.google.errorprone.bugpatterns.testdata;
+
+import static com.google.common.truth.Truth.assertThat;
+
+/**
+ * Positive test cases for TruthConstantAsserts check.
+ *
+ * @author bhagwani@google.com (Sumit Bhagwani)
+ */
+public class TruthConstantAssertsPositiveCases {
+
+  public void testAssertThat() {
+    // BUG: Diagnostic contains: assertThat(new TruthConstantAssertsPositiveCases()).isEqualTo(1);
+    assertThat(1).isEqualTo(new TruthConstantAssertsPositiveCases());
+
+    // BUG: Diagnostic contains: assertThat(someStaticMethod()).isEqualTo("my string");
+    assertThat("my string").isEqualTo(someStaticMethod());
+
+    // BUG: Diagnostic contains: assertThat(memberMethod()).isEqualTo(42);
+    assertThat(42).isEqualTo(memberMethod());
+
+    // BUG: Diagnostic contains: assertThat(someStaticMethod()).isEqualTo(42L);
+    assertThat(42L).isEqualTo(someStaticMethod());
+
+    // BUG: Diagnostic contains: assertThat(new Object()).isEqualTo(4.2);
+    assertThat(4.2).isEqualTo(new Object());
+  }
+
+  private static TruthConstantAssertsPositiveCases someStaticMethod() {
+    return new TruthConstantAssertsPositiveCases();
+  }
+
+  private TruthConstantAssertsPositiveCases memberMethod() {
+    return new TruthConstantAssertsPositiveCases();
+  }
+}
+""")
+        .doTest();
   }
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("TruthConstantAssertsPositiveCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "TruthConstantAssertsNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            import static com.google.common.truth.Truth.assertThat;
+
+            /**
+             * Negative test cases for TruthConstantAsserts check.
+             *
+             * @author bhagwani@google.com (Sumit Bhagwani)
+             */
+            public class TruthConstantAssertsNegativeCases {
+
+              public void testNegativeCases() {
+                assertThat(new TruthConstantAssertsNegativeCases()).isEqualTo(Boolean.TRUE);
+                assertThat(getObject()).isEqualTo(Boolean.TRUE);
+
+                // assertion called on constant with constant expectation is ignored.
+                assertThat(Boolean.FALSE).isEqualTo(4.2);
+              }
+
+              private static TruthConstantAssertsNegativeCases getObject() {
+                return new TruthConstantAssertsNegativeCases();
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("TruthConstantAssertsNegativeCases.java").doTest();
+  public void positiveCase_viaImmutableList() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static com.google.common.truth.Truth.assertThat;
+
+            import com.google.common.collect.ImmutableList;
+
+            public class Test {
+              public void test(Object a) {
+                // BUG: Diagnostic contains:
+                assertThat(ImmutableList.of(1, 2, 3)).isEqualTo(a);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveWithEnumOnLeftHandSide() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import static com.google.common.truth.Truth.assertThat;
+
+            public class Test {
+              enum TestEnum {
+                A,
+                B
+              }
+
+              public void test(Object a) {
+                // BUG: Diagnostic contains:
+                assertThat(TestEnum.A).isEqualTo(a);
+              }
+            }
+            """)
+        .doTest();
   }
 }

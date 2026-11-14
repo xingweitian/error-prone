@@ -33,7 +33,6 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
-import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.Name;
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -60,6 +59,7 @@ import java.time.chrono.ThaiBuddhistDate;
 import java.time.chrono.ThaiBuddhistEra;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAccessor;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -67,7 +67,6 @@ import java.util.Optional;
  * throw an {@code UnsupportedTemporalTypeException}.
  */
 @BugPattern(
-    name = "TemporalAccessorGetChronoField",
     summary = "TemporalAccessor.get() only works for certain values of ChronoField.",
     explanation =
         "TemporalAccessor.get(ChronoField) only works for certain values of ChronoField. E.g., "
@@ -130,14 +129,14 @@ public final class TemporalAccessorGetChronoField extends BugChecker
     if (params.size() != 1) {
       return Description.NO_MATCH;
     }
-    Name argType = params.get(0).type.tsym.getQualifiedName();
+    Name argType = params.getFirst().type.tsym.getQualifiedName();
     if (!argType.contentEquals("java.time.temporal.TemporalField")) {
       return Description.NO_MATCH;
     }
 
     String declaringType = sym.owner.getQualifiedName().toString();
     ImmutableList<ChronoField> invalidChronoFields = UNSUPPORTED.get(declaringType);
-    if (invalidChronoFields != null && isDefinitelyInvalidChronoField(tree, invalidChronoFields)) {
+    if (isDefinitelyInvalidChronoField(tree, invalidChronoFields)) {
       return describeMatch(tree);
     }
     return Description.NO_MATCH;
@@ -156,11 +155,12 @@ public final class TemporalAccessorGetChronoField extends BugChecker
   }
 
   private static Optional<String> getEnumName(ExpressionTree chronoField) {
-    if (chronoField instanceof IdentifierTree) { // e.g., SECOND_OF_DAY
-      return Optional.of(((IdentifierTree) chronoField).getName().toString());
+    if (chronoField instanceof IdentifierTree identifierTree) { // e.g., SECOND_OF_DAY
+      return Optional.of(identifierTree.getName().toString());
     }
-    if (chronoField instanceof MemberSelectTree) { // e.g., ChronoField.SECOND_OF_DAY
-      return Optional.of(((MemberSelectTree) chronoField).getIdentifier().toString());
+    if (chronoField
+        instanceof MemberSelectTree memberSelectTree) { // e.g., ChronoField.SECOND_OF_DAY
+      return Optional.of(memberSelectTree.getIdentifier().toString());
     }
     return Optional.empty();
   }

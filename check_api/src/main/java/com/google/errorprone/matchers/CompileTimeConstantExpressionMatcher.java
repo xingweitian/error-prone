@@ -16,22 +16,35 @@
 
 package com.google.errorprone.matchers;
 
-import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.errorprone.matchers.Matchers.anyOf;
-import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.matchers.Matchers.anything;
+import static com.google.errorprone.matchers.Matchers.nullLiteral;
+import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.matchers.Matchers.toType;
+import static com.google.errorprone.matchers.Matchers.typeCast;
+import static com.google.errorprone.util.ASTHelpers.constValue;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.isConsideredFinal;
+import static javax.lang.model.element.ElementKind.FIELD;
+import static javax.lang.model.element.ElementKind.PARAMETER;
 
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.annotations.CompileTimeConstant;
-import com.google.errorprone.suppliers.Supplier;
-import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.BinaryTree;
+import com.sun.source.tree.CaseTree.CaseKind;
 import com.sun.source.tree.ConditionalExpressionTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.ParenthesizedTree;
+import com.sun.source.tree.SwitchExpressionTree;
+import com.sun.source.tree.ThrowTree;
 import com.sun.source.tree.Tree;
+import com.sun.source.tree.Tree.Kind;
+import com.sun.source.tree.TypeCastTree;
 import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.tools.javac.code.Symbol;
-import javax.lang.model.element.ElementKind;
+import com.sun.tools.javac.code.Symbol.VarSymbol;
 
 /**
  * A matcher for compile-time-constant expressions.
@@ -41,33 +54,72 @@ import javax.lang.model.element.ElementKind;
  * <ol>
  *   <li>Any expression for which the Java compiler can determine a constant value at compile time.
  *   <li>The expression consisting of the literal {@code null}.
- *   <li>An expression consisting of a single identifier, where the identifier is a formal method
- *       parameter that is declared {@code final} and has the {@link CompileTimeConstant}
- *       annotation.
+ *   <li>An expression consisting of a single identifier, where the identifier has the {@link
+ *       CompileTimeConstant} annotation and is either:
+ *       <ul>
+ *         <li>A class field that is declared {@code final}.
+ *         <li>A formal parameter of a method or constructor, which is declared {@code final} or is
+ *             effectively final.
+ *       </ul>
+ *   <li>A {@link String} which is formed from the concatenation of other compile-time-constant
+ *       {@link String}s.
+ *   <li>A switch expression where all case bodies are compile-time constants.
+ *   <li>A conditional expression (a ? b : c) where both branches are compile-time constants.
+ *   <li>The result of an invocation of one of the following immutable collection factory methods,
+ *       where all arguments are compile-time constants:
+ *       <ul>
+ *         <li>{@code ImmutableList.of(...)}
+ *         <li>{@code ImmutableSet.of(...)}
+ *         <li>{@code ImmutableMap.of(...)}
+ *         <li>{@code ImmutableMultiset.of(...)}
+ *         <li>{@code ImmutableSortedSet.of(...)}
+ *         <li>{@code ImmutableSortedMap.of(...)}
+ *         <li>{@code List.of(...)}
+ *         <li>{@code Set.of(...)}
+ *         <li>{@code Map.of(...)}
+ *       </ul>
  * </ol>
  */
 public class CompileTimeConstantExpressionMatcher implements Matcher<ExpressionTree> {
 
-  private static final Supplier<Symbol> COMPILE_TIME_CONSTANT_ANNOTATION =
-      VisitorState.memoize(state -> state.getSymbolFromString(CompileTimeConstant.class.getName()));
+  private static final ClassName COMPILE_TIME_CONSTANT_ANNOTATION =
+      ClassName.of(CompileTimeConstant.class.getName());
 
-  private final Matcher<ExpressionTree> matcher =
-      Matchers.anyOf(
+  private static final Matcher<ExpressionTree> INSTANCE =
+      anyOf(
           // TODO(xtof): Consider utilising mdempsky's closed-over-addition matcher
           // (perhaps extended for other arithmetic operations).
           new ExpressionWithConstValueMatcher(),
-          Matchers.kindIs(Tree.Kind.NULL_LITERAL),
-          new FinalCompileTimeConstantIdentifierMatcher());
+          nullLiteral(),
+          // Allows passing a null literal to a method with a @CompileTimeConstant parameter
+          // when A) there's an overload of the method that takes a supertype of the parameter's
+          // type and B) the overload with the @CompileTimeConstant parameter specifically needs to
+          // be the overload that is called.
+          toType(TypeCastTree.class, typeCast(anything(), nullLiteral())));
+
+  public static Matcher<ExpressionTree> instance() {
+    return INSTANCE;
+  }
 
   @Override
   public boolean matches(ExpressionTree t, VisitorState state) {
-    return matcher.matches(t, state);
+    return INSTANCE.matches(t, state);
   }
 
   private static final Matcher<ExpressionTree> IMMUTABLE_FACTORY =
       anyOf(
-          staticMethod().onClass("com.google.common.collect.ImmutableList").named("of"),
-          staticMethod().onClass("com.google.common.collect.ImmutableSet").named("of"));
+          staticMethod()
+              .onClassAny(
+                  "com.google.common.collect.ImmutableList",
+                  "com.google.common.collect.ImmutableSet",
+                  "com.google.common.collect.ImmutableMap",
+                  "com.google.common.collect.ImmutableMultiset",
+                  "com.google.common.collect.ImmutableSortedSet",
+                  "com.google.common.collect.ImmutableSortedMap",
+                  "java.util.List",
+                  "java.util.Set",
+                  "java.util.Map")
+              .named("of"));
 
   /**
    * A matcher for {@link ExpressionTree}s for which the java compiler can compute a constant value
@@ -76,82 +128,72 @@ public class CompileTimeConstantExpressionMatcher implements Matcher<ExpressionT
   private static final class ExpressionWithConstValueMatcher implements Matcher<ExpressionTree> {
 
     @Override
-    public boolean matches(ExpressionTree t, VisitorState state) {
-      return firstNonNull(
-          t.accept(
-              new SimpleTreeVisitor<Boolean, Void>() {
-                @Override
-                public Boolean visitConditionalExpression(
-                    ConditionalExpressionTree tree, Void unused) {
-                  return reduce(
-                      tree.getTrueExpression().accept(this, null),
-                      tree.getFalseExpression().accept(this, null));
-                }
+    public boolean matches(ExpressionTree tree, VisitorState state) {
+      return tree.accept(
+          new SimpleTreeVisitor<Boolean, Void>() {
+            @Override
+            public Boolean visitConditionalExpression(ConditionalExpressionTree tree, Void unused) {
+              return tree.getTrueExpression().accept(this, null)
+                  && tree.getFalseExpression().accept(this, null);
+            }
 
-                @Override
-                public Boolean visitMethodInvocation(MethodInvocationTree node, Void unused) {
-                  if (!IMMUTABLE_FACTORY.matches(node, state)) {
-                    return false;
-                  }
-                  for (ExpressionTree argument : node.getArguments()) {
-                    if (!argument.accept(this, null)) {
-                      return false;
-                    }
-                  }
-                  return true;
-                }
+            @Override
+            public Boolean visitSwitchExpression(SwitchExpressionTree tree, Void unused) {
+              // This is intentionally quite restrictive: only accept bare values and throws.
+              return tree.getCases().stream()
+                  .allMatch(c ->
+                      c.getCaseKind().equals(CaseKind.RULE)
+                          && (c.getBody().accept(this, null) || c.getBody() instanceof ThrowTree));
+            }
 
-                @Override
-                protected Boolean defaultAction(Tree node, Void unused) {
-                  Object constValue = ASTHelpers.constValue(node);
-                  return constValue != null;
-                }
+            @Override
+            public Boolean visitMethodInvocation(MethodInvocationTree tree, Void unused) {
+              return IMMUTABLE_FACTORY.matches(tree, state)
+                  && tree.getArguments().stream().allMatch(a -> a.accept(this, null));
+            }
 
-                public Boolean reduce(Boolean lhs, Boolean rhs) {
-                  return firstNonNull(lhs, false) && firstNonNull(rhs, false);
-                }
-              },
-              null),
-          false);
+            @Override
+            public Boolean visitBinary(BinaryTree tree, Void unused) {
+              return defaultAction(tree, null)
+                  || (tree.getKind().equals(Kind.PLUS)
+                      && tree.getLeftOperand().accept(this, null)
+                      && tree.getRightOperand().accept(this, null));
+            }
+
+            @Override
+            public Boolean visitParenthesized(ParenthesizedTree tree, Void unused) {
+              return tree.getExpression().accept(this, null);
+            }
+
+            @Override
+            protected Boolean defaultAction(Tree node, Void unused) {
+              if (constValue(node) != null) {
+                return true;
+              }
+              if (!(getSymbol(node) instanceof VarSymbol varSymbol)) {
+                return false;
+              }
+              // Check that the symbol is a formal method/constructor parameter or a field.
+              if (varSymbol.getKind() != PARAMETER && varSymbol.getKind() != FIELD) {
+                return false;
+              }
+              // Check that the symbol is final
+              if (!isConsideredFinal(varSymbol)) {
+                return false;
+              }
+              // Check if the symbol has the @CompileTimeConstant annotation.
+              if (hasCompileTimeConstantAnnotation(state, varSymbol)) {
+                return true;
+              }
+              return false;
+            }
+          },
+          null);
     }
   }
 
-  /**
-   * A matcher that matches a {@code @CompileTimeConstant final} identifier}. These can either be a
-   * method parameter or a class field.
-   */
-  private static final class FinalCompileTimeConstantIdentifierMatcher
-      implements Matcher<ExpressionTree> {
-
-    @Override
-    public boolean matches(ExpressionTree t, VisitorState state) {
-      if (t.getKind() != Tree.Kind.IDENTIFIER) {
-        return false;
-      }
-      Symbol.VarSymbol varSymbol = (Symbol.VarSymbol) ASTHelpers.getSymbol(t);
-      Symbol owner = varSymbol.owner;
-      ElementKind ownerKind = owner.getKind();
-      // Check that the identifier is a formal method/constructor parameter or a class field.
-      if (ownerKind != ElementKind.METHOD
-          && ownerKind != ElementKind.CONSTRUCTOR
-          && ownerKind != ElementKind.CLASS) {
-        return false;
-      }
-      // Check that the symbol is final
-      if (!isConsideredFinal(varSymbol)) {
-        return false;
-      }
-      // Check if the symbol has the @CompileTimeConstant annotation.
-      if (hasCompileTimeConstantAnnotation(state, varSymbol)) {
-        return true;
-      }
-      return false;
-    }
-  }
-
-  // public since this is also used by CompileTimeConstantChecker.
   public static boolean hasCompileTimeConstantAnnotation(VisitorState state, Symbol symbol) {
-    Symbol annotation = COMPILE_TIME_CONSTANT_ANNOTATION.get(state);
+    Symbol annotation = COMPILE_TIME_CONSTANT_ANNOTATION.symbol(state);
     // If we can't look up the annotation in the current VisitorState, then presumably it couldn't
     // be present on a Symbol we're inspecting.
     return annotation != null && symbol.attribute(annotation) != null;

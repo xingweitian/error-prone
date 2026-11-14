@@ -1,4 +1,4 @@
-When testing for exceptions in junit, it is easy to forget the call to `fail()`:
+When testing for exceptions in JUnit, it is easy to forget the call to `fail()`:
 
 ```java
 try {
@@ -7,6 +7,29 @@ try {
 } catch (SomeException expected) {
   assertThat(expected).hasMessage("Operation failed");
 }
+```
+
+This is better:
+
+```java
+import static org.junit.Assert.fail;
+
+try {
+  someOperationThatShouldThrow();
+  fail();
+} catch (SomeException expected) {
+  assertThat(expected).hasMessage("Operation failed");
+}
+```
+
+But using `assertThrows` is preferable and the least error prone:
+
+```java
+import static org.junit.Assert.assertThrows;
+
+SomeException expected =
+    assertThrows(SomeException.class, () -> someOperationThatShouldThrow());
+assertThat(expected).hasMessage("Operation failed");
 ```
 
 Without the call to `fail()`, the test is broken: it will pass if the exception
@@ -58,5 +81,5 @@ characteristics are present:
 
 *   A field assignment in the catch block.
 *   A call to `assertTrue/False(boolean variable or field)` in the catch block.
-*   The last statement in the `try` block is an `assert*()` (that is not a noop:
-    `assertFalse(false)`, `assertTrue(true))` or `Mockito.verify()` call.
+*   The last statement in the `try` block is an `assert*()` (that is not a
+    noop): `assertFalse(false)`, `assertTrue(true))` or `Mockito.verify()` call.

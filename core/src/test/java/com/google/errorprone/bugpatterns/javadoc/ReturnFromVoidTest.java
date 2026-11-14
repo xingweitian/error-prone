@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns.javadoc;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,33 +32,39 @@ public final class ReturnFromVoidTest {
   public void returnsVoid() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /**",
-            "   * @return anything",
-            "   */",
-            "  void foo();",
-            "}")
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @return anything
+               */
+              void foo();
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** */",
-            "  void foo();",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            interface Test {
+              /** */
+              void foo();
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void negative() {
     CompilationTestHelper.newInstance(ReturnFromVoid.class, getClass())
         .addSourceLines(
-            "Test.java", //
-            "interface Test {",
-            "  /**",
-            "   * @return anything",
-            "   */",
-            "  int foo();",
-            "}")
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @return anything
+               */
+              int foo();
+            }
+            """)
         .doTest();
   }
 }

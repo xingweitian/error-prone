@@ -46,7 +46,7 @@ abstract class UAssignOp extends UExpression implements CompoundAssignmentTree {
           .put(Kind.OR_ASSIGNMENT, JCTree.Tag.BITOR_ASG)
           .put(Kind.AND_ASSIGNMENT, JCTree.Tag.BITAND_ASG)
           .put(Kind.XOR_ASSIGNMENT, JCTree.Tag.BITXOR_ASG)
-          .build();
+          .buildOrThrow();
 
   public static UAssignOp create(UExpression variable, Kind operator, UExpression expression) {
     checkArgument(
@@ -83,7 +83,7 @@ abstract class UAssignOp extends UExpression implements CompoundAssignmentTree {
   @Override
   public Choice<Unifier> visitCompoundAssignment(CompoundAssignmentTree assignOp, Unifier unifier) {
     return Choice.condition(getKind() == assignOp.getKind(), unifier)
-        .thenChoose(unifications(getVariable(), assignOp.getVariable()))
-        .thenChoose(unifications(getExpression(), assignOp.getExpression()));
+        .flatMap(unifications(getVariable(), assignOp.getVariable()))
+        .flatMap(unifications(getExpression(), assignOp.getExpression()));
   }
 }

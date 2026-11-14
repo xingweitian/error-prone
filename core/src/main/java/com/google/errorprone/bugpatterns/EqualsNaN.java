@@ -29,11 +29,12 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
-/** @author lowasser@google.com (Louis Wasserman) */
+/**
+ * @author lowasser@google.com (Louis Wasserman)
+ */
 @BugPattern(
-    name = "EqualsNaN",
     summary = "== NaN always returns false; use the isNaN methods instead",
     severity = ERROR)
 public class EqualsNaN extends BugChecker implements BinaryTreeMatcher {
@@ -41,14 +42,11 @@ public class EqualsNaN extends BugChecker implements BinaryTreeMatcher {
   public Description matchBinary(BinaryTree tree, VisitorState state) {
     String prefix;
     switch (tree.getKind()) {
-      case EQUAL_TO:
-        prefix = "";
-        break;
-      case NOT_EQUAL_TO:
-        prefix = "!";
-        break;
-      default:
+      case EQUAL_TO -> prefix = "";
+      case NOT_EQUAL_TO -> prefix = "!";
+      default -> {
         return Description.NO_MATCH;
+      }
     }
     JCExpression left = (JCExpression) tree.getLeftOperand();
     JCExpression right = (JCExpression) tree.getRightOperand();
@@ -76,8 +74,7 @@ public class EqualsNaN extends BugChecker implements BinaryTreeMatcher {
     return (source == null) ? tree.toString() : source;
   }
 
-  @Nullable
-  private static String matchNaN(ExpressionTree tree) {
+  private static @Nullable String matchNaN(ExpressionTree tree) {
     Symbol sym = ASTHelpers.getSymbol(tree);
     if (sym != null
         && sym.owner != null

@@ -24,7 +24,6 @@ import static com.google.errorprone.bugpatterns.TypeParameterNaming.TypeParamete
 import com.google.common.truth.Subject;
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.BugCheckerRefactoringTestHelper.FixChoosers;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
 import com.google.errorprone.bugpatterns.TypeParameterNaming.TypeParameterNamingClassification;
 import org.junit.Test;
@@ -45,11 +44,13 @@ public class TypeParameterNamingTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "// BUG: Diagnostic contains: TypeParameterNaming",
-            "class Test<BadName> {",
-            "  // BUG: Diagnostic contains: TypeParameterNaming",
-            "  public <T, Foo> void method(Exception e) {}",
-            "}")
+            """
+            // BUG: Diagnostic contains: TypeParameterNaming
+            class Test<BadName> {
+              // BUG: Diagnostic contains: TypeParameterNaming
+              public <T, Foo> void method(Exception e) {}
+            }
+            """)
         .doTest();
   }
 
@@ -58,24 +59,32 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "/** @param <BadName> bad name */",
-            "class Test<BadName> {",
-            "  public <T, Foo> void method(Foo f) {",
-            "    BadName bad = null;",
-            "    Foo d = f;",
-            "  }",
-            "}")
+            """
+            /**
+             * @param <BadName> bad name
+             */
+            class Test<BadName> {
+              public <T, Foo> void method(Foo f) {
+                BadName bad = null;
+                Foo d = f;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "/** @param <BadNameT> bad name */",
-            "class Test<BadNameT> {",
-            "  public <T, FooT> void method(FooT f) {",
-            "    BadNameT bad = null;",
-            "    FooT d = f;",
-            "  }",
-            "}")
+            """
+            /**
+             * @param <BadNameT> bad name
+             */
+            class Test<BadNameT> {
+              public <T, FooT> void method(FooT f) {
+                BadNameT bad = null;
+                FooT d = f;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.FIRST)
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
   }
 
   @Test
@@ -83,24 +92,32 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test<BadName> {",
-            "  /** @param <Foo> foo */",
-            "  public <T, Foo> void method(Foo f) {",
-            "    BadName bad = null;",
-            "    Foo d = f;",
-            "  }",
-            "}")
+            """
+            class Test<BadName> {
+              /**
+               * @param <Foo> foo
+               */
+              public <T, Foo> void method(Foo f) {
+                BadName bad = null;
+                Foo d = f;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test<B> {",
-            "  /** @param <F> foo */",
-            "  public <T, F> void method(F f) {",
-            "    B bad = null;",
-            "    F d = f;",
-            "  }",
-            "}")
+            """
+            class Test<B> {
+              /**
+               * @param <F> foo
+               */
+              public <T, F> void method(F f) {
+                B bad = null;
+                F d = f;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
   }
 
   @Test
@@ -108,20 +125,24 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test<Bar> {",
-            "  public <T, Baz> void method(Baz f) {",
-            "    Bar bad = null;",
-            "    Baz d = f;",
-            "  }",
-            "}")
+            """
+            class Test<Bar> {
+              public <T, Baz> void method(Baz f) {
+                Bar bad = null;
+                Baz d = f;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test<B> {",
-            "  public <T, B2> void method(B2 f) {",
-            "    B bad = null;",
-            "    B2 d = f;",
-            "  }",
-            "}")
+            """
+            class Test<B> {
+              public <T, B2> void method(B2 f) {
+                B bad = null;
+                B2 d = f;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
         .doTest();
   }
@@ -131,22 +152,26 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test<Bar> {",
-            "  public <T, Baz, Boo> void method(Baz f) {",
-            "    Bar bad = null;",
-            "    Baz d = f;",
-            "    Boo wow = null;",
-            "  }",
-            "}")
+            """
+            class Test<Bar> {
+              public <T, Baz, Boo> void method(Baz f) {
+                Bar bad = null;
+                Baz d = f;
+                Boo wow = null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test<B> {",
-            "  public <T, B2, B3> void method(B2 f) {",
-            "    B bad = null;",
-            "    B2 d = f;",
-            "    B3 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test<B> {
+              public <T, B2, B3> void method(B2 f) {
+                B bad = null;
+                B2 d = f;
+                B3 wow = null;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
         .doTest();
   }
@@ -156,20 +181,24 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  public <T, Baz, Boo> void method(Baz f) {",
-            "    Baz d = f;",
-            "    Boo wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <T, Baz, Boo> void method(Baz f) {
+                Baz d = f;
+                Boo wow = null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  public <T, B, B2> void method(B f) {",
-            "    B d = f;",
-            "    B2 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <T, B, B2> void method(B f) {
+                B d = f;
+                B2 wow = null;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
         .doTest();
   }
@@ -179,20 +208,24 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  public <B, B2, B3, B4, Bad> void method(Bad f) {",
-            "    Bad d = f;",
-            "    B2 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <B, B2, B3, B4, Bad> void method(Bad f) {
+                Bad d = f;
+                B2 wow = null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  public <B, B2, B3, B4, B5> void method(B5 f) {",
-            "    B5 d = f;",
-            "    B2 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <B, B2, B3, B4, B5> void method(B5 f) {
+                B5 d = f;
+                B2 wow = null;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
         .doTest();
   }
@@ -202,20 +235,24 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  public <B, Bad, B2> void method(Bad f) {",
-            "    Bad d = f;",
-            "    B2 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <B, Bad, B2> void method(Bad f) {
+                Bad d = f;
+                B2 wow = null;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  public <B, B3, B2> void method(B3 f) {",
-            "    B3 d = f;",
-            "    B2 wow = null;",
-            "  }",
-            "}")
+            """
+            class Test {
+              public <B, B3, B2> void method(B3 f) {
+                B3 d = f;
+                B2 wow = null;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.SECOND)
         .doTest();
   }
@@ -225,43 +262,51 @@ public class TypeParameterNamingTest {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test<RESP> {",
-            "  public <TBaz, Foo> void method(Foo f) {",
-            "    TBaz bad = null;",
-            "    Foo d = f;",
-            "  }",
-            "}")
+            """
+            class Test<RESP> {
+              public <TBaz, Foo> void method(Foo f) {
+                TBaz bad = null;
+                Foo d = f;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test<RespT> {",
-            "  public <BazT, FooT> void method(FooT f) {",
-            "    BazT bad = null;",
-            "    FooT d = f;",
-            "  }",
-            "}")
+            """
+            class Test<RespT> {
+              public <BazT, FooT> void method(FooT f) {
+                BazT bad = null;
+                FooT d = f;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.FIRST)
         .doTest();
   }
 
   @Test
-  public void refactoring_TSuffixes() {
+  public void refactoring_tSuffixes() {
     refactoring
         .addInputLines(
             "in/Test.java",
-            "class Test<RESP> {",
-            "  public <FOOT, BART> void method(FOOT f) {",
-            "    BART bad = null;",
-            "    FOOT d = f;",
-            "  }",
-            "}")
+            """
+            class Test<RESP> {
+              public <FOOT, BART> void method(FOOT f) {
+                BART bad = null;
+                FOOT d = f;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test<RespT> {",
-            "  public <F, B> void method(F f) {",
-            "    B bad = null;",
-            "    F d = f;",
-            "  }",
-            "}")
+            """
+            class Test<RespT> {
+              public <F, B> void method(F f) {
+                B bad = null;
+                F d = f;
+              }
+            }
+            """)
         .setFixChooser(FixChoosers.FIRST)
         .doTest();
   }
@@ -271,12 +316,15 @@ public class TypeParameterNamingTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.ArrayList;",
-            "class Test<MyClassVarT> {",
-            "  public <T, T3, SomeOtherT> void method(Exception e) {",
-            "    ArrayList<String> dontCheckTypeArguments = new ArrayList<String>();",
-            "  }",
-            "}")
+            """
+            import java.util.ArrayList;
+
+            class Test<MyClassVarT> {
+              public <T, T3, SomeOtherT> void method(Exception e) {
+                ArrayList<String> dontCheckTypeArguments = new ArrayList<String>();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -285,12 +333,13 @@ public class TypeParameterNamingTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.ArrayList;",
-            "class Test<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> {",
-            "  public <T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> void method(Exception e) {",
-            "    T10 t = null;",
-            "  }",
-            "}")
+            """
+            class Test<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> {
+              public <T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> void method(Exception e) {
+                T10 t = null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -298,19 +347,21 @@ public class TypeParameterNamingTest {
   public void refactoring_underscore() {
     refactoring
         .addInputLines(
-            "in/Test.java", //
-            "class Test {",
-            "  public <_T> void method(_T t) {",
-            "  }",
-            "}")
+            "in/Test.java",
+            """
+            class Test {
+              public <_T> void method(_T t) {}
+            }
+            """)
         .addOutputLines(
-            "in/Test.java", //
-            "class Test {",
-            "  public <T> void method(T t) {",
-            "  }",
-            "}")
+            "in/Test.java",
+            """
+            class Test {
+              public <T> void method(T t) {}
+            }
+            """)
         .setFixChooser(FixChoosers.FIRST)
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
   }
 
   @Test

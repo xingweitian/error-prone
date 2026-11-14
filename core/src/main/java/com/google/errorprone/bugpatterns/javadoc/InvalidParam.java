@@ -17,13 +17,17 @@
 package com.google.errorprone.bugpatterns.javadoc;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.diagnosticPosition;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.getBestMatch;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.getDocComment;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.getDocTreePath;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.replace;
+import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.names.LevenshteinEditDistance.getEditDistance;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isRecord;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -32,6 +36,7 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
+import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.sun.source.doctree.DocTree;
 import com.sun.source.doctree.DocTree.Kind;
@@ -43,9 +48,10 @@ import com.sun.source.tree.Tree;
 import com.sun.source.util.DocTreePath;
 import com.sun.source.util.DocTreePathScanner;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
+import com.sun.tools.javac.tree.DCTree.DCText;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
+import org.safere.Pattern;
 
 /**
  * Matches incorrect Javadoc {@literal @}param tags.
@@ -55,7 +61,6 @@ import java.util.regex.Pattern;
 // TODO(ghm): Split this into the @param part and the @code part; the former is always right that
 // there's a mistake, but the latter is based on a heuristic.
 @BugPattern(
-    name = "InvalidParam",
     summary = "This @param tag doesn't refer to a parameter of the method.",
     severity = WARNING,
     documentSuppression = false)
@@ -75,14 +80,21 @@ public final class InvalidParam extends BugChecker implements ClassTreeMatcher, 
   public Description matchClass(ClassTree classTree, VisitorState state) {
     DocTreePath path = getDocTreePath(state);
     if (path != null) {
-      ImmutableSet<String> parameters = ImmutableSet.of();
+      ImmutableSet<String> parameters =
+          isRecord(getSymbol((Tree) classTree))
+              ? getCanonicalRecordConstructor(classTree).getParameters().stream()
+                  .map(p -> p.getName().toString())
+                  .collect(toImmutableSet())
+              : ImmutableSet.of();
+
       ImmutableSet<String> typeParameters =
           classTree.getTypeParameters().stream()
               .map(t -> t.getName().toString())
               .collect(toImmutableSet());
+
       new ParamsChecker(state, classTree, parameters, typeParameters).scan(path, null);
     }
-    return Description.NO_MATCH;
+    return NO_MATCH;
   }
 
   @Override
@@ -99,7 +111,15 @@ public final class InvalidParam extends BugChecker implements ClassTreeMatcher, 
               .collect(toImmutableSet());
       new ParamsChecker(state, methodTree, parameters, typeParameters).scan(path, null);
     }
-    return Description.NO_MATCH;
+    return NO_MATCH;
+  }
+
+  private static MethodTree getCanonicalRecordConstructor(ClassTree classTree) {
+    return classTree.getMembers().stream()
+        .filter(MethodTree.class::isInstance)
+        .map(MethodTree.class::cast)
+        .filter(tree -> isRecord(getSymbol((Tree) tree)))
+        .collect(onlyElement());
   }
 
   /** Checks that documented parameters match the method's parameter list. */
@@ -130,8 +150,22 @@ public final class InvalidParam extends BugChecker implements ClassTreeMatcher, 
     @Override
     public Void visitParam(ParamTree paramTree, Void unused) {
       ImmutableSet<String> paramNames = paramTree.isTypeParameter() ? typeParameters : parameters;
+      if (!paramTree.getDescription().isEmpty()) {
+        var firstDescription = paramTree.getDescription().getFirst();
+        if (firstDescription instanceof DCText dcText) {
+          if (dcText.getBody().startsWith(":")) {
+            int colonLocation = Utils.getEndPosition(paramTree.getName(), state);
+            if (state.getSourceCode().charAt(colonLocation) == ':') {
+              state.reportMatch(
+                  describeMatch(
+                      diagnosticPosition(getCurrentPath(), state),
+                      SuggestedFix.replace(colonLocation, colonLocation + 1, "")));
+            }
+          }
+        }
+      }
       if (!paramNames.contains(paramTree.getName().toString())) {
-        ImmutableSet<String> documentedParamNames =
+        var documentedParamNames =
             paramTree.isTypeParameter() ? documentedTypeParameters : documentedParameters;
         Set<String> undocumentedParameters = Sets.difference(paramNames, documentedParamNames);
         Optional<String> bestMatch =
@@ -140,12 +174,11 @@ public final class InvalidParam extends BugChecker implements ClassTreeMatcher, 
         String message = String.format("Parameter name `%s` is unknown.", paramTree.getName());
         state.reportMatch(
             bestMatch
-                .map(
-                    bm ->
-                        buildDescription(diagnosticPosition(getCurrentPath(), state))
-                            .setMessage(message + String.format(" Did you mean %s?", bm))
-                            .addFix(replace(paramTree.getName(), bm, state))
-                            .build())
+                .map(bm ->
+                    buildDescription(diagnosticPosition(getCurrentPath(), state))
+                        .setMessage(message + String.format(" Did you mean %s?", bm))
+                        .addFix(replace(paramTree.getName(), bm, state))
+                        .build())
                 .orElse(
                     buildDescription(diagnosticPosition(getCurrentPath(), state))
                         .setMessage(message)
@@ -195,10 +228,9 @@ public final class InvalidParam extends BugChecker implements ClassTreeMatcher, 
       DCDocComment docCommentTree, boolean isTypeParameter) {
     ImmutableSet.Builder<String> parameters = ImmutableSet.builder();
     for (DocTree docTree : docCommentTree.getBlockTags()) {
-      if (!(docTree instanceof ParamTree)) {
+      if (!(docTree instanceof ParamTree paramTree)) {
         continue;
       }
-      ParamTree paramTree = (ParamTree) docTree;
       if (paramTree.isTypeParameter() == isTypeParameter) {
         parameters.add(paramTree.getName().getName().toString());
       }

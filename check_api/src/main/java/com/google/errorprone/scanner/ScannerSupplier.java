@@ -16,11 +16,14 @@
 
 package com.google.errorprone.scanner;
 
+import static com.google.common.collect.ImmutableListMultimap.flatteningToImmutableListMultimap;
+
 import com.google.common.base.Predicate;
 import com.google.common.base.Supplier;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -61,7 +64,7 @@ public abstract class ScannerSupplier implements Supplier<Scanner> {
     for (BugCheckerInfo check : checkers) {
       severities.put(check.canonicalName(), check.defaultSeverity());
     }
-    return severities.build();
+    return severities.buildOrThrow();
   }
 
   /** Returns a {@link ScannerSupplier} with a specific list of {@link BugChecker} classes. */
@@ -138,12 +141,14 @@ public abstract class ScannerSupplier implements Supplier<Scanner> {
    */
   @CheckReturnValue
   public ScannerSupplier applyOverrides(ErrorProneOptions errorProneOptions) {
-    Map<String, Severity> severityOverrides = errorProneOptions.getSeverityMap();
+    ImmutableMap<String, Severity> severityOverrides = errorProneOptions.getSeverityMap();
     if (severityOverrides.isEmpty()
         && errorProneOptions.getFlags().isEmpty()
         && !errorProneOptions.isEnableAllChecksAsWarnings()
         && !errorProneOptions.isDropErrorsToWarnings()
-        && !errorProneOptions.isDisableAllChecks()) {
+        && !errorProneOptions.isDisableAllChecks()
+        && !errorProneOptions.isDisableAllWarnings()
+        && !errorProneOptions.isSuggestionsAsWarnings()) {
       return this;
     }
 
@@ -159,66 +164,74 @@ public abstract class ScannerSupplier implements Supplier<Scanner> {
     }
 
     if (errorProneOptions.isDropErrorsToWarnings()) {
-      getAllChecks().values().stream()
+      checks.values().stream()
           .filter(c -> c.defaultSeverity() == SeverityLevel.ERROR && c.disableable())
           .forEach(c -> severities.put(c.canonicalName(), SeverityLevel.WARNING));
     }
 
-    if (errorProneOptions.isDisableAllWarnings()) {
+    if (errorProneOptions.isSuggestionsAsWarnings()) {
       getAllChecks().values().stream()
+          .filter(c -> c.defaultSeverity() == SeverityLevel.SUGGESTION)
+          .forEach(c -> severities.put(c.canonicalName(), SeverityLevel.WARNING));
+    }
+
+    if (errorProneOptions.isDisableAllWarnings()) {
+      checks.values().stream()
           .filter(c -> c.defaultSeverity() == SeverityLevel.WARNING)
           .forEach(c -> disabled.add(c.canonicalName()));
     }
     if (errorProneOptions.isDisableAllChecks()) {
-      getAllChecks().values().stream()
+      checks.values().stream()
           .filter(c -> c.disableable())
           .forEach(c -> disabled.add(c.canonicalName()));
     }
 
-    // Process overrides
-    severityOverrides.forEach(
-        (checkName, newSeverity) -> {
-          BugCheckerInfo check = getAllChecks().get(checkName);
-          if (check == null) {
-            if (errorProneOptions.ignoreUnknownChecks()) {
-              return;
-            }
-            throw new InvalidCommandLineOptionException(checkName + " is not a valid checker name");
-          }
+    ImmutableListMultimap<String, BugCheckerInfo> checksByAltName =
+        checks.values().stream()
+            .collect(flatteningToImmutableListMultimap(x -> x, c -> c.allNames().stream()))
+            .inverse();
 
-          switch (newSeverity) {
-            case OFF:
-              if (!check.disableable()) {
-                throw new InvalidCommandLineOptionException(
-                    check.canonicalName() + " may not be disabled");
-              }
-              severities.remove(check.canonicalName());
-              disabled.add(check.canonicalName());
-              break;
-            case DEFAULT:
-              severities.put(check.canonicalName(), check.defaultSeverity());
-              disabled.remove(check.canonicalName());
-              break;
-            case WARN:
-              // Demoting an enabled check from an error to a warning is a form of disabling
-              if (!disabled().contains(check.canonicalName())
-                  && !check.disableable()
-                  && check.defaultSeverity() == SeverityLevel.ERROR) {
-                throw new InvalidCommandLineOptionException(
-                    check.canonicalName()
-                        + " is not disableable and may not be demoted to a warning");
-              }
-              severities.put(check.canonicalName(), SeverityLevel.WARNING);
-              disabled.remove(check.canonicalName());
-              break;
-            case ERROR:
-              severities.put(check.canonicalName(), SeverityLevel.ERROR);
-              disabled.remove(check.canonicalName());
-              break;
-            default:
-              throw new IllegalStateException("Unexpected severity level: " + newSeverity);
+    // Process overrides
+    severityOverrides.forEach((checkName, newSeverity) -> {
+      if (!checksByAltName.containsKey(checkName)) {
+        if (errorProneOptions.ignoreUnknownChecks()) {
+          return;
+        }
+        throw new InvalidCommandLineOptionException(checkName + " is not a valid checker name");
+      }
+      for (BugCheckerInfo check : checksByAltName.get(checkName)) {
+        switch (newSeverity) {
+          case OFF -> {
+            if (!check.disableable()) {
+              throw new InvalidCommandLineOptionException(
+                  check.canonicalName() + " may not be disabled");
+            }
+            severities.remove(check.canonicalName());
+            disabled.add(check.canonicalName());
           }
-        });
+          case DEFAULT -> {
+            severities.put(check.canonicalName(), check.defaultSeverity());
+            disabled.remove(check.canonicalName());
+          }
+          case WARN -> {
+            // Demoting an enabled check from an error to a warning is a form of disabling
+            if (!disabled().contains(check.canonicalName())
+                && !check.disableable()
+                && check.defaultSeverity() == SeverityLevel.ERROR) {
+              throw new InvalidCommandLineOptionException(
+                  check.canonicalName()
+                      + " is not disableable and may not be demoted to a warning");
+            }
+            severities.put(check.canonicalName(), SeverityLevel.WARNING);
+            disabled.remove(check.canonicalName());
+          }
+          case ERROR -> {
+            severities.put(check.canonicalName(), SeverityLevel.ERROR);
+            disabled.remove(check.canonicalName());
+          }
+        }
+      }
+    });
 
     flagsMap.putAll(errorProneOptions.getFlags().getFlagsMap());
 
@@ -239,32 +252,30 @@ public abstract class ScannerSupplier implements Supplier<Scanner> {
     HashBiMap<String, BugCheckerInfo> combinedAllChecks = HashBiMap.create(this.getAllChecks());
     other
         .getAllChecks()
-        .forEach(
-            (k, v) -> {
-              BugCheckerInfo existing = combinedAllChecks.putIfAbsent(k, v);
-              if (existing != null
-                  && !existing.checkerClass().getName().contentEquals(v.checkerClass().getName())) {
-                throw new IllegalArgumentException(
-                    String.format(
-                        "Cannot combine scanner suppliers with different implementations of"
-                            + " '%s': %s, %s",
-                        k, v.checkerClass().getName(), existing.checkerClass().getName()));
-              }
-            });
+        .forEach((k, v) -> {
+          BugCheckerInfo existing = combinedAllChecks.putIfAbsent(k, v);
+          if (existing != null
+              && !existing.checkerClass().getName().contentEquals(v.checkerClass().getName())) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "Cannot combine scanner suppliers with different implementations of"
+                        + " '%s': %s, %s",
+                    k, v.checkerClass().getName(), existing.checkerClass().getName()));
+          }
+        });
     HashMap<String, SeverityLevel> combinedSeverities = new LinkedHashMap<>(this.severities());
     other
         .severities()
-        .forEach(
-            (k, v) -> {
-              SeverityLevel existing = combinedSeverities.putIfAbsent(k, v);
-              if (existing != null && !existing.equals(v)) {
-                throw new IllegalArgumentException(
-                    String.format(
-                        "Cannot combine scanner suppliers with different severities for"
-                            + " '%s': %s, %s",
-                        k, v, existing));
-              }
-            });
+        .forEach((k, v) -> {
+          SeverityLevel existing = combinedSeverities.putIfAbsent(k, v);
+          if (existing != null && !existing.equals(v)) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "Cannot combine scanner suppliers with different severities for"
+                        + " '%s': %s, %s",
+                    k, v, existing));
+          }
+        });
     ImmutableSet<String> disabled =
         Sets.difference(combinedAllChecks.keySet(), Sets.union(enabled(), other.enabled()))
             .immutableCopy();
@@ -284,7 +295,7 @@ public abstract class ScannerSupplier implements Supplier<Scanner> {
   public ScannerSupplier filter(Predicate<? super BugCheckerInfo> predicate) {
     ImmutableSet<String> disabled =
         getAllChecks().values().stream()
-            .filter(predicate.negate())
+            .filter(bci -> disabled().contains(bci.canonicalName()) || !predicate.test(bci))
             .map(BugCheckerInfo::canonicalName)
             .collect(ImmutableSet.toImmutableSet());
     return new ScannerSupplierImpl(getAllChecks(), severities(), disabled, getFlags());

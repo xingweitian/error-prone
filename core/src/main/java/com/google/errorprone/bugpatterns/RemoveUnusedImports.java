@@ -15,13 +15,16 @@
  */
 package com.google.errorprone.bugpatterns;
 
-import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.getEnclosedElements;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.isSameType;
+import static com.google.errorprone.util.MoreAnnotations.asElement;
+import static java.util.stream.Collectors.joining;
 
-import com.google.common.base.Joiner;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSetMultimap;
 import com.google.errorprone.BugPattern;
@@ -34,9 +37,15 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.doctree.DocCommentTree;
 import com.sun.source.doctree.ReferenceTree;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ConstantCaseLabelTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.SwitchExpressionTree;
+import com.sun.source.tree.SwitchTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.DocTreePath;
 import com.sun.source.util.DocTreePathScanner;
@@ -44,47 +53,57 @@ import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Types;
+import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import com.sun.tools.javac.code.Symbol.VarSymbol;
+import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.DCTree.DCReference;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
-import javax.annotation.Nullable;
+import java.util.List;
+import java.util.Set;
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.element.AnnotationValue;
+import javax.lang.model.element.Name;
+import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.SimpleAnnotationValueVisitor8;
+import org.jspecify.annotations.Nullable;
 
-/** @author gak@google.com (Gregory Kick) */
+/**
+ * @author gak@google.com (Gregory Kick)
+ */
 @BugPattern(
-    name = "RemoveUnusedImports",
     summary = "Unused imports",
     severity = SUGGESTION,
     documentSuppression = false,
     tags = StandardTags.STYLE)
 public final class RemoveUnusedImports extends BugChecker implements CompilationUnitTreeMatcher {
-
-  private static final Joiner COMMA_JOINER = Joiner.on(", ");
-
   @Override
+  @SuppressWarnings("TreeToString")
   public Description matchCompilationUnit(
       CompilationUnitTree compilationUnitTree, VisitorState state) {
-    final ImmutableSetMultimap<ImportTree, Symbol> importedSymbols =
+    ImmutableSetMultimap<ImportTree, Symbol> importedSymbols =
         getImportedSymbols(compilationUnitTree, state);
 
     if (importedSymbols.isEmpty()) {
       return NO_MATCH;
     }
 
-    final LinkedHashSet<ImportTree> unusedImports = new LinkedHashSet<>(importedSymbols.keySet());
-    new TreeSymbolScanner(JavacTrees.instance(state.context), state.getTypes())
-        .scan(
-            compilationUnitTree,
-            new SymbolSink() {
-              @Override
-              public boolean keepScanning() {
-                return !unusedImports.isEmpty();
-              }
+    LinkedHashSet<ImportTree> unusedImports = new LinkedHashSet<>(importedSymbols.keySet());
+    var scanner = new TreeSymbolScanner(JavacTrees.instance(state.context), state);
+    scanner.scan(
+        compilationUnitTree,
+        new SymbolSink() {
+          @Override
+          public boolean keepScanning() {
+            return !unusedImports.isEmpty();
+          }
 
-              @Override
-              public void accept(Symbol symbol) {
-                unusedImports.removeAll(importedSymbols.inverse().get(symbol));
-              }
-            });
+          @Override
+          public void accept(Symbol symbol) {
+            unusedImports.removeAll(importedSymbols.inverse().get(symbol));
+          }
+        });
 
     if (unusedImports.isEmpty()) {
       return NO_MATCH;
@@ -93,15 +112,42 @@ public final class RemoveUnusedImports extends BugChecker implements Compilation
     for (ImportTree unusedImport : unusedImports) {
       fixBuilder.delete(unusedImport);
     }
-    ImmutableList<String> unusedImportQualifiedNames =
+    ImmutableSet<String> unusedImportSimpleNames =
         unusedImports.stream()
-            .map(tree -> state.getSourceForNode(tree.getQualifiedIdentifier()))
-            .collect(toImmutableList());
+            .map(tree -> getSimpleName(tree).toString())
+            .collect(toImmutableSet());
+    ImmutableSetMultimap<String, String> actualMeanings =
+        actualMeanings(unusedImportSimpleNames, state);
     return buildDescription(unusedImports.iterator().next())
         .addFix(fixBuilder.build())
         .setMessage(
-            String.format("Unused imports: %s", COMMA_JOINER.join(unusedImportQualifiedNames)))
+            "Unused imports: "
+                + unusedImports.stream()
+                    .map(tree -> {
+                      String name = state.getSourceForNode(tree.getQualifiedIdentifier());
+                      var meanings = actualMeanings.get(getSimpleName(tree).toString());
+                      if (importedSymbols.get(tree).stream()
+                          .anyMatch(scanner.enumConstantCaseUsages::contains)) {
+                        return String.format(
+                            "%s (this is an enum constant: if it's only used within switch"
+                                + " labels, that doesn't require an import)",
+                            name);
+                      }
+                      if (meanings.isEmpty()) {
+                        return name;
+                      }
+                      return String.format(
+                          "%s (this name appears in the file, but resolves to %s)",
+                          name, meanings.stream().collect(joining()));
+                    })
+                    .collect(joining(", ")))
         .build();
+  }
+
+  private static Name getSimpleName(ImportTree importTree) {
+    return importTree.getQualifiedIdentifier() instanceof IdentifierTree idTree
+        ? idTree.getName()
+        : ((MemberSelectTree) importTree.getQualifiedIdentifier()).getIdentifier();
   }
 
   /**
@@ -115,14 +161,15 @@ public final class RemoveUnusedImports extends BugChecker implements Compilation
   }
 
   private static final class TreeSymbolScanner extends TreePathScanner<Void, SymbolSink> {
-    final DocTreeSymbolScanner docTreeSymbolScanner;
-    final JavacTrees trees;
-    final Types types;
+    private final DocTreeSymbolScanner docTreeSymbolScanner;
+    private final JavacTrees trees;
+    private final VisitorState state;
+    private final Set<Symbol> enumConstantCaseUsages = new HashSet<>();
 
-    private TreeSymbolScanner(JavacTrees trees, Types types) {
-      this.types = types;
+    private TreeSymbolScanner(JavacTrees trees, VisitorState state) {
       this.docTreeSymbolScanner = new DocTreeSymbolScanner();
       this.trees = trees;
+      this.state = state;
     }
 
     /** Skip the imports themselves when checking for usage. */
@@ -140,9 +187,82 @@ public final class RemoveUnusedImports extends BugChecker implements Compilation
       if (symbol == null) {
         return null;
       }
+      var path = getCurrentPath();
+      if (path.getParentPath().getLeaf() instanceof ConstantCaseLabelTree caseLabelTree) {
+        var caseType = getType(caseLabelTree.getConstantExpression());
+        var switchType =
+            getType(
+                getSwitchExpression(
+                    path.getParentPath().getParentPath().getParentPath().getLeaf()));
+        // Exceptionally, a ConstantCaseLabel used in an enum of a matching switch type does not
+        // require an import.
+        if (caseType.tsym.isEnum() && isSameType(caseType, switchType, state)) {
+          enumConstantCaseUsages.add(symbol.baseSymbol());
+          return null;
+        }
+      }
       sink.accept(symbol.baseSymbol());
       return null;
     }
+
+    private static ExpressionTree getSwitchExpression(Tree tree) {
+      return switch (tree) {
+        case SwitchTree switchTree -> switchTree.getExpression();
+        case SwitchExpressionTree switchExpressionTree -> switchExpressionTree.getExpression();
+        default -> throw new AssertionError("Case not inside switch statement");
+      };
+    }
+
+    @Override
+    public Void visitClass(ClassTree node, SymbolSink symbolSink) {
+      if (node.getKind().equals(Tree.Kind.RECORD)) {
+        getEnclosedElements(getSymbol(node)).stream()
+            .flatMap(e -> e.getAnnotationMirrors().stream())
+            .forEach(a -> scanAnnotation(a, symbolSink));
+      }
+      return super.visitClass(node, symbolSink);
+    }
+
+    private static void scanAnnotation(AnnotationMirror annotation, SymbolSink sink) {
+      sink.accept(asElement(annotation));
+      for (AnnotationValue value : annotation.getElementValues().values()) {
+        value.accept(ANNOTATION_VALUE_VISITOR, sink);
+      }
+    }
+
+    private static final SimpleAnnotationValueVisitor8<Void, SymbolSink> ANNOTATION_VALUE_VISITOR =
+        new SimpleAnnotationValueVisitor8<>() {
+          @Override
+          public Void visitEnumConstant(VariableElement enumConstant, SymbolSink sink) {
+            sink.accept((Symbol) enumConstant);
+            return null;
+          }
+
+          @Override
+          public Void visitType(TypeMirror typeMirror, SymbolSink sink) {
+            if (typeMirror instanceof Type type) {
+              Symbol element = type.asElement();
+              if (element != null) {
+                sink.accept(element);
+              }
+            }
+            return null;
+          }
+
+          @Override
+          public Void visitAnnotation(AnnotationMirror annotationMirror, SymbolSink sink) {
+            scanAnnotation(annotationMirror, sink);
+            return null;
+          }
+
+          @Override
+          public Void visitArray(List<? extends AnnotationValue> vals, SymbolSink sink) {
+            for (AnnotationValue val : vals) {
+              val.accept(this, sink);
+            }
+            return null;
+          }
+        };
 
     @Override
     public Void scan(Tree tree, SymbolSink sink) {
@@ -214,5 +334,31 @@ public final class RemoveUnusedImports extends BugChecker implements Compilation
       @Nullable Symbol importedSymbol = getSymbol(importTree.getQualifiedIdentifier());
       return importedSymbol == null ? ImmutableSet.<Symbol>of() : ImmutableSet.of(importedSymbol);
     }
+  }
+
+  private static ImmutableSetMultimap<String, String> actualMeanings(
+      Set<String> simpleNames, VisitorState state) {
+    ImmutableSetMultimap.Builder<String, String> meanings = ImmutableSetMultimap.builder();
+    new TreeScanner<Void, Void>() {
+      // Don't descend into imports so we don't report those as meanings.
+      @Override
+      public Void visitImport(ImportTree tree, Void unused) {
+        return null;
+      }
+
+      @Override
+      public Void visitIdentifier(IdentifierTree tree, Void unused) {
+        var symbol = getSymbol(tree);
+        if (simpleNames.contains(symbol.getSimpleName().toString())) {
+          meanings.put(
+              symbol.getSimpleName().toString(),
+              symbol instanceof MethodSymbol || symbol instanceof VarSymbol
+                  ? symbol.owner.getQualifiedName() + "#" + symbol.getSimpleName()
+                  : symbol.getQualifiedName().toString());
+        }
+        return null;
+      }
+    }.scan(state.getPath().getCompilationUnit(), null);
+    return meanings.build();
   }
 }

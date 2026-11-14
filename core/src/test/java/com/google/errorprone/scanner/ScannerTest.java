@@ -27,7 +27,6 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.IdentifierTreeMatcher;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.util.RuntimeVersion;
 import com.sun.source.tree.IdentifierTree;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,10 +35,7 @@ import org.junit.runners.JUnit4;
 /** Tests for {@link Scanner}. */
 @RunWith(JUnit4.class)
 public class ScannerTest {
-  private static final String IMPORT_GENERATED_ANNOTATION =
-      RuntimeVersion.isAtLeast9()
-          ? "import javax.annotation.processing.Generated;"
-          : "import javax.annotation.Generated;";
+
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(ShouldNotUseFoo.class, getClass());
 
@@ -48,11 +44,14 @@ public class ScannerTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.scanner.ScannerTest.Foo;",
-            "class Test {",
-            "  // BUG: Diagnostic contains: ShouldNotUseFoo",
-            "  Foo foo;",
-            "}")
+            """
+            import com.google.errorprone.scanner.ScannerTest.Foo;
+
+            class Test {
+              // BUG: Diagnostic contains: ShouldNotUseFoo
+              Foo foo;
+            }
+            """)
         .doTest();
   }
 
@@ -61,11 +60,14 @@ public class ScannerTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.scanner.ScannerTest.Foo;",
-            "class Test {",
-            "  // BUG: Diagnostic contains: ShouldNotUseFoo",
-            "  Foo<String> foo;",
-            "}")
+            """
+            import com.google.errorprone.scanner.ScannerTest.Foo;
+
+            class Test {
+              // BUG: Diagnostic contains: ShouldNotUseFoo
+              Foo<String> foo;
+            }
+            """)
         .doTest();
   }
 
@@ -74,12 +76,14 @@ public class ScannerTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.scanner.ScannerTest.Foo;",
-            "import com.google.errorprone.scanner.ScannerTest.OkToUseFoo;",
-            "class Test {",
-            "  @OkToUseFoo",
-            "  Foo foo;",
-            "}")
+            """
+            import com.google.errorprone.scanner.ScannerTest.Foo;
+            import com.google.errorprone.scanner.ScannerTest.OkToUseFoo;
+
+            class Test {
+              @OkToUseFoo Foo foo;
+            }
+            """)
         .doTest();
   }
 
@@ -88,13 +92,16 @@ public class ScannerTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.errorprone.scanner.ScannerTest.Foo;",
-            "import com.google.errorprone.scanner.ScannerTest.OkToUseFoo;",
-            "class Test {",
-            "  @OkToUseFoo",
-            "  // BUG: Diagnostic contains: ShouldNotUseFoo",
-            "  Foo foo;",
-            "}")
+            """
+            import com.google.errorprone.scanner.ScannerTest.Foo;
+            import com.google.errorprone.scanner.ScannerTest.OkToUseFoo;
+
+            class Test {
+              @OkToUseFoo
+              // BUG: Diagnostic contains: ShouldNotUseFoo
+              Foo foo;
+            }
+            """)
         .setArgs(ImmutableList.of("-XepIgnoreSuppressionAnnotations"))
         .doTest();
   }
@@ -105,7 +112,6 @@ public class ScannerTest {
   public @interface OkToUseFoo {}
 
   @BugPattern(
-      name = "ShouldNotUseFoo",
       summary = "Code should not use Foo.",
       severity = ERROR,
       suppressionAnnotations = OkToUseFoo.class)

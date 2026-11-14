@@ -33,15 +33,14 @@ import com.sun.source.util.DocTreePathScanner;
 import com.sun.tools.javac.parser.Tokens.Comment;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
 import com.sun.tools.javac.tree.DCTree.DCErroneous;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 /** Matches misuse of link tags within throws tags. */
 @BugPattern(
-    name = "InvalidThrowsLink",
     summary =
-        "Javadoc links to exceptions in @throws without a @link tag (@throws Exception, not"
-            + " @throws {@link Exception}).",
+        "Don't use {@link} or {@code} in @throws tags; mention the exception name directly (e.g.,"
+            + " @throws IOException, not @throws {@link IOException}).",
     severity = WARNING,
     tags = StandardTags.STYLE,
     documentSuppression = false)
@@ -80,5 +79,5 @@ public final class InvalidThrowsLink extends BugChecker implements MethodTreeMat
     }
   }
 
-  private static final Pattern THROWS_LINK = Pattern.compile("^@throws \\{@link ([^}]+)}");
+  private static final Pattern THROWS_LINK = Pattern.compile("^@throws \\{@(?:link|code) ([^}]+)}");
 }

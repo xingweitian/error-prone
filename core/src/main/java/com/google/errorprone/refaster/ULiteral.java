@@ -26,7 +26,7 @@ import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.tree.JCTree.JCLiteral;
 import java.util.Objects;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UTree} version of {@link LiteralTree}.
@@ -78,7 +78,7 @@ public abstract class ULiteral extends UExpression implements LiteralTree {
           .put(Kind.BOOLEAN_LITERAL, TypeTag.BOOLEAN)
           .put(Kind.NULL_LITERAL, TypeTag.BOT)
           .put(Kind.STRING_LITERAL, TypeTag.CLASS)
-          .build();
+          .buildOrThrow();
 
   public static ULiteral create(Kind kind, Object value) {
     checkArgument(LIT_KIND_TAG.containsKey(kind), "%s is not a literal kind", kind);
@@ -89,18 +89,17 @@ public abstract class ULiteral extends UExpression implements LiteralTree {
   public abstract Kind getKind();
 
   @Override
-  @Nullable
-  public abstract Object getValue();
+  public abstract @Nullable Object getValue();
 
   private static boolean integral(@Nullable Object o) {
     return o instanceof Integer || o instanceof Long;
   }
 
   private static boolean match(@Nullable Object a, @Nullable Object b) {
-    if (a instanceof Number && b instanceof Number) {
-      return (integral(a) && integral(b))
-          ? ((Number) a).longValue() == ((Number) b).longValue()
-          : Double.compare(((Number) a).doubleValue(), ((Number) b).doubleValue()) == 0;
+    if (a instanceof Number aNum && b instanceof Number bNum) {
+      return (integral(aNum) && integral(bNum))
+          ? aNum.longValue() == bNum.longValue()
+          : Double.compare(aNum.doubleValue(), bNum.doubleValue()) == 0;
     } else {
       return Objects.equals(a, b);
     }
@@ -120,15 +119,13 @@ public abstract class ULiteral extends UExpression implements LiteralTree {
   public JCLiteral inline(Inliner inliner) {
     Object value = this.getValue();
     switch (getKind()) {
-      case CHAR_LITERAL:
-        // Why do they do it like this?  I wish I knew.
-        value = (int) ((Character) value).charValue();
-        break;
-      case BOOLEAN_LITERAL:
-        value = ((Boolean) value) ? 1 : 0;
-        break;
-      default:
+      case CHAR_LITERAL ->
+          // Why do they do it like this?  I wish I knew.
+          value = (int) ((Character) value).charValue();
+      case BOOLEAN_LITERAL -> value = ((Boolean) value) ? 1 : 0;
+      default -> {
         // do nothing
+      }
     }
     return inliner.maker().Literal(LIT_KIND_TAG.get(getKind()), value);
   }

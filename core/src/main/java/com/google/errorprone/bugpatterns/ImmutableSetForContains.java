@@ -19,6 +19,9 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
+import static com.google.errorprone.bugpatterns.ImmutableSetForContains.UsageState.DISALLOWED_USAGE;
+import static com.google.errorprone.bugpatterns.ImmutableSetForContains.UsageState.NEVER_USED;
+import static com.google.errorprone.bugpatterns.ImmutableSetForContains.UsageState.ONLY_ALLOWED_USAGE;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.hasAnnotationWithSimpleName;
@@ -29,6 +32,7 @@ import static com.google.errorprone.matchers.Matchers.isStatic;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 import static java.util.stream.Collectors.toMap;
 
 import com.google.common.collect.ImmutableList;
@@ -49,7 +53,6 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.ParameterizedTypeTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreeScanner;
@@ -57,6 +60,7 @@ import com.sun.tools.javac.code.Symbol;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import javax.inject.Inject;
 import javax.lang.model.element.Modifier;
 
 /**
@@ -64,7 +68,6 @@ import javax.lang.model.element.Modifier;
  * ImmutableList} when using only contains, containsAll and isEmpty.
  */
 @BugPattern(
-    name = "ImmutableSetForContains",
     summary =
         "This private static ImmutableList is only used for contains, containsAll or isEmpty"
             + " checks; prefer ImmutableSet.",
@@ -79,9 +82,7 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
           isSameType(ImmutableList.class));
 
   private static final Matcher<Tree> EXCLUSIONS =
-      anyOf(
-          hasAnnotationWithSimpleName("Bind"),
-          hasAnnotationWithSimpleName("Inject"));
+      anyOf(hasAnnotationWithSimpleName("Bind"), hasAnnotationWithSimpleName("Inject"));
 
   private static final Matcher<ExpressionTree> IMMUTABLE_LIST_FACTORIES =
       staticMethod().onClass(ImmutableList.class.getName()).namedAnyOf("of", "copyOf");
@@ -94,17 +95,24 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
           .onExactClass(ImmutableList.Builder.class.getName())
           .namedAnyOf("add", "addAll");
 
+  private final WellKnownKeep wellKnownKeep;
+
+  @Inject
+  ImmutableSetForContains(WellKnownKeep wellKnownKeep) {
+    this.wellKnownKeep = wellKnownKeep;
+  }
+
   @Override
   public Description matchClass(ClassTree tree, VisitorState state) {
     ImmutableSet<VariableTree> immutableListVar =
         tree.getMembers().stream()
-            .filter(member -> member.getKind().equals(Kind.VARIABLE))
+            .filter(member -> member instanceof VariableTree)
             .map(VariableTree.class::cast)
             // TODO(ashishkedia) : Expand to non-static vars with simple init in constructors.
-            .filter(
-                member ->
-                    PRIVATE_STATIC_IMMUTABLE_LIST_MATCHER.matches(member, state)
-                        && !EXCLUSIONS.matches(member, state))
+            .filter(member ->
+                PRIVATE_STATIC_IMMUTABLE_LIST_MATCHER.matches(member, state)
+                    && !wellKnownKeep.shouldKeep(member)
+                    && !EXCLUSIONS.matches(member, state))
             .collect(toImmutableSet());
     if (immutableListVar.isEmpty()) {
       return Description.NO_MATCH;
@@ -117,18 +125,15 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
     SuggestedFix.Builder fix = SuggestedFix.builder();
     Optional<VariableTree> firstReplacement = Optional.empty();
     for (VariableTree var : immutableListVar) {
-      if (isSuppressed(var)) {
+      if (isSuppressed(var, state)) {
         continue;
       }
-      if (!usageScanner.disallowedVarUsages.get(getSymbol(var))) {
+      if (usageScanner.varUsages.get(getSymbol(var)).shouldReport()) {
         firstReplacement = Optional.of(var);
         fix.merge(convertListToSetInit(var, state));
       }
     }
-    if (!firstReplacement.isPresent()) {
-      return Description.NO_MATCH;
-    }
-    return describeMatch(firstReplacement.get(), fix.build());
+    return firstReplacement.map(fr -> describeMatch(fr, fix.build())).orElse(Description.NO_MATCH);
   }
 
   private static SuggestedFix convertListToSetInit(VariableTree var, VisitorState state) {
@@ -151,13 +156,11 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
       Optional<ExpressionTree> rootExpr =
           getRootMethod((MethodInvocationTree) var.getInitializer(), state);
       if (rootExpr.isPresent()) {
-        if (rootExpr.get().getKind().equals(Kind.METHOD_INVOCATION)) {
-          MethodInvocationTree methodTree = (MethodInvocationTree) rootExpr.get();
+        if (rootExpr.get() instanceof MethodInvocationTree methodTree) {
           fix.replace(getReceiver(methodTree), "ImmutableSet");
           return fix.build();
         }
-        if (rootExpr.get().getKind().equals(Kind.NEW_CLASS)) {
-          NewClassTree ctorTree = (NewClassTree) rootExpr.get();
+        if (rootExpr.get() instanceof NewClassTree ctorTree) {
           fix.replace(stripParameters(ctorTree.getIdentifier()), "ImmutableSet.Builder");
         }
         return fix.build();
@@ -170,18 +173,16 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
   }
 
   private static Tree stripParameters(Tree tree) {
-    return tree.getKind().equals(Kind.PARAMETERIZED_TYPE)
-        ? ((ParameterizedTypeTree) tree).getType()
+    return tree instanceof ParameterizedTypeTree parameterizedTypeTree
+        ? parameterizedTypeTree.getType()
         : tree;
   }
 
   private static Optional<ExpressionTree> getRootMethod(
       MethodInvocationTree methodInvocationTree, VisitorState state) {
-    ExpressionTree receiver = getReceiver(methodInvocationTree);
-    while (receiver != null && IMMUTABLE_BUILDER_METHODS.matches(receiver, state)) {
-      receiver = getReceiver(receiver);
-    }
-    return Optional.ofNullable(receiver);
+    return streamReceivers(methodInvocationTree)
+        .filter(t -> !IMMUTABLE_BUILDER_METHODS.matches(t, state))
+        .findFirst();
   }
 
   // Scans the tree for all usages of immutable list vars and determines if any usage will prevent
@@ -195,13 +196,13 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
 
     // For each ImmutableList usage var, we will keep a map indicating if the var has been used in a
     // way that would prevent us from making it a set.
-    private final Map<Symbol, Boolean> disallowedVarUsages;
+    private final Map<Symbol, UsageState> varUsages;
 
     private ImmutableVarUsageScanner(ImmutableSet<VariableTree> immutableListVar) {
-      this.disallowedVarUsages =
+      this.varUsages =
           immutableListVar.stream()
               .map(ASTHelpers::getSymbol)
-              .collect(toMap(x -> x, x -> Boolean.FALSE));
+              .collect(toMap(x -> x, x -> NEVER_USED));
     }
 
     @Override
@@ -220,11 +221,16 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
       if (receiver == null) {
         return false;
       }
-      if (!disallowedVarUsages.containsKey(getSymbol(receiver))) {
+      if (!varUsages.containsKey(getSymbol(receiver))) {
         // Not a function invocation on any of the candidate immutable list vars.
         return false;
       }
-      return ALLOWED_FUNCTIONS_ON_LIST.matches(methodTree, state);
+      boolean allowed = ALLOWED_FUNCTIONS_ON_LIST.matches(methodTree, state);
+      if (allowed) {
+        varUsages.computeIfPresent(
+            getSymbol(receiver), (sym, oldVal) -> oldVal.markAllowedUsageDetected());
+      }
+      return allowed;
     }
 
     @Override
@@ -240,7 +246,33 @@ public final class ImmutableSetForContains extends BugChecker implements ClassTr
     }
 
     private void recordDisallowedUsage(Symbol symbol) {
-      disallowedVarUsages.computeIfPresent(symbol, (sym, oldVal) -> Boolean.TRUE);
+      varUsages.computeIfPresent(symbol, (sym, oldVal) -> oldVal.markDisallowedUsageDetected());
+    }
+  }
+
+  enum UsageState {
+    /** No usage detected. */
+    NEVER_USED,
+
+    /** At least one allowed usage detected. No disallowed usage detected. */
+    ONLY_ALLOWED_USAGE,
+
+    /** Disallowed usage detected. Allowed usage is ignored. */
+    DISALLOWED_USAGE;
+
+    UsageState markAllowedUsageDetected() {
+      if (this == DISALLOWED_USAGE) {
+        return DISALLOWED_USAGE;
+      }
+      return ONLY_ALLOWED_USAGE;
+    }
+
+    UsageState markDisallowedUsageDetected() {
+      return DISALLOWED_USAGE;
+    }
+
+    boolean shouldReport() {
+      return this == ONLY_ALLOWED_USAGE;
     }
   }
 }

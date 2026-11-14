@@ -24,7 +24,7 @@ import com.sun.source.tree.TryTree;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCTry;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code UTree} representation of a {@code TryTree}.
@@ -52,8 +52,7 @@ abstract class UTry extends USimpleStatement implements TryTree {
   public abstract ImmutableList<UCatch> getCatches();
 
   @Override
-  @Nullable
-  public abstract UBlock getFinallyBlock();
+  public abstract @Nullable UBlock getFinallyBlock();
 
   @Override
   public Kind getKind() {
@@ -77,8 +76,8 @@ abstract class UTry extends USimpleStatement implements TryTree {
   }
 
   /** Skips the finally block if the result would be empty. */
-  @Nullable
-  private JCBlock inlineFinallyBlock(Inliner inliner) throws CouldNotResolveImportException {
+  private @Nullable JCBlock inlineFinallyBlock(Inliner inliner)
+      throws CouldNotResolveImportException {
     if (getFinallyBlock() != null) {
       JCBlock block = getFinallyBlock().inline(inliner);
       if (!block.getStatements().isEmpty()) {
@@ -89,11 +88,10 @@ abstract class UTry extends USimpleStatement implements TryTree {
   }
 
   @Override
-  @Nullable
-  public Choice<Unifier> visitTry(TryTree node, @Nullable Unifier unifier) {
+  public @Nullable Choice<Unifier> visitTry(TryTree node, @Nullable Unifier unifier) {
     return unifyList(unifier, getResources(), node.getResources())
-        .thenChoose(unifications(getBlock(), node.getBlock()))
-        .thenChoose(unifications(getCatches(), node.getCatches()))
-        .thenChoose(unifications(getFinallyBlock(), node.getFinallyBlock()));
+        .flatMap(unifications(getBlock(), node.getBlock()))
+        .flatMap(unifications(getCatches(), node.getCatches()))
+        .flatMap(unifications(getFinallyBlock(), node.getFinallyBlock()));
   }
 }

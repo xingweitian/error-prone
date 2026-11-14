@@ -38,7 +38,9 @@ import static com.google.errorprone.matchers.Matchers.symbolHasAnnotation;
 import static com.google.errorprone.matchers.Matchers.typeCast;
 import static com.google.errorprone.matchers.Matchers.variableInitializer;
 import static com.google.errorprone.matchers.Matchers.variableType;
-import static com.google.errorprone.util.ASTHelpers.findSuperMethods;
+import static com.google.errorprone.predicates.TypePredicates.isPrimitive;
+import static com.google.errorprone.predicates.TypePredicates.not;
+import static com.google.errorprone.util.ASTHelpers.streamSuperMethods;
 import static com.sun.source.tree.Tree.Kind.AND_ASSIGNMENT;
 import static com.sun.source.tree.Tree.Kind.DIVIDE_ASSIGNMENT;
 import static com.sun.source.tree.Tree.Kind.LEFT_SHIFT_ASSIGNMENT;
@@ -56,6 +58,7 @@ import static com.sun.source.tree.Tree.Kind.RIGHT_SHIFT_ASSIGNMENT;
 import static com.sun.source.tree.Tree.Kind.UNSIGNED_RIGHT_SHIFT_ASSIGNMENT;
 import static com.sun.source.tree.Tree.Kind.XOR_ASSIGNMENT;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.annotations.NoAllocation;
@@ -98,11 +101,9 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Checks methods annotated with {@code @NoAllocation} to ensure they really do not allocate.
@@ -163,8 +164,8 @@ public class NoAllocationChecker extends BugChecker
 
   private static final Matcher<ExpressionTree> primitiveArrayExpression = isPrimitiveArrayType();
 
-  private static final Set<Kind> ALL_COMPOUND_OPERATORS =
-      Collections.unmodifiableSet(
+  private static final ImmutableSet<Kind> ALL_COMPOUND_OPERATORS =
+      ImmutableSet.copyOf(
           EnumSet.of(
               AND_ASSIGNMENT,
               DIVIDE_ASSIGNMENT,
@@ -184,28 +185,25 @@ public class NoAllocationChecker extends BugChecker
    * below it.
    */
   private static final Matcher<Tree> withinThrowOrAnnotation =
-      new Matcher<Tree>() {
-        @Override
-        public boolean matches(Tree tree, VisitorState state) {
-          // TODO(agoode): Make this accept statements in a block that definitely will lead to a
-          // throw.
-          TreePath path = state.getPath().getParentPath();
-          while (path != null) {
-            Tree node = path.getLeaf();
-            state = state.withPath(path);
-            switch (node.getKind()) {
-              case METHOD:
-                // We've gotten to the top of the method without finding a throw.
-                return false;
-              case THROW:
-              case ANNOTATION:
-                return true;
-              default:
-                path = path.getParentPath();
+      (Tree tree, VisitorState state) -> {
+        // TODO(agoode): Make this accept statements in a block that definitely will lead to a
+        // throw.
+        TreePath path = state.getPath().getParentPath();
+        while (path != null) {
+          Tree node = path.getLeaf();
+          state = state.withPath(path);
+          switch (node.getKind()) {
+            case METHOD -> {
+              // We've gotten to the top of the method without finding a throw.
+              return false;
             }
+            case THROW, ANNOTATION -> {
+              return true;
+            }
+            default -> path = path.getParentPath();
           }
-          return false;
         }
+        return false;
       };
 
   /**
@@ -253,7 +251,7 @@ public class NoAllocationChecker extends BugChecker
           anyOf(
               not(enhancedForLoop(anyVariable, arrayExpression, anyStatement)),
               enhancedForLoop(
-                  variableType(not(isPrimitiveType())), primitiveArrayExpression, anyStatement)));
+                  variableType(not(isPrimitive())), primitiveArrayExpression, anyStatement)));
 
   /** Matches boxing assignment. */
   private static final Matcher<AssignmentTree> boxingAssignment =
@@ -268,7 +266,7 @@ public class NoAllocationChecker extends BugChecker
           not(withinThrowOrAnnotation),
           enclosingMethod(noAllocationMethodMatcher),
           variableInitializer(primitiveExpression),
-          variableType(not(isPrimitiveType())));
+          variableType(not(isPrimitive())));
 
   /** Matches boxing by explicit cast. */
   private static final Matcher<TypeCastTree> boxingCast =
@@ -287,71 +285,65 @@ public class NoAllocationChecker extends BugChecker
 
   /** Matches boxing by method invocation, including varargs. */
   private static final Matcher<MethodInvocationTree> boxingInvocation =
-      new Matcher<MethodInvocationTree>() {
-        @Override
-        public boolean matches(MethodInvocationTree tree, VisitorState state) {
-          if (!enclosingMethod(noAllocationMethodMatcher).matches(tree, state)) {
-            return false;
-          }
+      (MethodInvocationTree tree, VisitorState state) -> {
+        if (!enclosingMethod(noAllocationMethodMatcher).matches(tree, state)) {
+          return false;
+        }
 
-          // Get the arguments.
-          JCMethodInvocation methodInvocation = (JCMethodInvocation) tree;
-          List<JCExpression> arguments = methodInvocation.getArguments();
+        // Get the arguments.
+        JCMethodInvocation methodInvocation = (JCMethodInvocation) tree;
+        List<JCExpression> arguments = methodInvocation.getArguments();
 
-          // Get the parameters.
-          MethodSymbol methodSymbol = ASTHelpers.getSymbol(tree);
-          List<VarSymbol> params = methodSymbol.getParameters();
+        // Get the parameters.
+        MethodSymbol methodSymbol = ASTHelpers.getSymbol(tree);
+        List<VarSymbol> params = methodSymbol.getParameters();
 
-          // If there is a length mismatch, this implies varargs boxing.
-          if (arguments.size() != params.size()) {
+        // If there is a length mismatch, this implies varargs boxing.
+        if (arguments.size() != params.size()) {
+          return true;
+        }
+
+        // Check for boxing at each argument.
+        int numArgs = arguments.size();
+        int i = 0;
+        Iterator<JCExpression> argument = arguments.iterator();
+        Iterator<VarSymbol> param = params.iterator();
+        while (param.hasNext() && argument.hasNext()) {
+          JCExpression a = argument.next();
+          VarSymbol p = param.next();
+
+          if (a.type.isPrimitive() && !p.type.isPrimitive()) {
+            // Boxing occurs here.
             return true;
           }
 
-          // Check for boxing at each argument.
-          int numArgs = arguments.size();
-          int i = 0;
-          Iterator<JCExpression> argument = arguments.iterator();
-          Iterator<VarSymbol> param = params.iterator();
-          while (param.hasNext() && argument.hasNext()) {
-            JCExpression a = argument.next();
-            VarSymbol p = param.next();
-
-            if (a.type.isPrimitive() && !p.type.isPrimitive()) {
-              // Boxing occurs here.
-              return true;
-            }
-
-            // Check last parameter. If it's a varargs parameter, ensure no boxing by making sure
-            // it's assignable.
-            if (i == numArgs - 1
-                && methodSymbol.isVarArgs()
-                && p.type instanceof ArrayType
-                && !state.getTypes().isAssignable(a.type, p.type)) {
-              return true;
-            }
-            i++;
+          // Check last parameter. If it's a varargs parameter, ensure no boxing by making sure
+          // it's assignable.
+          if (i == numArgs - 1
+              && methodSymbol.isVarArgs()
+              && p.type instanceof ArrayType
+              && !state.getTypes().isAssignable(a.type, p.type)) {
+            return true;
           }
-
-          return false;
+          i++;
         }
+
+        return false;
       };
 
   /** Matches boxing by unary operator. */
   private static final Matcher<UnaryTree> boxingUnary =
-      new Matcher<UnaryTree>() {
-        @Override
-        public boolean matches(UnaryTree tree, VisitorState state) {
-          return allOf(
-                      not(withinThrowOrAnnotation),
-                      enclosingMethod(noAllocationMethodMatcher),
-                      anyOf(
-                          kindIs(POSTFIX_DECREMENT),
-                          kindIs(POSTFIX_INCREMENT),
-                          kindIs(PREFIX_DECREMENT),
-                          kindIs(PREFIX_INCREMENT)))
-                  .matches(tree, state)
-              && not(isPrimitiveType()).matches(tree, state);
-        }
+      (UnaryTree tree, VisitorState state) -> {
+        return allOf(
+                    not(withinThrowOrAnnotation),
+                    enclosingMethod(noAllocationMethodMatcher),
+                    anyOf(
+                        kindIs(POSTFIX_DECREMENT),
+                        kindIs(POSTFIX_INCREMENT),
+                        kindIs(PREFIX_DECREMENT),
+                        kindIs(PREFIX_INCREMENT)))
+                .matches(tree, state)
+            && not(isPrimitiveType()).matches(tree, state);
       };
 
   @Override
@@ -394,28 +386,24 @@ public class NoAllocationChecker extends BugChecker
       return NO_MATCH;
     }
     MethodSymbol symbol = ASTHelpers.getSymbol(tree);
-    if (symbol == null) {
-      return NO_MATCH;
-    }
-    return findSuperMethods(symbol, state.getTypes()).stream()
+    return streamSuperMethods(symbol, state.getTypes())
         .filter(s -> ASTHelpers.hasAnnotation(s, NoAllocation.class.getName(), state))
         .findAny()
-        .map(
-            s -> {
-              String message =
-                  String.format(
-                      "Method overrides %s in %s which is annotated @NoAllocation,"
-                          + " it should also be annotated.",
-                      s.getSimpleName(), s.owner.getSimpleName());
-              return buildDescription(tree)
-                  .setMessage(message)
-                  .addFix(
-                      SuggestedFix.builder()
-                          .addImport(NoAllocation.class.getName())
-                          .prefixWith(tree, "@NoAllocation ")
-                          .build())
-                  .build();
-            })
+        .map(s -> {
+          String message =
+              String.format(
+                  "Method overrides %s in %s which is annotated @NoAllocation,"
+                      + " it should also be annotated.",
+                  s.getSimpleName(), s.owner.getSimpleName());
+          return buildDescription(tree)
+              .setMessage(message)
+              .addFix(
+                  SuggestedFix.builder()
+                      .addImport(NoAllocation.class.getName())
+                      .prefixWith(tree, "@NoAllocation ")
+                      .build())
+              .build();
+        })
         .orElse(NO_MATCH);
   }
 

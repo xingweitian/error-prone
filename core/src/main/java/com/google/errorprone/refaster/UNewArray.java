@@ -29,7 +29,7 @@ import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCNewArray;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** {@link UTree} version of {@link NewArrayTree}, which represents an array instantiation. */
 @AutoValue
@@ -45,27 +45,23 @@ abstract class UNewArray extends UExpression implements NewArrayTree {
         initializers != null ? ImmutableList.copyOf(initializers) : null);
   }
 
-  @Nullable
   @Override
-  public abstract UExpression getType();
-
-  @Nullable
-  @Override
-  public abstract ImmutableList<UExpression> getDimensions();
-
-  @Nullable
-  @Override
-  public abstract ImmutableList<UExpression> getInitializers();
+  public abstract @Nullable UExpression getType();
 
   @Override
-  @Nullable
-  public Choice<Unifier> visitNewArray(NewArrayTree newArray, @Nullable Unifier unifier) {
+  public abstract @Nullable ImmutableList<UExpression> getDimensions();
+
+  @Override
+  public abstract @Nullable ImmutableList<UExpression> getInitializers();
+
+  @Override
+  public @Nullable Choice<Unifier> visitNewArray(NewArrayTree newArray, @Nullable Unifier unifier) {
     boolean hasRepeated =
         getInitializers() != null
             && Iterables.any(getInitializers(), Predicates.instanceOf(URepeated.class));
     return unifyNullable(unifier, getType(), newArray.getType())
-        .thenChoose(unifications(getDimensions(), newArray.getDimensions()))
-        .thenChoose(unifications(getInitializers(), newArray.getInitializers(), hasRepeated));
+        .flatMap(unifications(getDimensions(), newArray.getDimensions()))
+        .flatMap(unifications(getInitializers(), newArray.getInitializers(), hasRepeated));
   }
 
   @Override

@@ -36,8 +36,7 @@ import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "ConstantField",
-    summary = "Field name is CONSTANT_CASE, but field is not static and final",
+    summary = "Fields with CONSTANT_CASE names should be both static and final",
     severity = SUGGESTION,
     tags = BugPattern.StandardTags.STYLE)
 public class ConstantField extends BugChecker implements VariableTreeMatcher {
@@ -45,7 +44,7 @@ public class ConstantField extends BugChecker implements VariableTreeMatcher {
   @Override
   public Description matchVariable(VariableTree tree, VisitorState state) {
     Symbol.VarSymbol sym = ASTHelpers.getSymbol(tree);
-    if (sym == null || sym.getKind() != ElementKind.FIELD) {
+    if (sym.getKind() != ElementKind.FIELD) {
       return Description.NO_MATCH;
     }
     String name = sym.getSimpleName().toString();
@@ -58,14 +57,10 @@ public class ConstantField extends BugChecker implements VariableTreeMatcher {
 
     Description.Builder descriptionBuilder = buildDescription(tree);
     if (canBecomeStaticMember(sym)) {
-      descriptionBuilder.addFix(
-          SuggestedFixes.addModifiers(tree, state, Modifier.FINAL, Modifier.STATIC)
-              .map(
-                  f ->
-                      SuggestedFix.builder()
-                          .setShortDescription("make static and final")
-                          .merge(f)
-                          .build()));
+      SuggestedFixes.addModifiers(tree, state, Modifier.FINAL, Modifier.STATIC)
+          .map(f ->
+              SuggestedFix.builder().setShortDescription("make static and final").merge(f).build())
+          .ifPresent(descriptionBuilder::addFix);
     }
     return descriptionBuilder
         .addFix(
@@ -87,13 +82,9 @@ public class ConstantField extends BugChecker implements VariableTreeMatcher {
     ClassSymbol owningClass = sym.enclClass();
 
     // Enum anonymous classes aren't considered isInner() even though they can't hold static fields
-    switch (owningClass.getNestingKind()) {
-      case LOCAL:
-      case ANONYMOUS:
-        return false;
-      default:
-        return !owningClass.isInner();
-    }
+    return switch (owningClass.getNestingKind()) {
+      case LOCAL, ANONYMOUS -> false;
+      default -> !owningClass.isInner();
+    };
   }
-
 }

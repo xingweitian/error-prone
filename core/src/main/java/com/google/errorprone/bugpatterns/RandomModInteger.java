@@ -30,9 +30,10 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree.Kind;
 
-/** @author Louis Wasserman */
+/**
+ * @author Louis Wasserman
+ */
 @BugPattern(
-    name = "RandomModInteger",
     summary = "Use Random.nextInt(int).  Random.nextInt() % n can have negative results",
     severity = SeverityLevel.ERROR)
 public class RandomModInteger extends BugChecker implements BinaryTreeMatcher {
@@ -41,7 +42,7 @@ public class RandomModInteger extends BugChecker implements BinaryTreeMatcher {
       Matchers.instanceMethod()
           .onDescendantOf("java.util.Random")
           .named("nextInt")
-          .withParameters();
+          .withNoParameters();
 
   @Override
   public Description matchBinary(BinaryTree tree, VisitorState state) {

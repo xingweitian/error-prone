@@ -18,10 +18,9 @@ package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.fixes.SuggestedFix;
-import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.Tree;
 import java.util.stream.Collectors;
 
 /**
@@ -29,15 +28,10 @@ import java.util.stream.Collectors;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-@AutoValue
-abstract class Changes {
-
-  abstract ImmutableList<Double> originalCost();
-
-  abstract ImmutableList<Double> assignmentCost();
-
-  abstract ImmutableList<ParameterPair> changedPairs();
-
+record Changes(
+    ImmutableList<Double> originalCost,
+    ImmutableList<Double> assignmentCost,
+    ImmutableList<ParameterPair> changedPairs) {
   boolean isEmpty() {
     return changedPairs().isEmpty();
   }
@@ -54,18 +48,18 @@ abstract class Changes {
       ImmutableList<Double> originalCost,
       ImmutableList<Double> assignmentCost,
       ImmutableList<ParameterPair> changedPairs) {
-    return new AutoValue_Changes(originalCost, assignmentCost, changedPairs);
+    return new Changes(originalCost, assignmentCost, changedPairs);
   }
 
   static Changes empty() {
-    return new AutoValue_Changes(ImmutableList.of(), ImmutableList.of(), ImmutableList.of());
+    return new Changes(ImmutableList.of(), ImmutableList.of(), ImmutableList.of());
   }
 
   SuggestedFix buildCommentArgumentsFix(InvocationInfo info) {
     SuggestedFix.Builder commentArgumentsFixBuilder = SuggestedFix.builder();
     for (ParameterPair change : changedPairs()) {
       int index = change.formal().index();
-      ExpressionTree actual = info.actualParameters().get(index);
+      Tree actual = info.actualParameters().get(index);
       int startPosition = getStartPosition(actual);
       String formal = info.formalParameters().get(index).getSimpleName().toString();
       commentArgumentsFixBuilder.replace(
@@ -89,13 +83,11 @@ abstract class Changes {
   public String describe(InvocationInfo info) {
     return "The following arguments may have been swapped: "
         + changedPairs().stream()
-            .map(
-                p ->
-                    String.format(
-                        "'%s' for formal parameter '%s'",
-                        info.state()
-                            .getSourceForNode(info.actualParameters().get(p.formal().index())),
-                        p.formal().name()))
+            .map(p ->
+                String.format(
+                    "'%s' for formal parameter '%s'",
+                    info.state().getSourceForNode(info.actualParameters().get(p.formal().index())),
+                    p.formal().name()))
             .collect(Collectors.joining(", "))
         + ". Either add clarifying `/* paramName= */` comments, or swap the arguments if that is"
         + " what was intended";

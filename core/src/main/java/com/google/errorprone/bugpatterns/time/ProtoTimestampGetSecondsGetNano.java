@@ -17,7 +17,8 @@ package com.google.errorprone.bugpatterns.time;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.bugpatterns.time.NearbyCallers.containsCallToSameReceiverNearby;
-import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
+import static com.google.errorprone.matchers.Matchers.instanceMethod;
+import static com.google.errorprone.matchers.ProtobufMatchers.PROTO_TIMESTAMP;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -35,7 +36,6 @@ import com.sun.source.tree.MethodInvocationTree;
  * @author kak@google.com (Kurt Alfred Kluever)
  */
 @BugPattern(
-    name = "ProtoTimestampGetSecondsGetNano",
     summary = "getNanos() only accesses the underlying nanosecond-adjustment of the instant.",
     explanation =
         "If you call timestamp.getNanos(), you must also call timestamp.getSeconds() in 'nearby' "
@@ -45,15 +45,16 @@ import com.sun.source.tree.MethodInvocationTree;
 public final class ProtoTimestampGetSecondsGetNano extends BugChecker
     implements MethodInvocationTreeMatcher {
 
-  private static final Matcher<ExpressionTree> GET_SECONDS =
-      instanceMethod().onExactClass("com.google.protobuf.Timestamp").named("getSeconds");
-  private static final Matcher<ExpressionTree> GET_NANOS =
-      instanceMethod().onExactClass("com.google.protobuf.Timestamp").named("getNanos");
+  private static final Matcher<ExpressionTree> PROTO_TIMESTAMP_GET_SECONDS =
+      instanceMethod().onExactClass(PROTO_TIMESTAMP).named("getSeconds");
+  private static final Matcher<ExpressionTree> PROTO_TIMESTAMP_GET_NANOS =
+      instanceMethod().onExactClass(PROTO_TIMESTAMP).named("getNanos");
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-    if (GET_NANOS.matches(tree, state)) {
-      if (!containsCallToSameReceiverNearby(tree, GET_SECONDS, state, /*checkProtoChains=*/ true)) {
+    if (PROTO_TIMESTAMP_GET_NANOS.matches(tree, state)) {
+      if (!containsCallToSameReceiverNearby(
+          tree, PROTO_TIMESTAMP_GET_SECONDS, state, /* checkProtoChains= */ true)) {
         return describeMatch(tree);
       }
     }

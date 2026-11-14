@@ -20,6 +20,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.errorprone.FileObjects.forResources;
 import static com.google.errorprone.FileObjects.forSourceLines;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.ErrorProneTestCompiler;
 import com.google.errorprone.bugpatterns.DeadException;
 import com.google.errorprone.bugpatterns.EmptyIfStatement;
@@ -48,15 +49,19 @@ public class SuppressLintTest {
   }
 
   @Test
-  public void testNegativeCase() {
-    List<JavaFileObject> sources = forResources(getClass(), "SuppressLintNegativeCases.java");
+  public void negativeCase() {
+    ImmutableList<JavaFileObject> sources =
+        forResources(getClass(), "testdata/SuppressLintNegativeCases.java");
     JavaFileObject stub =
         forSourceLines(
             "SuppressLint.java",
-            "package android.annotation;",
-            "public @interface SuppressLint {",
-            " public String[] value() default {};",
-            "}");
+            """
+            package android.annotation;
+
+            public @interface SuppressLint {
+              public String[] value() default {};
+            }
+            """);
     List<JavaFileObject> thingsToCompile = new ArrayList<>(sources);
     thingsToCompile.add(stub);
     assertThat(compiler.compile(thingsToCompile)).isEqualTo(Result.OK);

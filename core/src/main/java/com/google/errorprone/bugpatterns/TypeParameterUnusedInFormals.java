@@ -35,7 +35,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 @BugPattern(
-    name = "TypeParameterUnusedInFormals",
     summary =
         "Declaring a type parameter that is only used in the return type is a misuse of"
             + " generics: operations on the type parameter are unchecked, it hides unsafe casts at"
@@ -47,19 +46,15 @@ public class TypeParameterUnusedInFormals extends BugChecker implements MethodTr
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
     MethodSymbol methodSymbol = ASTHelpers.getSymbol(tree);
-    if (methodSymbol == null) {
-      return Description.NO_MATCH;
-    }
 
     // Only match methods where the return type is just a type parameter.
     // e.g. the following is OK: <T> List<T> newArrayList();
     TypeVar retType;
-    switch (methodSymbol.getReturnType().getKind()) {
-      case TYPEVAR:
-        retType = (TypeVar) methodSymbol.getReturnType();
-        break;
-      default:
+    switch (methodSymbol.getReturnType()) {
+      case TypeVar typeVar -> retType = typeVar;
+      default -> {
         return Description.NO_MATCH;
+      }
     }
 
     if (!methodSymbol.equals(retType.tsym.owner)) {
@@ -100,9 +95,9 @@ public class TypeParameterUnusedInFormals extends BugChecker implements MethodTr
 
     @Override
     public Void visitClassType(Type.ClassType type, Void unused) {
-      if (type instanceof Type.IntersectionClassType) {
+      if (type instanceof Type.IntersectionClassType intersectionClassType) {
         // TypeVisitor doesn't support intersection types natively
-        visitIntersectionClassType((Type.IntersectionClassType) type);
+        visitIntersectionClassType(intersectionClassType);
       } else {
         for (Type t : type.getTypeArguments()) {
           t.accept(this, null);
@@ -111,7 +106,7 @@ public class TypeParameterUnusedInFormals extends BugChecker implements MethodTr
       return null;
     }
 
-    public void visitIntersectionClassType(Type.IntersectionClassType type) {
+    void visitIntersectionClassType(Type.IntersectionClassType type) {
       for (Type component : type.getComponents()) {
         component.accept(this, null);
       }

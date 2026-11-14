@@ -20,17 +20,20 @@ import static com.google.common.collect.Streams.stream;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.fixes.SuggestedFixes.addMembers;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.matchers.JUnitMatchers.JUNIT4_RUN_WITH_ANNOTATION;
 import static com.google.errorprone.util.ASTHelpers.createPrivateConstructor;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static com.google.errorprone.util.ASTHelpers.isGeneratedConstructor;
+import static com.google.errorprone.util.AnnotationNames.AUTO_VALUE_ANNOTATION;
 import static com.sun.source.tree.Tree.Kind.CLASS;
-import static com.sun.source.tree.Tree.Kind.METHOD;
 import static javax.lang.model.element.Modifier.PRIVATE;
 import static javax.lang.model.element.Modifier.STATIC;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
@@ -41,11 +44,13 @@ import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import javax.lang.model.element.Modifier;
 
-/** @author gak@google.com (Gregory Kick) */
+/**
+ * @author gak@google.com (Gregory Kick)
+ */
 @BugPattern(
-    name = "PrivateConstructorForUtilityClass",
     summary =
         "Classes which are not intended to be instantiated should be made non-instantiable with a"
             + " private constructor. This includes utility classes (classes with only static"
@@ -54,60 +59,59 @@ import javax.lang.model.element.Modifier;
 public final class PrivateConstructorForUtilityClass extends BugChecker
     implements ClassTreeMatcher {
 
+  private static final ImmutableSet<ClassName> ANNOTATIONS_TO_IGNORE =
+      ImmutableSet.of(
+          JUNIT4_RUN_WITH_ANNOTATION,
+          ClassName.of("org.robolectric.annotation.Implements"),
+          AUTO_VALUE_ANNOTATION);
+
   @Override
   public Description matchClass(ClassTree classTree, VisitorState state) {
     if (!classTree.getKind().equals(CLASS)
         || classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT)
         || classTree.getExtendsClause() != null
         || !classTree.getImplementsClause().isEmpty()
-        || isInPrivateScope(state)
-        || hasAnnotation(getSymbol(classTree), "org.junit.runner.RunWith", state)
-        || hasAnnotation(getSymbol(classTree), "org.robolectric.annotation.Implements", state)) {
+        || isInPrivateScope(state)) {
       return NO_MATCH;
+    }
+    ClassSymbol sym = getSymbol(classTree);
+    for (ClassName annotation : ANNOTATIONS_TO_IGNORE) {
+      if (hasAnnotation(sym, annotation, state)) {
+        return NO_MATCH;
+      }
     }
 
     ImmutableList<Tree> nonSyntheticMembers =
         classTree.getMembers().stream()
-            .filter(
-                tree ->
-                    !(tree.getKind().equals(METHOD) && isGeneratedConstructor((MethodTree) tree)))
+            .filter(tree ->
+                !(tree instanceof MethodTree methodTree && isGeneratedConstructor(methodTree)))
             .collect(toImmutableList());
     if (nonSyntheticMembers.isEmpty()
         || nonSyntheticMembers.stream().anyMatch(PrivateConstructorForUtilityClass::isInstance)) {
       return NO_MATCH;
     }
     SuggestedFix.Builder fix =
-        SuggestedFix.builder()
-            .merge(addMembers(classTree, state, createPrivateConstructor(classTree)));
+        addMembers(classTree, state, createPrivateConstructor(classTree)).toBuilder();
     SuggestedFixes.addModifiers(classTree, state, Modifier.FINAL).ifPresent(fix::merge);
     return describeMatch(classTree, fix.build());
   }
 
   private static boolean isInPrivateScope(VisitorState state) {
     return stream(state.getPath())
-        .anyMatch(
-            currentLeaf ->
-                // Checking instanceof rather than Kind given (e.g.) enums are ClassTrees.
-                currentLeaf instanceof ClassTree
-                    && ((ClassTree) currentLeaf).getModifiers().getFlags().contains(PRIVATE));
+        .anyMatch(currentLeaf ->
+            // Checking instanceof rather than Kind given (e.g.) enums are ClassTrees.
+            currentLeaf instanceof ClassTree classTree
+                && classTree.getModifiers().getFlags().contains(PRIVATE));
   }
 
   private static boolean isInstance(Tree tree) {
-    switch (tree.getKind()) {
-      case CLASS:
-        return !((ClassTree) tree).getModifiers().getFlags().contains(STATIC);
-      case METHOD:
-        return !((MethodTree) tree).getModifiers().getFlags().contains(STATIC);
-      case VARIABLE:
-        return !((VariableTree) tree).getModifiers().getFlags().contains(STATIC);
-      case BLOCK:
-        return !((BlockTree) tree).isStatic();
-      case ENUM:
-      case ANNOTATION_TYPE:
-      case INTERFACE:
-        return false;
-      default:
-        throw new AssertionError("unknown member type:" + tree.getKind());
-    }
+    return switch (tree.getKind()) {
+      case CLASS -> !((ClassTree) tree).getModifiers().getFlags().contains(STATIC);
+      case METHOD -> !((MethodTree) tree).getModifiers().getFlags().contains(STATIC);
+      case VARIABLE -> !((VariableTree) tree).getModifiers().getFlags().contains(STATIC);
+      case BLOCK -> !((BlockTree) tree).isStatic();
+      case ENUM, ANNOTATION_TYPE, INTERFACE, RECORD -> false;
+      default -> throw new AssertionError("unknown member type:" + tree.getKind());
+    };
   }
 }

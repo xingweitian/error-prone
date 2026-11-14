@@ -16,15 +16,15 @@
 
 package com.google.errorprone.apply;
 
+import static com.google.errorprone.fixes.ErrorProneEndPosTable.getEndPosition;
+
 import com.google.common.base.CharMatcher;
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-import com.sun.tools.javac.tree.EndPosTable;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
-import com.sun.tools.javac.tree.JCTree.JCExpression;
-import com.sun.tools.javac.tree.JCTree.JCImport;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,33 +56,30 @@ public class ImportStatements {
   public static ImportStatements create(
       JCCompilationUnit compilationUnit, ImportOrganizer importOrganizer) {
     return new ImportStatements(
-        (JCExpression) compilationUnit.getPackageName(),
+        compilationUnit.getPackage(),
         compilationUnit.getImports(),
-        compilationUnit.endPositions,
+        compilationUnit,
         importOrganizer);
   }
 
   ImportStatements(
-      JCExpression packageTree,
-      List<JCImport> importTrees,
-      EndPosTable endPositions,
+      JCTree packageTree,
+      List<? extends JCTree> importTrees,
+      JCCompilationUnit unit,
       ImportOrganizer importOrganizer) {
 
     // find start, end positions for current list of imports (for replacement)
     if (importTrees.isEmpty()) {
-      // start/end positions are just after the package expression
+      // start/end positions are just after the package declaration
       hasExistingImports = false;
-      startPos =
-          packageTree != null
-              ? packageTree.getEndPosition(endPositions) + 2 // +2 for semicolon and newline
-              : 0;
+      startPos = packageTree != null ? getEndPosition(packageTree, unit) : 0;
       endPos = startPos;
     } else {
       // process list of imports and find start/end positions
       hasExistingImports = true;
-      for (JCImport importTree : importTrees) {
+      for (JCTree importTree : importTrees) {
         int currStartPos = importTree.getStartPosition();
-        int currEndPos = importTree.getEndPosition(endPositions);
+        int currEndPos = getEndPosition(importTree, unit);
 
         startPos = Math.min(startPos, currStartPos);
         endPos = Math.max(endPos, currEndPos);
@@ -99,14 +96,9 @@ public class ImportStatements {
     importStrings.addAll(
         Lists.transform(
             importTrees,
-            new Function<JCImport, String>() {
-              @Override
-              public String apply(JCImport input) {
-                String importExpr = input.toString();
-                return CharMatcher.whitespace()
-                    .or(CharMatcher.is(';'))
-                    .trimTrailingFrom(importExpr);
-              }
+            input -> {
+              String importExpr = input.toString();
+              return CharMatcher.whitespace().or(CharMatcher.is(';')).trimTrailingFrom(importExpr);
             }));
 
     originalImports = ImmutableSet.copyOf(importStrings);
@@ -129,6 +121,7 @@ public class ImportStatements {
    * @param importToAdd a string representation of the import to add
    * @return true if the import was added
    */
+  @CanIgnoreReturnValue
   public boolean add(String importToAdd) {
     return importStrings.add(importToAdd);
   }
@@ -140,6 +133,7 @@ public class ImportStatements {
    * @param importsToAdd a collection of imports to add
    * @return true if any imports were added to the list
    */
+  @CanIgnoreReturnValue
   public boolean addAll(Collection<String> importsToAdd) {
     return importStrings.addAll(importsToAdd);
   }
@@ -151,6 +145,7 @@ public class ImportStatements {
    * @param importToRemove a string representation of the import to remove
    * @return true if the import was removed
    */
+  @CanIgnoreReturnValue
   public boolean remove(String importToRemove) {
     return importStrings.remove(importToRemove);
   }
@@ -162,6 +157,7 @@ public class ImportStatements {
    * @param importsToRemove a collection of imports to remove
    * @return true if any imports were removed from the list
    */
+  @CanIgnoreReturnValue
   public boolean removeAll(Collection<String> importsToRemove) {
     return importStrings.removeAll(importsToRemove);
   }

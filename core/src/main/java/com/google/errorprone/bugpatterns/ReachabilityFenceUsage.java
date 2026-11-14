@@ -25,14 +25,17 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TryTree;
+import java.util.Objects;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "ReachabilityFenceUsage",
     summary = "reachabilityFence should always be called inside a finally block",
     severity = WARNING)
 public class ReachabilityFenceUsage extends BugChecker implements MethodInvocationTreeMatcher {
@@ -48,17 +51,22 @@ public class ReachabilityFenceUsage extends BugChecker implements MethodInvocati
     Tree previous = null;
     OUTER:
     for (Tree enclosing : state.getPath().getParentPath()) {
-      switch (enclosing.getKind()) {
-        case TRY:
-          if (((TryTree) enclosing).getFinallyBlock().equals(previous)) {
+      switch (enclosing) {
+        case TryTree tryTree -> {
+          if (Objects.equals(tryTree.getFinallyBlock(), previous)) {
             return NO_MATCH;
           }
-          break;
-        case CLASS:
-        case METHOD:
-        case LAMBDA_EXPRESSION:
+        }
+        case ClassTree classTree -> {
           break OUTER;
-        default: // fall out
+        }
+        case MethodTree methodTree -> {
+          break OUTER;
+        }
+        case LambdaExpressionTree lambdaExpressionTree -> {
+          break OUTER;
+        }
+        default -> {}
       }
       previous = enclosing;
     }

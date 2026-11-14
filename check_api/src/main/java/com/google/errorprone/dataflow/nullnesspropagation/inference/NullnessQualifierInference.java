@@ -18,16 +18,13 @@ package com.google.errorprone.dataflow.nullnesspropagation.inference;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import com.google.auto.value.AutoValue;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import com.google.common.graph.GraphBuilder;
 import com.google.common.graph.MutableGraph;
-import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.google.errorprone.dataflow.nullnesspropagation.Nullness;
 import com.google.errorprone.dataflow.nullnesspropagation.NullnessAnnotations;
 import com.sun.source.tree.ArrayAccessTree;
@@ -47,7 +44,6 @@ import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
@@ -65,8 +61,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
-import javax.annotation.Nullable;
 import javax.lang.model.type.TypeVariable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Eagerly traverse one {@code MethodTree} at a time and accumulate constraints between nullness
@@ -75,21 +71,17 @@ import javax.lang.model.type.TypeVariable;
  *
  * @author bennostein@google.com (Benno Stein)
  */
-public class NullnessQualifierInference extends TreeScanner<Void, Void> {
+public final class NullnessQualifierInference extends TreeScanner<Void, Void> {
 
   private static final LoadingCache<Tree, InferredNullability> inferenceCache =
-      CacheBuilder.newBuilder()
+      Caffeine.newBuilder()
           .maximumSize(1)
-          .build(
-              new CacheLoader<Tree, InferredNullability>() {
-                @Override
-                public InferredNullability load(Tree methodOrInitializer) {
-                  NullnessQualifierInference inferenceEngine =
-                      new NullnessQualifierInference(methodOrInitializer);
-                  inferenceEngine.scan(methodOrInitializer, null);
-                  return new InferredNullability(inferenceEngine.qualifierConstraints);
-                }
-              });
+          .build((Tree methodOrInitializer) -> {
+            NullnessQualifierInference inferenceEngine =
+                new NullnessQualifierInference(methodOrInitializer);
+            inferenceEngine.scan(methodOrInitializer, null);
+            return new InferredNullability(inferenceEngine.qualifierConstraints);
+          });
 
   public static InferredNullability getInferredNullability(Tree methodOrInitializerOrLambda) {
     checkArgument(
@@ -99,11 +91,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
             || methodOrInitializerOrLambda instanceof VariableTree,
         "Tree `%s` is not a lambda, initializer, or method.",
         methodOrInitializerOrLambda);
-    try {
-      return inferenceCache.getUnchecked(methodOrInitializerOrLambda);
-    } catch (UncheckedExecutionException e) {
-      throw e.getCause() instanceof CompletionFailure ? (CompletionFailure) e.getCause() : e;
-    }
+    return inferenceCache.get(methodOrInitializerOrLambda);
   }
 
   /**
@@ -134,7 +122,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
       generateConstraintsFromAnnotations(
           ((JCIdent) node).type, sym, declaredType, node, new ArrayDeque<>());
     }
-    return super.visitIdentifier(node, unused);
+    return super.visitIdentifier(node, null);
   }
 
   private void generateConstraintsFromAnnotations(
@@ -160,18 +148,18 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
 
     Optional<Nullness> fromAnnotations =
         extractExplicitNullness(declaredType, argSelector.isEmpty() ? decl : null);
-    if (!fromAnnotations.isPresent()) {
+    if (fromAnnotations.isEmpty()) {
       // Check declared type before inferred type so that type annotations on the declaration take
       // precedence (just like declaration annotations) over annotations on the inferred type.
       // For instance, we want a @Nullable T m() to take precedence over annotations on T's inferred
       // type (e.g., @NotNull String), whether @Nullable is a declaration or type annotation.
       fromAnnotations = NullnessAnnotations.fromAnnotationsOn(inferredType);
     }
-    if (!fromAnnotations.isPresent()) {
-      if (declaredType instanceof TypeVariable) {
+    if (fromAnnotations.isEmpty()) {
+      if (declaredType instanceof TypeVariable typeVariable) {
         // Check bounds second so explicit annotations take precedence. Even for bounds we still use
         // equality constraint below since we have to assume the bound as the "worst" case.
-        fromAnnotations = NullnessAnnotations.getUpperBound((TypeVariable) declaredType);
+        fromAnnotations = NullnessAnnotations.getUpperBound(typeVariable);
       } else {
         // Look for a default annotation in scope of either the symbol we're looking at or, if this
         // is a type variable, the type variable declaration's scope, which is effectively the type
@@ -182,13 +170,12 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
     // Use equality constraints even for top-level type, since we want to "trust" the annotation
     fromAnnotations
         .map(ProperInferenceVar::create)
-        .ifPresent(
-            annot -> {
-              InferenceVariable var =
-                  TypeArgInferenceVar.create(ImmutableList.copyOf(argSelector), sourceTree);
-              qualifierConstraints.putEdge(var, annot);
-              qualifierConstraints.putEdge(annot, var);
-            });
+        .ifPresent(annot -> {
+          InferenceVariable var =
+              TypeArgInferenceVar.create(ImmutableList.copyOf(argSelector), sourceTree);
+          qualifierConstraints.putEdge(var, annot);
+          qualifierConstraints.putEdge(annot, var);
+        });
   }
 
   @Override
@@ -198,7 +185,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
             ? ((JCArrayAccess) node.getVariable()).getExpression().type
             : TreeInfo.symbol((JCTree) node.getVariable()).type;
     generateConstraintsForWrite(lhsType, null, node.getExpression(), node);
-    return super.visitAssignment(node, unused);
+    return super.visitAssignment(node, null);
   }
 
   @Override
@@ -207,7 +194,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
       Symbol symbol = TreeInfo.symbolFor((JCTree) node);
       generateConstraintsForWrite(symbol.type, symbol, node.getInitializer(), node);
     }
-    return super.visitVariable(node, unused);
+    return super.visitVariable(node, null);
   }
 
   @Override
@@ -217,7 +204,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
           ((MethodSymbol) TreeInfo.symbolFor((JCTree) currentMethodOrInitializerOrLambda));
       generateConstraintsForWrite(sym.getReturnType(), sym, node.getExpression(), node);
     }
-    return super.visitReturn(node, unused);
+    return super.visitReturn(node, null);
   }
 
   private static ImmutableList<TypeAndSymbol> expandVarargsToArity(
@@ -260,7 +247,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
         sourceNode.getArguments().stream(),
         (formal, actual) -> {
           // formal parameter type (no l-val b/c that would wrongly constrain the method return)
-          generateConstraintsForWrite(formal.type(), formal.symbol(), actual, /*lVal=*/ null);
+          generateConstraintsForWrite(formal.type(), formal.symbol(), actual, /* lVal= */ null);
         });
 
     // Generate constraints for method return
@@ -269,28 +256,24 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
 
     // If return type is parameterized by a generic type on receiver, collate references to that
     // generic between the receiver and the result/argument types.
-    if (!callee.isStatic() && node.getMethodSelect() instanceof JCFieldAccess) {
-      JCFieldAccess fieldAccess = ((JCFieldAccess) node.getMethodSelect());
+    if (!callee.isStatic() && node.getMethodSelect() instanceof JCFieldAccess fieldAccess) {
       for (TypeVariableSymbol tvs : fieldAccess.selected.type.tsym.getTypeParameters()) {
         Type rcvrtype = fieldAccess.selected.type.tsym.type;
         // Note this should be a singleton set, one for each type parameter
         ImmutableSet<InferenceVariable> rcvrReferences =
-            findUnannotatedTypeVarRefs(tvs, rcvrtype, /*decl=*/ null, fieldAccess.selected);
+            findUnannotatedTypeVarRefs(tvs, rcvrtype, /* decl= */ null, fieldAccess.selected);
         Type restype = fieldAccess.sym.type.asMethodType().restype;
         findUnannotatedTypeVarRefs(tvs, restype, fieldAccess.sym, node)
-            .forEach(
-                resRef ->
-                    rcvrReferences.forEach(
-                        rcvrRef -> qualifierConstraints.putEdge(resRef, rcvrRef)));
+            .forEach(resRef ->
+                rcvrReferences.forEach(rcvrRef -> qualifierConstraints.putEdge(resRef, rcvrRef)));
         Streams.forEachPair(
             formalParameters.stream(),
             node.getArguments().stream(),
             (formal, actual) ->
                 findUnannotatedTypeVarRefs(tvs, formal.type(), formal.symbol(), actual)
-                    .forEach(
-                        argRef ->
-                            rcvrReferences.forEach(
-                                rcvrRef -> qualifierConstraints.putEdge(argRef, rcvrRef))));
+                    .forEach(argRef ->
+                        rcvrReferences.forEach(
+                            rcvrRef -> qualifierConstraints.putEdge(argRef, rcvrRef))));
       }
     }
 
@@ -307,25 +290,25 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
     // allow the inference to conclude later that x[0] = m(x)[0, 0], meaning the nullness qualifier
     // for x's <String> is the same as the one for m(x)'s <String>.
     for (TypeVariableSymbol typeVar : callee.getTypeParameters()) {
-      TypeVariableInferenceVar typeVarIV = TypeVariableInferenceVar.create(typeVar, node);
+      TypeVariableInferenceVar typeVarIv = TypeVariableInferenceVar.create(typeVar, node);
       visitUnannotatedTypeVarRefsAndEquateInferredComponents(
-          typeVarIV,
+          typeVarIv,
           callee.getReturnType(),
           callee,
           node,
-          iv -> qualifierConstraints.putEdge(typeVarIV, iv));
+          iv -> qualifierConstraints.putEdge(typeVarIv, iv));
       Streams.forEachPair(
           formalParameters.stream(),
           node.getArguments().stream(),
           (formal, actual) ->
               visitUnannotatedTypeVarRefsAndEquateInferredComponents(
-                  typeVarIV,
+                  typeVarIv,
                   formal.type(),
                   formal.symbol(),
                   actual,
-                  iv -> qualifierConstraints.putEdge(iv, typeVarIV)));
+                  iv -> qualifierConstraints.putEdge(iv, typeVarIv)));
     }
-    return super.visitMethodInvocation(node, unused);
+    return super.visitMethodInvocation(node, null);
   }
 
   private static void visitTypeVarRefs(
@@ -367,7 +350,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
         new ArrayDeque<>(),
         null,
         (typeVarRef, selector, unused) -> {
-          if (!extractExplicitNullness(typeVarRef, selector.isEmpty() ? decl : null).isPresent()) {
+          if (extractExplicitNullness(typeVarRef, selector.isEmpty() ? decl : null).isEmpty()) {
             result.add(TypeArgInferenceVar.create(ImmutableList.copyOf(selector), sourceNode));
           }
         });
@@ -386,7 +369,7 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
         new ArrayDeque<>(),
         ((JCExpression) sourceNode).type,
         (declaredType, selector, inferredType) -> {
-          if (!extractExplicitNullness(type, selector.isEmpty() ? decl : null).isPresent()) {
+          if (extractExplicitNullness(type, selector.isEmpty() ? decl : null).isEmpty()) {
             consumer.accept(TypeArgInferenceVar.create(ImmutableList.copyOf(selector), sourceNode));
           }
 
@@ -460,8 +443,8 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
     } else if ((rVal instanceof LiteralTree)
         || (rVal instanceof NewClassTree)
         || (rVal instanceof NewArrayTree)
-        || ((rVal instanceof IdentifierTree)
-            && ((IdentifierTree) rVal).getName().contentEquals("this"))) {
+        || ((rVal instanceof IdentifierTree identifierTree)
+            && identifierTree.getName().contentEquals("this"))) {
       qualifierConstraints.putEdge(
           ProperInferenceVar.NONNULL, TypeArgInferenceVar.create(ImmutableList.of(), rVal));
       qualifierConstraints.putEdge(
@@ -490,9 +473,9 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
     boolean isBound = false;
     Optional<Nullness> fromAnnotations =
         extractExplicitNullness(lType, argSelector.isEmpty() ? decl : null);
-    if (!fromAnnotations.isPresent()) {
-      if (lType instanceof TypeVariable) {
-        fromAnnotations = NullnessAnnotations.getUpperBound((TypeVariable) lType);
+    if (fromAnnotations.isEmpty()) {
+      if (lType instanceof TypeVariable typeVariable) {
+        fromAnnotations = NullnessAnnotations.getUpperBound(typeVariable);
         isBound = true;
       } else {
         fromAnnotations = NullnessAnnotations.fromDefaultAnnotations(decl);
@@ -506,14 +489,13 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
     boolean oneSided = isBound || argSelector.isEmpty();
     fromAnnotations
         .map(ProperInferenceVar::create)
-        .ifPresent(
-            annot -> {
-              InferenceVariable var = TypeArgInferenceVar.create(argSelectorList, rVal);
-              qualifierConstraints.putEdge(var, annot);
-              if (!oneSided) {
-                qualifierConstraints.putEdge(annot, var);
-              }
-            });
+        .ifPresent(annot -> {
+          InferenceVariable var = TypeArgInferenceVar.create(argSelectorList, rVal);
+          qualifierConstraints.putEdge(var, annot);
+          if (!oneSided) {
+            qualifierConstraints.putEdge(annot, var);
+          }
+        });
 
     if (lVal != null) {
       // Constrain this type or type argument on the rVal to be <= its lVal counterpart
@@ -524,19 +506,13 @@ public class NullnessQualifierInference extends TreeScanner<Void, Void> {
   }
 
   /** Pair of a {@link Type} and an optional {@link Symbol}. */
-  @AutoValue
-  abstract static class TypeAndSymbol {
+  private record TypeAndSymbol(Type type, @Nullable VarSymbol symbol) {
     static TypeAndSymbol create(Type type) {
-      return create(type, /*symbol=*/ null);
+      return create(type, /* symbol= */ null);
     }
 
     static TypeAndSymbol create(Type type, @Nullable VarSymbol symbol) {
-      return new AutoValue_NullnessQualifierInference_TypeAndSymbol(type, symbol);
+      return new TypeAndSymbol(type, symbol);
     }
-
-    abstract Type type();
-
-    @Nullable
-    abstract VarSymbol symbol();
   }
 }

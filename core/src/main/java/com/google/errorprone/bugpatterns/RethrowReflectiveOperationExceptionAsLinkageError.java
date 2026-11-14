@@ -19,6 +19,8 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.constructor;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
+import static com.google.errorprone.util.ASTHelpers.isSameType;
 
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
@@ -27,17 +29,18 @@ import com.google.errorprone.bugpatterns.BugChecker.ThrowTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.ThrowTree;
 import com.sun.tools.javac.code.Symbol;
+import com.sun.tools.javac.code.Type;
 import java.util.List;
 import javax.lang.model.element.ElementKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "RethrowReflectiveOperationExceptionAsLinkageError",
     summary = "Prefer LinkageError for rethrowing ReflectiveOperationException as unchecked",
     severity = WARNING)
 public class RethrowReflectiveOperationExceptionAsLinkageError extends BugChecker
@@ -64,7 +67,7 @@ public class RethrowReflectiveOperationExceptionAsLinkageError extends BugChecke
     String message =
         arguments.size() == 1
             ? String.format("%s.getMessage()", cause.getSimpleName())
-            : state.getSourceForNode(arguments.get(0));
+            : state.getSourceForNode(arguments.getFirst());
     return describeMatch(
         newClassTree,
         SuggestedFix.replace(
@@ -73,9 +76,10 @@ public class RethrowReflectiveOperationExceptionAsLinkageError extends BugChecke
   }
 
   private static boolean isReflectiveOperationException(VisitorState state, Symbol symbol) {
-    return state
-            .getTypes()
-            .isSameType(symbol.asType(), state.getTypeFromString(REFLECTIVE_OPERATION_EXCEPTION))
+    return isSameType(symbol.asType(), JAVA_LANG_REFLECTIVEOPERATIONEXCEPTION.get(state), state)
         && symbol.getKind().equals(ElementKind.EXCEPTION_PARAMETER);
   }
+
+  private static final Supplier<Type> JAVA_LANG_REFLECTIVEOPERATIONEXCEPTION =
+      typeFromString(REFLECTIVE_OPERATION_EXCEPTION);
 }

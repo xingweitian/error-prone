@@ -18,10 +18,12 @@ package com.google.errorprone.bugpatterns.formatstring;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
+import static com.google.errorprone.util.ASTHelpers.isSubtype;
+import static java.util.Arrays.asList;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ConditionalExpressionTree;
@@ -31,8 +33,6 @@ import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
-import edu.umd.cs.findbugs.formatStringChecker.ExtraFormatArgumentsException;
-import edu.umd.cs.findbugs.formatStringChecker.Formatter;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;
@@ -40,16 +40,18 @@ import java.time.ZoneId;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Date;
 import java.util.Deque;
 import java.util.DuplicateFormatFlagsException;
 import java.util.FormatFlagsConversionMismatchException;
+import java.util.Formattable;
+import java.util.Formatter;
 import java.util.GregorianCalendar;
 import java.util.IllegalFormatCodePointException;
 import java.util.IllegalFormatConversionException;
+import java.util.IllegalFormatException;
 import java.util.IllegalFormatFlagsException;
 import java.util.IllegalFormatPrecisionException;
 import java.util.IllegalFormatWidthException;
@@ -58,25 +60,22 @@ import java.util.MissingFormatArgumentException;
 import java.util.MissingFormatWidthException;
 import java.util.UnknownFormatConversionException;
 import java.util.UnknownFormatFlagsException;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
 import javax.lang.model.type.TypeKind;
+import org.jspecify.annotations.Nullable;
 
 /** Utilities for validating format strings. */
 public final class FormatStringValidation {
 
-  /** Description of an incorrect format method call. */
-  @AutoValue
-  public abstract static class ValidationResult {
-    /** The exception thrown by {@code String.format} or {@code Formatter.check}. */
-    @Nullable
-    public abstract Exception exception();
-
-    /** A human-readable diagnostic message. */
-    public abstract String message();
-
-    public static ValidationResult create(@Nullable Exception exception, String message) {
-      return new AutoValue_FormatStringValidation_ValidationResult(exception, message);
+  /**
+   * Description of an incorrect format method call.
+   *
+   * @param message A human-readable diagnostic message.
+   */
+  public record ValidationResult(String message) {
+    public static ValidationResult create(String message) {
+      return new ValidationResult(message);
     }
   }
 
@@ -99,11 +98,10 @@ public final class FormatStringValidation {
     return flat.stream().map(t -> ASTHelpers.constValue(t, String.class)).filter(x -> x != null);
   }
 
-  @Nullable
-  public static ValidationResult validate(
+  public static @Nullable ValidationResult validate(
       @Nullable MethodSymbol formatMethodSymbol,
       Collection<? extends ExpressionTree> arguments,
-      final VisitorState state) {
+      VisitorState state) {
     Preconditions.checkArgument(
         !arguments.isEmpty(),
         "A format method should have one or more arguments, but method (%s) has zero arguments.",
@@ -120,24 +118,22 @@ public final class FormatStringValidation {
     // Bail out, since we don't know what the actual argument types are.
     if (args.size() == 1 && (formatMethodSymbol == null || formatMethodSymbol.isVarArgs())) {
       Type type = ASTHelpers.getType(Iterables.getOnlyElement(args));
-      if (type instanceof Type.ArrayType
-          && ASTHelpers.isSameType(
-              ((Type.ArrayType) type).elemtype, state.getSymtab().objectType, state)) {
+      if (type instanceof Type.ArrayType arrayType
+          && ASTHelpers.isSameType(arrayType.elemtype, state.getSymtab().objectType, state)) {
         return null;
       }
     }
 
     Object[] instances =
         args.stream()
-            .map(
-                (ExpressionTree input) -> {
-                  try {
-                    return getInstance(input, state);
-                  } catch (Throwable t) {
-                    // ignore symbol completion failures
-                    return null;
-                  }
-                })
+            .map((ExpressionTree input) -> {
+              try {
+                return getInstance(input, state);
+              } catch (RuntimeException t) {
+                // ignore symbol completion failures
+                return null;
+              }
+            })
             .toArray();
 
     return formatStrings
@@ -149,11 +145,10 @@ public final class FormatStringValidation {
 
   /**
    * Return an instance of the given type if it receives special handling by {@code String.format}.
-   * For example, an intance of {@link Integer} will be returned for an input of type {@code int} or
-   * {@link Integer}.
+   * For example, an instance of {@link Integer} will be returned for an input of type {@code int}
+   * or {@link Integer}.
    */
-  @Nullable
-  private static Object getInstance(Tree tree, VisitorState state) {
+  private static @Nullable Object getInstance(Tree tree, VisitorState state) {
     Object value = ASTHelpers.constValue(tree);
     if (value != null) {
       return value;
@@ -162,8 +157,7 @@ public final class FormatStringValidation {
     return getInstance(type, state);
   }
 
-  @Nullable
-  private static Object getInstance(Type type, VisitorState state) {
+  private static @Nullable Object getInstance(Type type, VisitorState state) {
     Types types = state.getTypes();
     if (type.getKind() == TypeKind.NULL) {
       return null;
@@ -172,136 +166,147 @@ public final class FormatStringValidation {
     Type unboxedType = types.unboxedTypeOrType(types.erasure(type));
     if (unboxedType.isPrimitive()) {
       type = unboxedType;
-      switch (type.getKind()) {
-        case BOOLEAN:
-          return false;
-        case BYTE:
-          return (byte) 1;
-        case SHORT:
-          return (short) 2;
-        case INT:
-          return 3;
-        case LONG:
-          return 4L;
-        case CHAR:
-          return 'c';
-        case FLOAT:
-          return 5.0f;
-        case DOUBLE:
-          return 6.0d;
-        case VOID:
-        case NONE:
-        case NULL:
-        case ERROR:
-          return null;
-        case ARRAY:
-          return new Object[0];
-        default:
-          throw new AssertionError(type.getKind());
-      }
+      return switch (type.getKind()) {
+        case BOOLEAN -> false;
+        case BYTE -> (byte) 1;
+        case SHORT -> (short) 2;
+        case INT -> 3;
+        case LONG -> 4L;
+        case CHAR -> 'c';
+        case FLOAT -> 5.0f;
+        case DOUBLE -> 6.0d;
+        case VOID, NONE, NULL, ERROR -> null;
+        case ARRAY -> new Object[0];
+        default -> throw new AssertionError(type.getKind());
+      };
     }
-    if (isSubtype(types, type, state.getSymtab().stringType)) {
+    if (isSubtype(type, state.getSymtab().stringType, state)) {
       return "string";
     }
-    if (isSubtype(types, type, state.getTypeFromString(BigDecimal.class.getName()))) {
+    if (isSubtype(type, BIG_DECIMAL, state)) {
       return BigDecimal.valueOf(42.0d);
     }
-    if (isSubtype(types, type, state.getTypeFromString(BigInteger.class.getName()))) {
+    if (isSubtype(type, BIG_INTEGER, state)) {
       return BigInteger.valueOf(43L);
     }
-    if (isSameType(type, state.getTypeFromString(Number.class.getName()), state)) {
+    if (isSameType(type, NUMBER, state)) {
       // String.format only supports well-known subtypes of Number, but custom subtypes of Number
       // are rarer than using it as a union of Byte/Short/Integer/Long/BigInteger, so we allow
       // Number to avoid false positives.
       return 0;
     }
-    if (isSubtype(types, type, state.getTypeFromString(Date.class.getName()))) {
+    if (isSubtype(type, DATE, state)) {
       return new Date();
     }
-    if (isSubtype(types, type, state.getTypeFromString(Calendar.class.getName()))) {
+    if (isSubtype(type, CALENDAR, state)) {
       return new GregorianCalendar();
     }
-    if (isSubtype(types, type, state.getTypeFromString(Instant.class.getName()))) {
+    if (isSubtype(type, INSTANT, state)) {
       return Instant.now();
     }
-    if (isSubtype(types, type, state.getTypeFromString(TemporalAccessor.class.getName()))) {
+    if (isSubtype(type, TEMPORAL_ACCESSOR, state)) {
       return Instant.now().atZone(ZoneId.systemDefault());
     }
-    Type lazyArg = state.getTypeFromString("com.google.common.flogger.LazyArg");
+    Type lazyArg = COM_GOOGLE_COMMON_FLOGGER_LAZYARG.type(state);
     if (lazyArg != null) {
       Type asLazyArg = types.asSuper(type, lazyArg.tsym);
       if (asLazyArg != null && !asLazyArg.getTypeArguments().isEmpty()) {
         return getInstance(getOnlyElement(asLazyArg.getTypeArguments()), state);
       }
     }
-    return new Object();
-  }
-
-  private static boolean isSubtype(Types types, Type t, Type s) {
-    return s != null && types.isSubtype(t, s);
+    return new Formattable() {
+      @Override
+      public void formatTo(Formatter formatter, int flags, int width, int precision) {
+        formatter.format("hello");
+      }
+    };
   }
 
   private static ValidationResult validate(String formatString, Object[] arguments) {
     try {
       String unused = String.format(formatString, arguments);
     } catch (DuplicateFormatFlagsException e) {
-      return ValidationResult.create(e, String.format("duplicate format flags: %s", e.getFlags()));
+      return ValidationResult.create(String.format("duplicate format flags: %s", e.getFlags()));
     } catch (FormatFlagsConversionMismatchException e) {
       return ValidationResult.create(
-          e,
           String.format(
               "format specifier '%%%s' is not compatible with the given flag(s): %s",
               e.getConversion(), e.getFlags()));
     } catch (IllegalFormatCodePointException e) {
       return ValidationResult.create(
-          e, String.format("invalid Unicode code point: %x", e.getCodePoint()));
+          String.format("invalid Unicode code point: %x", e.getCodePoint()));
     } catch (IllegalFormatConversionException e) {
       return ValidationResult.create(
-          e,
           String.format(
               "illegal format conversion: '%s' cannot be formatted using '%%%s'",
               e.getArgumentClass().getName(), e.getConversion()));
     } catch (IllegalFormatFlagsException e) {
-      return ValidationResult.create(e, String.format("illegal format flags: %s", e.getFlags()));
+      return ValidationResult.create(String.format("illegal format flags: %s", e.getFlags()));
     } catch (IllegalFormatPrecisionException e) {
       return ValidationResult.create(
-          e, String.format("illegal format precision: %d", e.getPrecision()));
+          String.format("illegal format precision: %d", e.getPrecision()));
     } catch (IllegalFormatWidthException e) {
-      return ValidationResult.create(e, String.format("illegal format width: %s", e.getWidth()));
+      return ValidationResult.create(String.format("illegal format width: %s", e.getWidth()));
     } catch (MissingFormatArgumentException e) {
       return ValidationResult.create(
-          e, String.format("missing argument for format specifier '%s'", e.getFormatSpecifier()));
+          String.format("missing argument for format specifier '%s'", e.getFormatSpecifier()));
     } catch (MissingFormatWidthException e) {
       return ValidationResult.create(
-          e, String.format("missing format width: %s", e.getFormatSpecifier()));
+          String.format("missing format width: %s", e.getFormatSpecifier()));
     } catch (UnknownFormatConversionException e) {
-      return ValidationResult.create(e, unknownFormatConversion(e.getConversion()));
+      return ValidationResult.create(unknownFormatConversion(e.getConversion()));
     } catch (UnknownFormatFlagsException e) {
       // TODO(cushon): I don't think the implementation ever throws this.
-      return ValidationResult.create(e, String.format("unknown format flag(s): %s", e.getFlags()));
+      return ValidationResult.create(String.format("unknown format flag(s): %s", e.getFlags()));
+    } catch (IllegalFormatException e) {
+      // Fall back for other invalid format strings, e.g. IllegalFormatArgumentIndexException that
+      // was added in JDK 16
+      return ValidationResult.create(e.getMessage());
     }
+    return extraFormatArguments(formatString, asList(arguments));
+  }
 
-    try {
-      // arguments are specified as type descriptors, and all we care about checking is the arity
-      String[] argDescriptors = new String[arguments.length];
-      Arrays.fill(argDescriptors, "Ljava/lang/Object;");
-      Formatter.check(formatString, argDescriptors);
-    } catch (ExtraFormatArgumentsException e) {
-      return ValidationResult.create(
-          e, String.format("extra format arguments: used %d, provided %d", e.used, e.provided));
-    } catch (Exception ignored) {
-      // everything else is validated by String.format above
+  private static @Nullable ValidationResult extraFormatArguments(
+      String formatString, List<Object> arguments) {
+    int used =
+        IntStream.rangeClosed(0, arguments.size())
+            .filter(i -> doesItFormat(formatString, arguments.subList(0, i)))
+            .findFirst()
+            .orElse(0);
+    if (used == arguments.size()) {
+      return null;
     }
-    return null;
+    return ValidationResult.create(
+        String.format("extra format arguments: used %d, provided %d", used, arguments.size()));
+  }
+
+  private static boolean doesItFormat(String formatString, List<Object> arguments) {
+    try {
+      String unused = String.format(formatString, arguments.toArray());
+      return true;
+    } catch (IllegalFormatException e) {
+      return false;
+    }
   }
 
   private static String unknownFormatConversion(String conversion) {
     if (conversion.equals("l")) {
-      return "%l is not a valid format specifier; use %d for all integral types and %f for all "
-          + "floating point types";
+      return "%l is not a valid format specifier; use %d to format integral types as a decimal "
+          + "integer, and %f, %g or %e to format floating point types (depending on your "
+          + "formatting needs)";
     }
     return String.format("unknown format conversion: '%s'", conversion);
   }
 
   private FormatStringValidation() {}
+
+  private static final ClassName BIG_DECIMAL = ClassName.of(BigDecimal.class.getName());
+  private static final ClassName BIG_INTEGER = ClassName.of(BigInteger.class.getName());
+  private static final ClassName NUMBER = ClassName.of(Number.class.getName());
+  private static final ClassName DATE = ClassName.of(Date.class.getName());
+  private static final ClassName CALENDAR = ClassName.of(Calendar.class.getName());
+  private static final ClassName INSTANT = ClassName.of(Instant.class.getName());
+  private static final ClassName TEMPORAL_ACCESSOR = ClassName.of(TemporalAccessor.class.getName());
+  private static final ClassName COM_GOOGLE_COMMON_FLOGGER_LAZYARG =
+      ClassName.of("com.google.common.flogger.LazyArg");
 }

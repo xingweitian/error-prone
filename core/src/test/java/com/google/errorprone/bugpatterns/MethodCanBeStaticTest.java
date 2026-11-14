@@ -19,7 +19,6 @@ package com.google.errorprone.bugpatterns;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.ErrorProneFlags;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -31,20 +30,21 @@ public class MethodCanBeStaticTest {
       CompilationTestHelper.newInstance(MethodCanBeStatic.class, getClass());
 
   private final BugCheckerRefactoringTestHelper refactoringHelper =
-      BugCheckerRefactoringTestHelper.newInstance(
-          new MethodCanBeStatic(ErrorProneFlags.empty()), getClass());
+      BugCheckerRefactoringTestHelper.newInstance(MethodCanBeStatic.class, getClass());
 
   @Test
   public void positive() {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  // BUG: Diagnostic contains: private static int add(",
-            "  private int add(int x, int y) {",
-            "    return x + y;",
-            "  }",
-            "}")
+            """
+            class Test {
+              // BUG: Diagnostic contains: private static int add(
+              private int add(int x, int y) {
+                return x + y;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -53,24 +53,30 @@ public class MethodCanBeStaticTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private int a(int x) {",
-            "    return b(x);",
-            "  }",
-            "  private int b(int x) {",
-            "    return a(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private int a(int x) {
+                return b(x);
+              }
+
+              private int b(int x) {
+                return a(x);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private static int a(int x) {",
-            "    return b(x);",
-            "  }",
-            "  private static int b(int x) {",
-            "    return a(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static int a(int x) {
+                return b(x);
+              }
+
+              private static int b(int x) {
+                return a(x);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -79,17 +85,21 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public int f(int x) {",
-            "    return x;",
-            "  }",
-            "  private int a(int x) {",
-            "    return b(x) + f(x);",
-            "  }",
-            "  private int b(int x) {",
-            "    return a(x) + f(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              public int f(int x) {
+                return x;
+              }
+
+              private int a(int x) {
+                return b(x) + f(x);
+              }
+
+              private int b(int x) {
+                return a(x) + f(x);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -98,22 +108,50 @@ public class MethodCanBeStaticTest {
     refactoringHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private static final int FOO = 1;",
-            "  private int a() { return FOO; }",
-            "  private int b() { return a(); }",
-            "  private int c() { return b(); }",
-            "  private int d() { return c(); }",
-            "}")
+            """
+            class Test {
+              private static final int FOO = 1;
+
+              private int a() {
+                return FOO;
+              }
+
+              private int b() {
+                return a();
+              }
+
+              private int c() {
+                return b();
+              }
+
+              private int d() {
+                return c();
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private static final int FOO = 1;",
-            "  private static int a() { return FOO; }",
-            "  private static int b() { return a(); }",
-            "  private static int c() { return b(); }",
-            "  private static int d() { return c(); }",
-            "}")
+            """
+            class Test {
+              private static final int FOO = 1;
+
+              private static int a() {
+                return FOO;
+              }
+
+              private static int b() {
+                return a();
+              }
+
+              private static int c() {
+                return b();
+              }
+
+              private static int d() {
+                return c();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -122,14 +160,28 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private static final int FOO = 1;",
-            "  // BUG: Diagnostic contains: MethodCanBeStatic",
-            "  private int a() { return FOO; }",
-            "  private int b() { return a(); }",
-            "  private int c() { return b(); }",
-            "  private int d() { return c(); }",
-            "}")
+            """
+            class Test {
+              private static final int FOO = 1;
+
+              // BUG: Diagnostic contains: MethodCanBeStatic
+              private int a() {
+                return FOO;
+              }
+
+              private int b() {
+                return a();
+              }
+
+              private int c() {
+                return b();
+              }
+
+              private int d() {
+                return c();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -137,14 +189,23 @@ public class MethodCanBeStaticTest {
   public void positiveRecursive() {
     refactoringHelper
         .addInputLines(
-            "Test.java", "class Test {", "  private int a(int x) {", "    return a(x);", "  }", "}")
+            "Test.java",
+            """
+            class Test {
+              private int a(int x) {
+                return a(x);
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  private static int a(int x) {",
-            "    return a(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              private static int a(int x) {
+                return a(x);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -153,12 +214,15 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  int base = 0;",
-            "  private int f(int x, int y) {",
-            "    return base++ + x + y;",
-            "  }",
-            "}")
+            """
+            class Test {
+              int base = 0;
+
+              private int f(int x, int y) {
+                return base++ + x + y;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -167,12 +231,32 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test<T> {",
-            "  // BUG: Diagnostic contains: private static <T> T f(",
-            "  private <T> T f(int x, int y) {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test<T> {
+              // BUG: Diagnostic contains: private static <T> T f(
+              private <T> T f(int x, int y) {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeSuppressedByKeep() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.errorprone.annotations.Keep;
+
+            class Test {
+              @Keep
+              private int add(int x, int y) {
+                return x + y;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -181,11 +265,13 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test<T> {",
-            "  private T f(int x, int y) {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            class Test<T> {
+              private T f(int x, int y) {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -193,11 +279,12 @@ public class MethodCanBeStaticTest {
   public void negativeConstructor() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  Test() {",
-            "}",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              Test() {}
+            }
+            """)
         .doTest();
   }
 
@@ -206,11 +293,13 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public String toString() {",
-            "    return \"\";",
-            "  }",
-            "}")
+            """
+            class Test {
+              public String toString() {
+                return "";
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -219,11 +308,13 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private synchronized String frobnicate() {",
-            "    return \"\";",
-            "  }",
-            "}")
+            """
+            class Test {
+              private synchronized String frobnicate() {
+                return "";
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -232,12 +323,14 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  @SuppressWarnings(\"MethodCanBeStatic\")",
-            "  private String f() {",
-            "    return \"\";",
-            "  }",
-            "}")
+            """
+            class Test {
+              @SuppressWarnings("MethodCanBeStatic")
+              private String f() {
+                return "";
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -246,12 +339,14 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  @SuppressWarnings(\"static-method\")",
-            "  private String f() {",
-            "    return \"\";",
-            "  }",
-            "}")
+            """
+            class Test {
+              @SuppressWarnings("static-method")
+              private String f() {
+                return "";
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -260,12 +355,14 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  @Override",
-            "  public String toString() {",
-            "    return \"\";",
-            "  }",
-            "}")
+            """
+            class Test {
+              @Override
+              public String toString() {
+                return "";
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -274,15 +371,19 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  int x;",
-            "  int f() {",
-            "    return x++;",
-            "  }",
-            "  private int g() {",
-            "    return f();",
-            "  }",
-            "}")
+            """
+            class Test {
+              int x;
+
+              int f() {
+                return x++;
+              }
+
+              private int g() {
+                return f();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -290,10 +391,12 @@ public class MethodCanBeStaticTest {
   public void nativeMethod() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  private native int f();",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              private native int f();
+            }
+            """)
         .doTest();
   }
 
@@ -301,14 +404,35 @@ public class MethodCanBeStaticTest {
   public void innerClass() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  class Inner {",
-            "    private int incr(int x) {",
-            "      return x + 1;",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              class Inner {
+                private int incr(int x) {
+                  return x + 1;
+                }
+              }
+            }
+            """)
+        .setArgs("--release", "11")
+        .doTest();
+  }
+
+  @Test
+  public void innerClass_static() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              class Inner {
+                // BUG: Diagnostic contains: static
+                private int incr(int x) {
+                  return x + 1;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -316,12 +440,14 @@ public class MethodCanBeStaticTest {
   public void negativeEnum() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "enum Test {",
-            "  VALUE {",
-            "    private void foo() {}",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            enum Test {
+              VALUE {
+                private void foo() {}
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -329,14 +455,16 @@ public class MethodCanBeStaticTest {
   public void negativeAnonymous() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  static void foo() {",
-            "    new Object() {",
-            "      private void foo() {}",
-            "    };",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              static void foo() {
+                new Object() {
+                  private void foo() {}
+                };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -344,14 +472,35 @@ public class MethodCanBeStaticTest {
   public void negativeLocal() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  static void foo() {",
-            "    class Local {",
-            "      private void foo() {}",
-            "    }",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              static void foo() {
+                class Local {
+                  private void foo() {}
+                }
+              }
+            }
+            """)
+        .setArgs("--release", "11")
+        .doTest();
+  }
+
+  @Test
+  public void positiveLocal() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              static void foo() {
+                class Local {
+                  // BUG: Diagnostic contains: static
+                  private void foo() {}
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -360,21 +509,36 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test<T> {",
-            "  private int add(int x, int y) {",
-            "    T t = null;",
-            "    return x + y;",
-            "  }",
-            "}")
+            """
+            class Test<T> {
+              private int add(int x, int y) {
+                T t = null;
+                return x + y;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
   public void negative_baseClass() {
     testHelper
-        .addSourceLines("A.java", "class A {", "  void foo() {}", "}")
         .addSourceLines(
-            "B.java", "class B extends A {", "  private void bar() {", "    foo();", "  }", "}")
+            "A.java",
+            """
+            class A {
+              void foo() {}
+            }
+            """)
+        .addSourceLines(
+            "B.java",
+            """
+            class B extends A {
+              private void bar() {
+                foo();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -382,21 +546,30 @@ public class MethodCanBeStaticTest {
   public void serialization() {
     testHelper
         .addSourceLines(
-            "Test.java", //
-            "import java.io.ObjectInputStream;",
-            "import java.io.ObjectOutputStream;",
-            "import java.io.ObjectStreamException;",
-            "import java.io.IOException;",
-            "import java.io.Serializable;",
-            "class Test implements Serializable {",
-            "  private void readObject(",
-            "    ObjectInputStream stream) throws IOException, ClassNotFoundException {}",
-            "  private void writeObject(",
-            "    ObjectOutputStream stream) throws IOException {}",
-            "  private void readObjectNoData() throws ObjectStreamException {}",
-            "  private Object readResolve() { return null; }",
-            "  private Object writeReplace() { return null; }",
-            "}")
+            "Test.java",
+"""
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.ObjectStreamException;
+import java.io.Serializable;
+
+class Test implements Serializable {
+  private void readObject(ObjectInputStream stream) throws IOException, ClassNotFoundException {}
+
+  private void writeObject(ObjectOutputStream stream) throws IOException {}
+
+  private void readObjectNoData() throws ObjectStreamException {}
+
+  private Object readResolve() {
+    return null;
+  }
+
+  private Object writeReplace() {
+    return null;
+  }
+}
+""")
         .doTest();
   }
 
@@ -405,24 +578,32 @@ public class MethodCanBeStaticTest {
     refactoringHelper
         .addInputLines(
             "in/Test.java",
-            "import java.util.function.ToIntBiFunction;",
-            "class Test {",
-            "  private int add(int x, int y) {",
-            "    return x + y;",
-            "  }",
-            "  ToIntBiFunction<Integer, Integer> f = this::add;",
-            "  ToIntBiFunction<Integer, Integer> g = (x, y) -> this.add(x, y);",
-            "}")
+            """
+            import java.util.function.ToIntBiFunction;
+
+            class Test {
+              private int add(int x, int y) {
+                return x + y;
+              }
+
+              ToIntBiFunction<Integer, Integer> f = this::add;
+              ToIntBiFunction<Integer, Integer> g = (x, y) -> this.add(x, y);
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import java.util.function.ToIntBiFunction;",
-            "class Test {",
-            "  private static int add(int x, int y) {",
-            "    return x + y;",
-            "  }",
-            "  ToIntBiFunction<Integer, Integer> f = Test::add;",
-            "  ToIntBiFunction<Integer, Integer> g = (x, y) -> Test.add(x, y);",
-            "}")
+            """
+            import java.util.function.ToIntBiFunction;
+
+            class Test {
+              private static int add(int x, int y) {
+                return x + y;
+              }
+
+              ToIntBiFunction<Integer, Integer> f = Test::add;
+              ToIntBiFunction<Integer, Integer> g = (x, y) -> Test.add(x, y);
+            }
+            """)
         .doTest();
   }
 
@@ -431,17 +612,181 @@ public class MethodCanBeStaticTest {
     testHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  // BUG: Diagnostic contains: static",
-            "  private int a(int x) {",
-            "    return b(x);",
-            "  }",
-            "  // BUG: Diagnostic contains: static",
-            "  private int b(int x) {",
-            "    return a(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              // BUG: Diagnostic contains: static
+              private int a(int x) {
+                return b(x);
+              }
+
+              // BUG: Diagnostic contains: static
+              private int b(int x) {
+                return a(x);
+              }
+            }
+            """)
         .setArgs(ImmutableList.of("-XepOpt:MethodCanBeStatic:FindingPerSite"))
+        .doTest();
+  }
+
+  @Test
+  public void abstractMethod_notFlagged() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              private abstract static class Foo {
+                abstract void frobnicate();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultMethodExempted() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              private interface Foo {
+                default void foo() {}
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void keepAnnotationsExempted() {
+    testHelper
+        .addSourceLines(
+            "DoFn.java",
+            """
+            package org.apache.beam.sdk.transforms;
+
+            public class DoFn {
+              public @interface ProcessElement {}
+            }
+            """)
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              @org.apache.beam.sdk.transforms.DoFn.ProcessElement
+              private void foo() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void privateMethod_overriddenWithinFile_cannotBeStatic() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              private static class A {
+                public int get() {
+                  return 0;
+                }
+              }
+
+              private static class B extends A {
+                private final int x = 1;
+
+                @Override
+                public int get() {
+                  return x;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void privateMethod_overriddenWithinFile_bothDoNotReferenceInstanceState_cannotBeStatic() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              private static class A {
+                public int get() {
+                  return 0;
+                }
+              }
+
+              private static class B extends A {
+                @Override
+                public int get() {
+                  return 1;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void guiceProvidesMethod_madeStatic() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import com.google.inject.AbstractModule;
+            import com.google.inject.Provides;
+
+            class MadeStatic extends AbstractModule {
+              @Provides
+              Boolean provideBoolean() {
+                return false;
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            import com.google.inject.AbstractModule;
+            import com.google.inject.Provides;
+
+            class MadeStatic extends AbstractModule {
+              @Provides
+              static Boolean provideBoolean() {
+                return false;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void guiceProvidesMethod_withInstanceState_cannotBeMadeStatic() {
+    testHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.inject.AbstractModule;
+            import com.google.inject.Provides;
+
+            class Test extends AbstractModule {
+
+              private final int value;
+
+              public Test(int value) {
+                this.value = value;
+              }
+
+              @Provides
+              int provideInteger() {
+                return value;
+              }
+            }
+            """)
         .doTest();
   }
 }

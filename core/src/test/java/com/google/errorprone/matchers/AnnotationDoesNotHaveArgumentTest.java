@@ -37,41 +37,69 @@ public class AnnotationDoesNotHaveArgumentTest extends CompilerBasedAbstractTest
   @Before
   public void createAnnotation() {
     writeFile(
-        "Annotation.java", "public @interface Annotation {", "  String value() default \"\";", "}");
+        "Annotation.java",
+        """
+        public @interface Annotation {
+          String value() default "";
+        }
+        """);
   }
 
   @Test
   public void matchesWhenArgumentIsNotPresent() {
-    writeFile("Class.java", "@Annotation", "public class Class {}");
+    writeFile(
+        "Class.java",
+        """
+        @Annotation
+        public class Class {}
+        """);
     assertCompiles(annotationMatches(true));
   }
 
   @Test
-  public void matchesWhenArgumentIsNotPresent_OtherArgumentPresent() {
+  public void matchesWhenArgumentIsNotPresent_otherArgumentPresent() {
     writeFile(
         "Annotation2.java",
-        "public @interface Annotation2 {",
-        "  String value() default \"\";",
-        "  String otherValue() default \"\";",
-        "}");
-    writeFile("Class.java", "@Annotation2(otherValue = \"literal\")", "public class Class {}");
+        """
+        public @interface Annotation2 {
+          String value() default "";
+
+          String otherValue() default "";
+        }
+        """);
+    writeFile(
+        "Class.java",
+        """
+        @Annotation2(otherValue = "literal")
+        public class Class {}
+        """);
     assertCompiles(annotationMatches(true));
   }
 
   @Test
-  public void doesNotMatchWhenArgumentIsPresent_Implicit() {
-    writeFile("Class.java", "@Annotation(\"literal\")", "public class Class {}");
+  public void doesNotMatchWhenArgumentIsPresent_implicit() {
+    writeFile(
+        "Class.java",
+        """
+        @Annotation("literal")
+        public class Class {}
+        """);
     assertCompiles(annotationMatches(false));
   }
 
   @Test
-  public void doesNotMatchWhenArgumentIsPresent_Explicit() {
-    writeFile("Class.java", "@Annotation(value = \"literal\")", "public class Class {}");
+  public void doesNotMatchWhenArgumentIsPresent_explicit() {
+    writeFile(
+        "Class.java",
+        """
+        @Annotation(value = "literal")
+        public class Class {}
+        """);
     assertCompiles(annotationMatches(false));
   }
 
-  private Scanner annotationMatches(final boolean shouldMatch) {
-    final AnnotationDoesNotHaveArgument toMatch = new AnnotationDoesNotHaveArgument("value");
+  private Scanner annotationMatches(boolean shouldMatch) {
+    AnnotationDoesNotHaveArgument toMatch = new AnnotationDoesNotHaveArgument("value");
     return new Scanner() {
       @Override
       public Void visitAnnotation(AnnotationTree node, VisitorState visitorState) {

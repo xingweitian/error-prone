@@ -100,7 +100,11 @@ public class ErrorProneJavacPluginTest {
                 null,
                 fileManager,
                 diagnosticCollector,
-                ImmutableList.of("-Xplugin:ErrorProne", "-XDcompilePolicy=byfile"),
+                ImmutableList.of(
+                    "-Xplugin:ErrorProne",
+                    "-XDcompilePolicy=byfile",
+                    "--should-stop=ifError=FLOW",
+                    "-XDaddTypeAnnotationsToSymbol=true"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(source));
     assertThat(task.call()).isFalse();
@@ -144,7 +148,9 @@ public class ErrorProneJavacPluginTest {
                 ImmutableList.of(
                     "-Xplugin:ErrorProne"
                         + " -XepPatchChecks:MissingOverride -XepPatchLocation:IN_PLACE",
-                    "-XDcompilePolicy=byfile"),
+                    "-XDcompilePolicy=byfile",
+                    "--should-stop=ifError=FLOW",
+                    "-XDaddTypeAnnotationsToSymbol=true"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(fileA, fileB));
     assertWithMessage(Joiner.on('\n').join(diagnosticCollector.getDiagnostics()))
@@ -203,7 +209,9 @@ public class ErrorProneJavacPluginTest {
                     "-Xplugin:ErrorProne"
                         + " -XepPatchChecks:MissingOverride -XepPatchLocation:"
                         + patchDir,
-                    "-XDcompilePolicy=byfile"),
+                    "-XDcompilePolicy=byfile",
+                    "--should-stop=ifError=FLOW",
+                    "-XDaddTypeAnnotationsToSymbol=true"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(fileA, fileB));
     assertWithMessage(Joiner.on('\n').join(diagnosticCollector.getDiagnostics()))
@@ -254,7 +262,11 @@ public class ErrorProneJavacPluginTest {
                 new PrintWriter(sw, true),
                 fileManager,
                 diagnosticCollector,
-                ImmutableList.of("-XDcompilePolicy=bytodo", "-Xplugin:ErrorProne"),
+                ImmutableList.of(
+                    "-XDcompilePolicy=bytodo",
+                    "--should-stop=ifError=FLOW",
+                    "-XDaddTypeAnnotationsToSymbol=true",
+                    "-Xplugin:ErrorProne"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(source));
     RuntimeException expected = assertThrows(RuntimeException.class, () -> task.call());
@@ -304,7 +316,8 @@ public class ErrorProneJavacPluginTest {
                 ImmutableList.of(
                     "-Xplugin:ErrorProne",
                     "-XDcompilePolicy=byfile",
-                    "-XDshould-stop.ifError=LOWER"),
+                    "--should-stop=ifError=LOWER",
+                    "-XDaddTypeAnnotationsToSymbol=true"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(one, two));
     assertThat(task.call()).isFalse();
@@ -319,7 +332,7 @@ public class ErrorProneJavacPluginTest {
   }
 
   /** A bugpattern for testing. */
-  @BugPattern(name = "TestCompilesWithFix", summary = "", severity = SeverityLevel.ERROR)
+  @BugPattern(summary = "", severity = SeverityLevel.ERROR)
   public static class TestCompilesWithFix extends BugChecker implements ReturnTreeMatcher {
 
     @Override
@@ -375,7 +388,9 @@ public class ErrorProneJavacPluginTest {
                 diagnosticCollector,
                 ImmutableList.of(
                     "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:TestCompilesWithFix:ERROR",
-                    "-XDcompilePolicy=byfile"),
+                    "-XDcompilePolicy=byfile",
+                    "--should-stop=ifError=FLOW",
+                    "-XDaddTypeAnnotationsToSymbol=true"),
                 ImmutableList.of(),
                 fileManager.getJavaFileObjects(source));
     assertThat(task.call()).isFalse();
@@ -384,5 +399,50 @@ public class ErrorProneJavacPluginTest {
             .filter(d -> d.getKind() == Diagnostic.Kind.ERROR)
             .collect(onlyElement());
     assertThat(diagnostic.getMessage(ENGLISH)).contains("[TestCompilesWithFix]");
+  }
+
+  @Test
+  public void noShouldStopIfErrorPolicy() throws IOException {
+    FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix());
+    Path source = fileSystem.getPath("Test.java");
+    Files.writeString(source, "class Test {}");
+    JavacFileManager fileManager = new JavacFileManager(new Context(), false, UTF_8);
+    DiagnosticCollector<JavaFileObject> diagnosticCollector = new DiagnosticCollector<>();
+    StringWriter sw = new StringWriter();
+    JavacTask task =
+        JavacTool.create()
+            .getTask(
+                new PrintWriter(sw, true),
+                fileManager,
+                diagnosticCollector,
+                ImmutableList.of("-Xplugin:ErrorProne", "-XDcompilePolicy=byfile"),
+                ImmutableList.of(),
+                fileManager.getJavaFileObjects(source));
+    RuntimeException expected = assertThrows(RuntimeException.class, task::call);
+    assertThat(expected)
+        .hasMessageThat()
+        .contains("The default --should-stop=ifError policy (INIT) is not supported");
+  }
+
+  @Test
+  public void shouldStopIfErrorPolicyInit() throws IOException {
+    FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix());
+    Path source = fileSystem.getPath("Test.java");
+    Files.writeString(source, "class Test {}");
+    JavacFileManager fileManager = new JavacFileManager(new Context(), false, UTF_8);
+    DiagnosticCollector<JavaFileObject> diagnosticCollector = new DiagnosticCollector<>();
+    StringWriter sw = new StringWriter();
+    JavacTask task =
+        JavacTool.create()
+            .getTask(
+                new PrintWriter(sw, true),
+                fileManager,
+                diagnosticCollector,
+                ImmutableList.of(
+                    "-Xplugin:ErrorProne", "-XDcompilePolicy=byfile", "--should-stop=ifError=INIT"),
+                ImmutableList.of(),
+                fileManager.getJavaFileObjects(source));
+    RuntimeException expected = assertThrows(RuntimeException.class, task::call);
+    assertThat(expected).hasMessageThat().contains("--should-stop=ifError=INIT is not supported");
   }
 }

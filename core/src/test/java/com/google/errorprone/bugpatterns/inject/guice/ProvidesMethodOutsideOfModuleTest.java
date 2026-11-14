@@ -21,19 +21,110 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author glorioso@google.com (Nick Glorioso) */
+/**
+ * @author glorioso@google.com (Nick Glorioso)
+ */
 @RunWith(JUnit4.class)
 public class ProvidesMethodOutsideOfModuleTest {
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(ProvidesMethodOutsideOfModule.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("ProvidesMethodOutsideOfModulePositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "ProvidesMethodOutsideOfModulePositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.guice.testdata;
+
+            import com.google.inject.AbstractModule;
+            import com.google.inject.Provides;
+
+            /** Tests for {@code ProvidesMethodOutsideOfModule} */
+            public class ProvidesMethodOutsideOfModulePositiveCases {
+
+              /** Random class contains a provides method. */
+              public class TestClass1 {
+                // BUG: Diagnostic contains: remove
+                @Provides
+                void providesBlah() {}
+              }
+
+              /** Module contains an anonymous inner with a Provides method. */
+              public class TestModule extends AbstractModule {
+                @Override
+                protected void configure() {
+                  Object x =
+                      new Object() {
+                        // BUG: Diagnostic contains: remove
+                        @Provides
+                        void providesBlah() {}
+                      };
+                }
+              }
+
+              /** Class has inner module class */
+              public class TestClass2 {
+                class NestedModule extends AbstractModule {
+                  @Override
+                  protected void configure() {}
+
+                  @Provides
+                  int thisIsOk() {
+                    return 42;
+                  }
+                }
+
+                // BUG: Diagnostic contains: remove
+                @Provides
+                int thisIsNotOk() {
+                  return 42;
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("ProvidesMethodOutsideOfModuleNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "ProvidesMethodOutsideOfModuleNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.guice.testdata;
+
+            import com.google.inject.AbstractModule;
+            import com.google.inject.Binder;
+            import com.google.inject.Module;
+            import com.google.inject.Provides;
+
+            /** Tests for {@code ProvidesMethodOutsideOfModule} */
+            public class ProvidesMethodOutsideOfModuleNegativeCases {
+
+              /** Regular module */
+              class Module1 extends AbstractModule {
+                @Override
+                protected void configure() {}
+
+                @Provides
+                int providesFoo() {
+                  return 42;
+                }
+              }
+
+              /** implements the Module interface directly */
+              class Module2 implements Module {
+                @Override
+                public void configure(Binder binder) {}
+
+                @Provides
+                int providesFoo() {
+                  return 42;
+                }
+              }
+            }
+            """)
+        .doTest();
   }
 }

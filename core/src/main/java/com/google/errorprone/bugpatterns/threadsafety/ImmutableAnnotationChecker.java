@@ -21,13 +21,13 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getGeneratedBy;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.AnnotationNames.IMMUTABLE_ANNOTATION;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
-import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.Immutable;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.bugpatterns.threadsafety.ThreadSafety.Violation;
@@ -40,6 +40,7 @@ import com.sun.source.tree.Tree;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import java.util.Collections;
 import java.util.Optional;
+import javax.inject.Inject;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
@@ -55,34 +56,26 @@ public class ImmutableAnnotationChecker extends BugChecker implements ClassTreeM
           + " @com.google.errorprone.annotations.Immutable is unnecessary";
 
   private static final ImmutableSet<String> IGNORED_PROCESSORS =
-      ImmutableSet.of(
-          "com.google.auto.value.processor.AutoAnnotationProcessor"
-          );
+      ImmutableSet.of("com.google.auto.value.processor.AutoAnnotationProcessor");
 
-  private final WellKnownMutability wellKnownMutability;
+  private final ImmutableAnalysis.Factory immutableAnalysisFactory;
 
-  @Deprecated // Used reflectively, but you should pass in ErrorProneFlags to get custom mutability
-  public ImmutableAnnotationChecker() {
-    this(ErrorProneFlags.empty());
-  }
-
-  public ImmutableAnnotationChecker(ErrorProneFlags flags) {
-    this.wellKnownMutability = WellKnownMutability.fromFlags(flags);
+  @Inject
+  ImmutableAnnotationChecker(ImmutableAnalysis.Factory immutableAnalysisFactory) {
+    this.immutableAnalysisFactory = immutableAnalysisFactory;
   }
 
   @Override
   public Description matchClass(ClassTree tree, VisitorState state) {
     ClassSymbol symbol = getSymbol(tree);
-    if (symbol == null
-        || symbol.isAnnotationType()
-        || !WellKnownMutability.isAnnotation(state, symbol.type)) {
+    if (symbol.isAnnotationType() || !WellKnownMutability.isAnnotation(state, symbol.type)) {
       return NO_MATCH;
     }
-    if (!Collections.disjoint(getGeneratedBy(symbol, state), IGNORED_PROCESSORS)) {
+    if (!Collections.disjoint(getGeneratedBy(symbol), IGNORED_PROCESSORS)) {
       return NO_MATCH;
     }
 
-    if (ASTHelpers.hasAnnotation(symbol, Immutable.class, state)) {
+    if (hasAnnotation(symbol, IMMUTABLE_ANNOTATION, state)) {
       AnnotationTree annotation =
           ASTHelpers.getAnnotationWithSimpleName(tree.getModifiers().getAnnotations(), "Immutable");
       if (annotation != null) {
@@ -97,8 +90,8 @@ public class ImmutableAnnotationChecker extends BugChecker implements ClassTreeM
     }
 
     Violation info =
-        new ImmutableAnalysis(
-                this, state, wellKnownMutability, ImmutableSet.of(Immutable.class.getName()))
+        immutableAnalysisFactory
+            .create(this::isSuppressed, state, ImmutableSet.of(IMMUTABLE_ANNOTATION.toString()))
             .checkForImmutability(
                 Optional.of(tree), ImmutableSet.of(), getType(tree), this::describeClass);
 

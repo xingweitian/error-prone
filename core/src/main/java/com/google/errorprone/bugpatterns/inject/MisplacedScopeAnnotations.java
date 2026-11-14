@@ -19,11 +19,12 @@ package com.google.errorprone.bugpatterns.inject;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.errorprone.matchers.ChildMultiMatcher.MatchType.AT_LEAST_ONE;
 import static com.google.errorprone.matchers.InjectMatchers.IS_APPLICATION_OF_AT_INJECT;
-import static com.google.errorprone.matchers.InjectMatchers.IS_BINDING_ANNOTATION;
+import static com.google.errorprone.matchers.InjectMatchers.IS_QUALIFIER_ANNOTATION;
 import static com.google.errorprone.matchers.InjectMatchers.IS_SCOPING_ANNOTATION;
 import static com.google.errorprone.matchers.InjectMatchers.hasProvidesAnnotation;
 import static com.google.errorprone.matchers.Matchers.annotations;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
 import com.google.errorprone.VisitorState;
@@ -44,7 +45,6 @@ import java.util.List;
  * on the injected values.
  */
 @BugPattern(
-    name = "MisplacedScopeAnnotations",
     summary =
         "Scope annotations used as qualifier annotations don't have any effect."
             + " Move the scope annotation to the binding location or delete it.",
@@ -65,12 +65,11 @@ public class MisplacedScopeAnnotations extends BugChecker
     if (!HAS_INJECT.matches(tree, state) && !HAS_PROVIDES.matches(tree, state)) {
       return Description.NO_MATCH;
     }
-    List<AnnotationTree> scopeAnnotations =
+    ImmutableList<AnnotationTree> scopeAnnotations =
         tree.getParameters().stream()
-            .flatMap(
-                variable ->
-                    IS_SCOPE_ANNOTATION.multiMatchResult(variable, state).matchingNodes().stream())
-            .filter(annotation -> !IS_BINDING_ANNOTATION.matches(annotation, state))
+            .flatMap(variable ->
+                IS_SCOPE_ANNOTATION.multiMatchResult(variable, state).matchingNodes().stream())
+            .filter(annotation -> !IS_QUALIFIER_ANNOTATION.matches(annotation, state))
             .collect(toImmutableList());
 
     if (scopeAnnotations.isEmpty()) {
@@ -87,10 +86,10 @@ public class MisplacedScopeAnnotations extends BugChecker
     if (!hasInject) {
       return Description.NO_MATCH;
     }
-    List<AnnotationTree> scopeAnnotations =
+    ImmutableList<AnnotationTree> scopeAnnotations =
         tree.getModifiers().getAnnotations().stream()
             .filter(annotation -> IS_SCOPING_ANNOTATION.matches(annotation, state))
-            .filter(annotation -> !IS_BINDING_ANNOTATION.matches(annotation, state))
+            .filter(annotation -> !IS_QUALIFIER_ANNOTATION.matches(annotation, state))
             .collect(toImmutableList());
     if (scopeAnnotations.isEmpty()) {
       return Description.NO_MATCH;
@@ -101,6 +100,6 @@ public class MisplacedScopeAnnotations extends BugChecker
   private Description deleteAll(List<AnnotationTree> scopeAnnotations) {
     SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
     scopeAnnotations.forEach(fixBuilder::delete);
-    return describeMatch(scopeAnnotations.get(0), fixBuilder.build());
+    return describeMatch(scopeAnnotations.getFirst(), fixBuilder.build());
   }
 }

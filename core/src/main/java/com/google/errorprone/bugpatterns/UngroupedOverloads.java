@@ -19,12 +19,10 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
-import static com.google.errorprone.BugPattern.StandardTags.STYLE;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static java.util.stream.Collectors.joining;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.errorprone.BugPattern;
@@ -43,49 +41,41 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import javax.inject.Inject;
 import javax.lang.model.element.Name;
 
-/** @author hanuszczak@google.com (Łukasz Hanuszczak) */
+/**
+ * @author hanuszczak@google.com (Łukasz Hanuszczak)
+ */
 @BugPattern(
-    name = "UngroupedOverloads",
     summary =
         "Constructors and methods with the same name should appear sequentially with no other code"
             + " in between, even when modifiers such as static or private differ between the"
             + " methods. Please re-order or re-name methods.",
-    severity = SUGGESTION,
-    tags = STYLE)
+    severity = SUGGESTION)
 public class UngroupedOverloads extends BugChecker implements ClassTreeMatcher {
 
   private final Boolean batchFindings;
 
-  public UngroupedOverloads(ErrorProneFlags flags) {
+  @Inject
+  UngroupedOverloads(ErrorProneFlags flags) {
     batchFindings = flags.getBoolean("UngroupedOverloads:BatchFindings").orElse(false);
   }
 
-  @AutoValue
-  abstract static class MemberWithIndex {
-
-    abstract int index();
-
-    abstract MethodTree tree();
-
+  private record MemberWithIndex(int index, MethodTree tree) {
     static MemberWithIndex create(int index, MethodTree tree) {
-      return new AutoValue_UngroupedOverloads_MemberWithIndex(index, tree);
+      return new MemberWithIndex(index, tree);
     }
   }
 
-  @AutoValue
-  abstract static class OverloadKey {
-    abstract Name name();
+  private record OverloadKey(Name name) {
+    // TODO(cushon): re-enable `boolean isStatic`, but don't warn about interspersed
+    // static/non-static overloads Include static-ness when grouping overloads. Static and
+    // non-static methods are still overloads per the JLS, but are less interesting in practice.
 
-    // TODO(cushon): re-enable this, but don't warn about interspersed static/non-static overloads
-    // Include static-ness when grouping overloads. Static and non-static methods are still
-    // overloads per the JLS, but are less interesting in practice.
-    // abstract boolean isStatic();
-
-    public static OverloadKey create(MethodTree methodTree) {
+    static OverloadKey create(MethodTree methodTree) {
       MethodSymbol sym = ASTHelpers.getSymbol(methodTree);
-      return new AutoValue_UngroupedOverloads_OverloadKey(sym.getSimpleName());
+      return new OverloadKey(sym.getSimpleName());
     }
   }
 
@@ -95,22 +85,21 @@ public class UngroupedOverloads extends BugChecker implements ClassTreeMatcher {
     LinkedHashMultimap<OverloadKey, MemberWithIndex> methods = LinkedHashMultimap.create();
     for (int i = 0; i < classTree.getMembers().size(); ++i) {
       Tree member = classTree.getMembers().get(i);
-      if (member instanceof MethodTree) {
-        MethodTree methodTree = (MethodTree) member;
-        methods.put(OverloadKey.create(methodTree), MemberWithIndex.create(i, methodTree));
+      if (member instanceof MethodTree methodTree) {
+        if (!ASTHelpers.isGeneratedConstructor(methodTree)) {
+          methods.put(OverloadKey.create(methodTree), MemberWithIndex.create(i, methodTree));
+        }
       }
     }
     ImmutableList<Description> descriptions =
         methods.asMap().entrySet().stream()
-            .flatMap(
-                e ->
-                    checkOverloads(
-                        state, classTree.getMembers(), ImmutableList.copyOf(e.getValue())))
+            .flatMap(e ->
+                checkOverloads(state, classTree.getMembers(), ImmutableList.copyOf(e.getValue())))
             .collect(toImmutableList());
     if (batchFindings && !descriptions.isEmpty()) {
       SuggestedFix.Builder fix = SuggestedFix.builder();
       descriptions.forEach(d -> fix.merge((SuggestedFix) getOnlyElement(d.fixes)));
-      return describeMatch(descriptions.get(0).position, fix.build());
+      return describeMatch(descriptions.getFirst().position, fix.build());
     }
     descriptions.forEach(state::reportMatch);
     return NO_MATCH;
@@ -122,7 +111,7 @@ public class UngroupedOverloads extends BugChecker implements ClassTreeMatcher {
       return Stream.empty();
     }
     // check if the indices of the overloads in the member list are sequential
-    MemberWithIndex first = overloads.get(0);
+    MemberWithIndex first = overloads.getFirst();
     int prev = -1;
     int group = 0;
     Map<MemberWithIndex, Integer> groups = new LinkedHashMap<>();
@@ -136,7 +125,7 @@ public class UngroupedOverloads extends BugChecker implements ClassTreeMatcher {
     if (group == 0) {
       return Stream.empty();
     }
-    if (overloads.stream().anyMatch(m -> isSuppressed(m.tree()))) {
+    if (overloads.stream().anyMatch(m -> isSuppressed(m.tree(), state))) {
       return Stream.empty();
     }
     // build a fix that replaces the first overload with all the overloads grouped together
@@ -145,24 +134,22 @@ public class UngroupedOverloads extends BugChecker implements ClassTreeMatcher {
     sb.append(state.getSourceForNode(first.tree()));
     overloads.stream()
         .filter(o -> o != first)
-        .forEach(
-            o -> {
-              int start = state.getEndPosition(members.get(o.index() - 1));
-              int end = state.getEndPosition(o.tree());
-              sb.append(state.getSourceCode(), start, end).append('\n');
-              fixBuilder.replace(start, end, "");
-            });
+        .forEach(o -> {
+          int start = state.getEndPosition(members.get(o.index() - 1));
+          int end = state.getEndPosition(o.tree());
+          sb.append(state.getSourceCode(), start, end).append('\n');
+          fixBuilder.replace(start, end, "");
+        });
     fixBuilder.replace(first.tree(), sb.toString());
     SuggestedFix fix = fixBuilder.build();
     LineMap lineMap = state.getPath().getCompilationUnit().getLineMap();
     // emit findings for each overload
     return overloads.stream()
-        .map(
-            o ->
-                buildDescription(o.tree())
-                    .addFix(fix)
-                    .setMessage(createMessage(o.tree(), overloads, groups, lineMap, o))
-                    .build());
+        .map(o ->
+            buildDescription(o.tree())
+                .addFix(fix)
+                .setMessage(createMessage(o.tree(), overloads, groups, lineMap, o))
+                .build());
   }
 
   private static String createMessage(

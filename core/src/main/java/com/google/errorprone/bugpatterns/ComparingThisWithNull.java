@@ -31,7 +31,6 @@ import com.sun.source.tree.Tree.Kind;
 
 /** Check for expressions containing {@code this != null} or {@code this == null} */
 @BugPattern(
-    name = "ComparingThisWithNull",
     summary = "this == null is always false, this != null is always true",
     explanation =
         "The boolean expression this != null always returns true"
@@ -55,13 +54,8 @@ public class ComparingThisWithNull extends BugChecker implements BinaryTreeMatch
   private static class ThisMatcher implements Matcher<ExpressionTree> {
     @Override
     public boolean matches(ExpressionTree thisExpression, VisitorState state) {
-      if (thisExpression.getKind().equals(Kind.IDENTIFIER)) {
-        IdentifierTree identifier = (IdentifierTree) thisExpression;
-        if (identifier.getName().contentEquals("this")) {
-          return true;
-        }
-      }
-      return false;
+      return thisExpression instanceof IdentifierTree identifier
+          && identifier.getName().contentEquals("this");
     }
   }
 }

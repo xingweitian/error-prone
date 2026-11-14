@@ -19,7 +19,9 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.fixes.SuggestedFixes.qualifyType;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
@@ -38,9 +40,10 @@ import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import java.util.Objects;
 
-/** @author eaftan@google.com (Eddie Aftandilian) */
+/**
+ * @author eaftan@google.com (Eddie Aftandilian)
+ */
 @BugPattern(
-    name = "StaticQualifiedUsingExpression",
     summary = "A static variable or method should be qualified with a class name, not expression",
     severity = ERROR,
     altNames = {"static", "static-access", "StaticAccessedFromInstance"},
@@ -59,21 +62,20 @@ public class StaticQualifiedUsingExpression extends BugChecker implements Member
             || sym.getSimpleName().contentEquals("super")) {
           return NO_MATCH;
         }
-        // fall through
+      // fall through
       case ENUM_CONSTANT:
       case METHOD:
-        if (!sym.isStatic()) {
+        if (!isStatic(sym)) {
           return NO_MATCH;
         }
         break; // continue below
       default:
         return NO_MATCH;
     }
-    ClassSymbol owner = sym.owner.enclClass();
+    ClassSymbol owner = enclosingClass(sym);
     ExpressionTree expression = tree.getExpression();
     switch (expression.getKind()) {
-      case MEMBER_SELECT:
-      case IDENTIFIER:
+      case MEMBER_SELECT, IDENTIFIER -> {
         // References to static variables should be qualified by the type name of the owning type,
         // or a sub-type. e.g.: if CONST is declared in Foo, and SubFoo extends Foo,
         // allow `Foo.CONST` and `SubFoo.CONST` (but not, say, `new Foo().CONST`.
@@ -81,8 +83,10 @@ public class StaticQualifiedUsingExpression extends BugChecker implements Member
         if (base instanceof ClassSymbol && base.isSubClass(owner, state.getTypes())) {
           return NO_MATCH;
         }
-        break;
-      default: // continue below
+      }
+      default -> {
+        // continue below
+      }
     }
     SuggestedFix.Builder fix = SuggestedFix.builder();
     String replacement;

@@ -18,13 +18,16 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.ErrorProneToken;
 import com.sun.source.tree.ClassTree;
@@ -34,11 +37,11 @@ import com.sun.source.tree.Tree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.parser.Tokens.TokenKind;
-import java.util.List;
 
-/** @author kayco@google.com (Kayla Walker) */
+/**
+ * @author kayco@google.com (Kayla Walker)
+ */
 @BugPattern(
-    name = "ExtendingJUnitAssert",
     summary =
         "When only using JUnit Assert's static methods, "
             + "you should import statically instead of extending.",
@@ -52,7 +55,7 @@ public class ExtendingJUnitAssert extends BugChecker implements ClassTreeMatcher
   public Description matchClass(ClassTree tree, VisitorState state) {
     Tree extendsClause = tree.getExtendsClause();
     Type type = ASTHelpers.getType(extendsClause);
-    if (ASTHelpers.isSameType(type, state.getTypeFromString("org.junit.Assert"), state)) {
+    if (ASTHelpers.isSameType(type, ORG_JUNIT_ASSERT.get(state), state)) {
       return describeMatch(extendsClause, fixAsserts(tree, state));
     }
     return Description.NO_MATCH;
@@ -68,7 +71,7 @@ public class ExtendingJUnitAssert extends BugChecker implements ClassTreeMatcher
               String assertType = ASTHelpers.getSymbol(tree).getSimpleName().toString();
               fix.addStaticImport("org.junit.Assert." + assertType);
             }
-            return super.visitMethodInvocation(tree, unused);
+            return super.visitMethodInvocation(tree, null);
           }
         },
         null);
@@ -76,7 +79,7 @@ public class ExtendingJUnitAssert extends BugChecker implements ClassTreeMatcher
     Tree extendsClause = tree.getExtendsClause();
     int endOfExtendsClause = state.getEndPosition(extendsClause);
 
-    List<ErrorProneToken> tokens = state.getOffsetTokensForNode(tree);
+    ImmutableList<ErrorProneToken> tokens = state.getOffsetTokensForNode(tree);
 
     int startPos = 0;
     for (ErrorProneToken token : tokens) {
@@ -92,4 +95,6 @@ public class ExtendingJUnitAssert extends BugChecker implements ClassTreeMatcher
     }
     return fix.replace(startPos, endOfExtendsClause, "").build();
   }
+
+  private static final Supplier<Type> ORG_JUNIT_ASSERT = typeFromString("org.junit.Assert");
 }

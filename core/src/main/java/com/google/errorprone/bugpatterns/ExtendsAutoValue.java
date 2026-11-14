@@ -16,59 +16,87 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.common.collect.Streams.stream;
+import static com.google.errorprone.util.ASTHelpers.annotationsAmong;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.AnnotationNames.AUTO_BUILDER_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.AUTO_ONE_OF_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.AUTO_VALUE_ANNOTATION;
+import static com.google.errorprone.util.AnnotationNames.AUTO_VALUE_BUILDER_ANNOTATION;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.Tree;
 import com.sun.tools.javac.util.Name;
-import java.util.Objects;
+import java.util.stream.Stream;
+import javax.inject.Inject;
 
 /** Makes sure that you are not extending a class that has @AutoValue as an annotation. */
 @BugPattern(
-    name = "ExtendsAutoValue",
-    summary = "Do not extend an @AutoValue/@AutoOneOf class in non-generated code.",
+    summary = "Do not extend an @AutoValue-like classes in non-generated code.",
     severity = SeverityLevel.ERROR)
 public final class ExtendsAutoValue extends BugChecker implements ClassTreeMatcher {
 
   private static final Supplier<ImmutableSet<Name>> AUTOS =
-      VisitorState.memoize(
-          s ->
-              ImmutableSet.of(
-                  s.getName("com.google.auto.value.AutoValue"),
-                  s.getName("com.google.auto.value.AutoOneOf")));
+      VisitorState.memoize(s ->
+          ImmutableSet.of(
+              AUTO_ONE_OF_ANNOTATION.binaryName(s), AUTO_VALUE_ANNOTATION.binaryName(s)));
+
+  private static final Supplier<ImmutableSet<Name>> AUTOS_AND_BUILDERS =
+      VisitorState.memoize(s ->
+          ImmutableSet.of(
+              AUTO_BUILDER_ANNOTATION.binaryName(s),
+              AUTO_ONE_OF_ANNOTATION.binaryName(s),
+              AUTO_VALUE_ANNOTATION.binaryName(s),
+              AUTO_VALUE_BUILDER_ANNOTATION.binaryName(s)));
+
+  private final boolean testBuilders;
+  private final Supplier<ImmutableSet<Name>> autos;
+
+  @Inject
+  ExtendsAutoValue(ErrorProneFlags flags) {
+    this.testBuilders = flags.getBoolean("ExtendsAutoValue:builders").orElse(true);
+    this.autos = testBuilders ? AUTOS_AND_BUILDERS : AUTOS;
+  }
 
   @Override
   public Description matchClass(ClassTree tree, VisitorState state) {
-    if (tree.getExtendsClause() == null) {
-      // Doesn't extend anything, can't possibly be a violation.
+    if (tree.getExtendsClause() == null
+        && (!testBuilders || tree.getImplementsClause().isEmpty())) {
       return Description.NO_MATCH;
     }
 
-    if (!ASTHelpers.annotationsAmong(
-            ASTHelpers.getSymbol(tree.getExtendsClause()), AUTOS.get(state), state)
-        .isEmpty()) {
-      // Violation: one of its superclasses extends AutoValue.
-      if (!isInGeneratedCode(state)) {
-        return buildDescription(tree).build();
-      }
-    }
+    Stream<Tree> parents =
+        Stream.concat(
+            Stream.ofNullable(tree.getExtendsClause()),
+            testBuilders ? tree.getImplementsClause().stream() : Stream.empty());
 
-    return Description.NO_MATCH;
+    return parents
+        .map(parent -> annotationsAmong(getSymbol(parent), autos.get(state), state))
+        .filter(annotations -> !annotations.isEmpty())
+        .findFirst()
+        .filter(unused -> !isInGeneratedCode(state))
+        .map(annotations -> {
+          String name = annotations.iterator().next().toString();
+          name = name.substring(name.lastIndexOf('.') + 1); // Strip package
+          name = name.replace('$', '.'); // AutoValue$Builder -> AutoValue.Builder
+          return buildDescription(tree)
+              .setMessage(String.format("Do not extend an @%s class in non-generated code.", name))
+              .build();
+        })
+        .orElse(Description.NO_MATCH);
   }
 
   private static boolean isInGeneratedCode(VisitorState state) {
     // Skip generated code. Yes, I know we can do this via a flag but we should always ignore
     // generated code, so to be sure, manually check it.
-    return stream(state.getPath())
-        .map(ASTHelpers::getSymbol)
-        .filter(Objects::nonNull)
-        .anyMatch(sym -> !ASTHelpers.getGeneratedBy(sym, state).isEmpty());
+    return !ASTHelpers.getGeneratedBy(state).isEmpty();
   }
 }

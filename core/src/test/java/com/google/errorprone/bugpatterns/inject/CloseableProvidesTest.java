@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author bhagwani@google.com (Sumit Bhagwani) */
+/**
+ * @author bhagwani@google.com (Sumit Bhagwani)
+ */
 @RunWith(JUnit4.class)
 public class CloseableProvidesTest {
 
@@ -29,12 +31,81 @@ public class CloseableProvidesTest {
       CompilationTestHelper.newInstance(CloseableProvides.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("CloseableProvidesPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "CloseableProvidesPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.inject.Provides;
+            import java.io.Closeable;
+            import java.io.PrintWriter;
+            import java.nio.charset.StandardCharsets;
+            import javax.inject.Singleton;
+
+            /**
+             * @author bhagwani@google.com (Sumit Bhagwani)
+             */
+            public class CloseableProvidesPositiveCases {
+
+              static class ImplementsClosable implements Closeable {
+                public void close() {
+                  // no op
+                }
+              }
+
+              @Provides
+              // BUG: Diagnostic contains: CloseableProvides
+              ImplementsClosable providesImplementsClosable() {
+                return new ImplementsClosable();
+              }
+
+              @Provides
+              @Singleton
+              // BUG: Diagnostic contains: CloseableProvides
+              PrintWriter providesPrintWriter() throws Exception {
+                return new PrintWriter("some_file_path", StandardCharsets.UTF_8.name());
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("CloseableProvidesNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "CloseableProvidesNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.inject.Provides;
+            import javax.inject.Singleton;
+
+            /**
+             * @author bhagwani@google.com (Sumit Bhagwani)
+             */
+            public class CloseableProvidesNegativeCases {
+
+              static class DoesNotImplementsClosable {
+                public void close() {
+                  // no op
+                }
+              }
+
+              @Provides
+              DoesNotImplementsClosable providesDoesNotImplementsClosable() {
+                return new DoesNotImplementsClosable();
+              }
+
+              @Provides
+              @Singleton
+              Object providesObject() {
+                return new Object();
+              }
+            }
+            """)
+        .doTest();
   }
 }

@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author lowasser@google.com (Louis Wasserman) */
+/**
+ * @author lowasser@google.com (Louis Wasserman)
+ */
 @RunWith(JUnit4.class)
 public class StringBuilderInitWithCharTest {
 
@@ -29,12 +31,50 @@ public class StringBuilderInitWithCharTest {
       CompilationTestHelper.newInstance(StringBuilderInitWithChar.class, getClass());
 
   @Test
-  public void testPositiveCases() {
-    compilationHelper.addSourceFile("StringBuilderInitWithCharPositiveCases.java").doTest();
+  public void positiveCases() {
+    compilationHelper
+        .addSourceLines(
+            "StringBuilderInitWithCharPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author lowasser@google.com (Louis Wasserman)
+             */
+            public class StringBuilderInitWithCharPositiveCases {
+              {
+                // BUG: Diagnostic contains: new StringBuilder("a")
+                new StringBuilder('a');
+                // BUG: Diagnostic contains: new StringBuilder("\\"")
+                new StringBuilder('"');
+                char c = 'c';
+                // BUG: Diagnostic contains: new StringBuilder().append(c)
+                new StringBuilder(c);
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCases() {
-    compilationHelper.addSourceFile("StringBuilderInitWithCharNegativeCases.java").doTest();
+  public void negativeCases() {
+    compilationHelper
+        .addSourceLines(
+            "StringBuilderInitWithCharNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author lowasser@google.com (Louis Wasserman)
+             */
+            public class StringBuilderInitWithCharNegativeCases {
+              {
+                new StringBuilder("a");
+                new StringBuilder(5);
+                new StringBuilder();
+              }
+            }
+            """)
+        .doTest();
   }
 }

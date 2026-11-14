@@ -24,6 +24,7 @@ import static com.google.errorprone.bugpatterns.javadoc.Utils.getDocTreePath;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.getStartPosition;
 import static com.google.errorprone.bugpatterns.javadoc.Utils.replace;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ErrorProneLog.deferredDiagnosticHandler;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.BugPattern;
@@ -37,6 +38,7 @@ import com.google.errorprone.matchers.Description;
 import com.sun.source.doctree.DocTree;
 import com.sun.source.doctree.ErroneousTree;
 import com.sun.source.doctree.LinkTree;
+import com.sun.source.doctree.ReferenceTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
@@ -46,13 +48,14 @@ import com.sun.source.util.DocTreePathScanner;
 import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.tree.DCTree.DCDocComment;
 import com.sun.tools.javac.tree.DCTree.DCText;
+import com.sun.tools.javac.tree.DocTreeMaker;
 import com.sun.tools.javac.util.Log;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.lang.model.element.Element;
+import org.safere.Matcher;
+import org.safere.Pattern;
 
 /** Finds some common errors in {@literal @}link tags. */
-@BugPattern(name = "InvalidLink", summary = "This @link tag looks wrong.", severity = WARNING)
+@BugPattern(summary = "This @link tag looks wrong.", severity = WARNING)
 public final class InvalidLink extends BugChecker
     implements ClassTreeMatcher, MethodTreeMatcher, VariableTreeMatcher {
 
@@ -107,10 +110,9 @@ public final class InvalidLink extends BugChecker
       String body = erroneousTree.getBody();
       if (body.startsWith("{@link ")) {
         DocTree parent = getCurrentPath().getParentPath().getLeaf();
-        if (!(parent instanceof DCDocComment)) {
+        if (!(parent instanceof DCDocComment comment)) {
           return null;
         }
-        DCDocComment comment = (DCDocComment) parent;
         int nextIndex = comment.getFullBody().indexOf(erroneousTree) + 1;
         if (nextIndex >= comment.getFullBody().size()) {
           return null;
@@ -124,10 +126,9 @@ public final class InvalidLink extends BugChecker
         String reference = erroneousTree.getBody().replaceFirst("\\{@link ", "");
         String fixedLink = fixLink(reference, target);
         DCDocComment docComment = getDocComment(state, tree);
-        if (!(next instanceof DCText)) {
+        if (!(next instanceof DCText nextText)) {
           return null;
         }
-        DCText nextText = (DCText) next;
         int endPos = docComment.comment.getSourcePos(nextText.pos + nextText.text.indexOf("}") + 1);
         SuggestedFix fix =
             SuggestedFix.replace(getStartPosition(erroneousTree, state), endPos, fixedLink);
@@ -147,24 +148,43 @@ public final class InvalidLink extends BugChecker
       }
       String reference = linkTree.getReference().getSignature();
       Element element = null;
-      Log log = Log.instance(state.context);
-      // Install a deferred diagnostic handler before calling DocTrees.getElement(DocTreePath)
-      // TODO(cushon): revert if https://bugs.openjdk.java.net/browse/JDK-8248117 is fixed
-      Log.DeferredDiagnosticHandler deferredDiagnosticHandler =
-          new Log.DeferredDiagnosticHandler(log);
+      boolean crashed = false;
       try {
-        element =
-            JavacTrees.instance(state.context)
-                .getElement(new DocTreePath(getCurrentPath(), linkTree.getReference()));
-      } catch (NullPointerException e) {
-        // TODO(b/176098078): remove once JDK 12 is the minimum supported version
-        // https://bugs.openjdk.java.net/browse/JDK-8200432
-      } finally {
-        log.popDiagnosticHandler(deferredDiagnosticHandler);
+        element = getElement(linkTree.getReference());
+      } catch (NullPointerException | AssertionError e) {
+        crashed = true;
+      }
+      if (crashed) {
+        // If the @link crashed javac, report a finding.
+        // TODO: cushon - remove if https://bugs.openjdk.org/browse/JDK-8371248 is fixed
+        state.reportMatch(
+            buildDescription(diagnosticPosition(getCurrentPath(), state))
+                .addFix(replace(linkTree, String.format("{@code %s}", reference), state))
+                .build());
       }
       // Don't warn about fully qualified types; they won't always be known at compile-time.
-      if (element != null || reference.contains(".")) {
+      if (element != null || (reference.contains(".") && !reference.contains("#"))) {
         return super.visitLink(linkTree, null);
+      }
+      if (reference.contains("#")) {
+        String classPart = reference.substring(0, reference.indexOf('#'));
+        if (classPart.isEmpty() || classExists(classPart)) {
+          state.reportMatch(
+              buildDescription(diagnosticPosition(getCurrentPath(), state))
+                  .setMessage(
+                      String.format(
+                          "The reference `%s` to a method doesn't resolve to anything. Is it"
+                              + " misspelt, or is the parameter list not correct? See"
+                              + " https://docs.oracle.com/javase/8/docs/technotes/tools/unix/javadoc.html#JSSOR654"
+                              + " for documentation on how to form method links.%s",
+                          reference,
+                          reference.contains("<")
+                              ? " Note, in particular, that the _erasure_ of generic types should"
+                                  + " be used (for example, List rather than List<Foo>)."
+                              : ""))
+                  .build());
+          return super.visitLink(linkTree, null);
+        }
       }
       if (parameters.contains(reference)) {
         String message =
@@ -192,21 +212,28 @@ public final class InvalidLink extends BugChecker
                 .build());
         return super.visitLink(linkTree, null);
       }
-      if (reference.charAt(0) == '#') {
-        state.reportMatch(
-            buildDescription(diagnosticPosition(getCurrentPath(), state))
-                .setMessage(
-                    String.format(
-                        "The reference `%s` to a method doesn't resolve to anything. Is it"
-                            + " misspelt, or is the parameter list not correct? See"
-                            + " https://docs.oracle.com/javase/8/docs/technotes/tools/unix/javadoc.html#JSSOR654"
-                            + " for documentation on how to form method links.",
-                        reference))
-                .build());
-      }
-      // TODO(ghm): If this is a method reference, we could check whether class is available but the
-      // method isn't.
       return super.visitLink(linkTree, null);
+    }
+
+    private boolean classExists(String classPart) {
+      try {
+        DocTreeMaker maker = DocTreeMaker.instance(state.context);
+        ReferenceTree classReference = maker.newReferenceTree(classPart);
+        return getElement(classReference) != null;
+      } catch (NullPointerException | AssertionError e) {
+        return false;
+      }
+    }
+
+    private Element getElement(ReferenceTree reference) {
+      Log log = Log.instance(state.context);
+      Log.DeferredDiagnosticHandler handler = deferredDiagnosticHandler(log);
+      try {
+        return JavacTrees.instance(state.context)
+            .getElement(new DocTreePath(getCurrentPath(), reference));
+      } finally {
+        log.popDiagnosticHandler(handler);
+      }
     }
 
     private String fixLink(String reference, String label) {

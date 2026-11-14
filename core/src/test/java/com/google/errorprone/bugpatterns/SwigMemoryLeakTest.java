@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author irogers@google.com (Ian Rogers) */
+/**
+ * @author irogers@google.com (Ian Rogers)
+ */
 @RunWith(JUnit4.class)
 public class SwigMemoryLeakTest {
 
@@ -29,12 +31,79 @@ public class SwigMemoryLeakTest {
       CompilationTestHelper.newInstance(SwigMemoryLeak.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("SwigMemoryLeakPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "SwigMemoryLeakPositiveCases.java",
+"""
+package com.google.errorprone.bugpatterns.testdata;
+
+/**
+ * @author irogers@google.com (Ian Rogers)
+ */
+public class SwigMemoryLeakPositiveCases {
+  private long swigCPtr;
+  protected boolean swigCMemOwn;
+
+  public SwigMemoryLeakPositiveCases(long cPtr, boolean cMemoryOwn) {
+    swigCMemOwn = cMemoryOwn;
+    swigCPtr = cPtr;
+  }
+
+  public synchronized void delete() {
+    if (swigCPtr != 0) {
+      if (swigCMemOwn) {
+        swigCMemOwn = false;
+        // BUG: Diagnostic contains: SWIG generated code that can't call a C++ destructor will leak
+        // memory
+        throw new UnsupportedOperationException("C++ destructor does not have public access");
+      }
+      swigCPtr = 0;
+    }
+  }
+}
+""")
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("SwigMemoryLeakNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "SwigMemoryLeakNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.testdata;
+
+            /**
+             * @author irogers@google.com (Ian Rogers)
+             */
+            public class SwigMemoryLeakNegativeCases {
+              private long swigCPtr;
+              protected boolean swigCMemOwn;
+
+              public SwigMemoryLeakNegativeCases(long cPtr, boolean cMemoryOwn) {
+                swigCMemOwn = cMemoryOwn;
+                swigCPtr = cPtr;
+              }
+
+              @SuppressWarnings("removal") // deprecated for removal starting in JDK 18
+              protected void finalize() {
+                delete();
+              }
+
+              public synchronized void delete() {
+                if (swigCPtr != 0) {
+                  if (swigCMemOwn) {
+                    swigCMemOwn = false;
+                    nativeDelete(swigCPtr);
+                  }
+                  swigCPtr = 0;
+                }
+              }
+
+              private static native void nativeDelete(long cptr);
+            }
+            """)
+        .doTest();
   }
 }

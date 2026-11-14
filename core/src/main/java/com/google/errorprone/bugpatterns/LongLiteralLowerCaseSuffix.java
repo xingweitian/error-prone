@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -27,9 +28,8 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.Tree.Kind;
-import com.sun.tools.javac.tree.JCTree.JCLiteral;
 import java.util.regex.Pattern;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Matcher for a <code>long</code> literal with a lower-case ell for a suffix (e.g. <code>234l
@@ -37,24 +37,18 @@ import javax.annotation.Nullable;
  *
  * @author Simon Nickerson (sjnickerson@google.com)
  */
-@BugPattern(
-    name = "LongLiteralLowerCaseSuffix",
-    summary = "Prefer 'L' to 'l' for the suffix to long literals",
-    severity = ERROR)
+@BugPattern(summary = "Prefer 'L' to 'l' for the suffix to long literals", severity = ERROR)
 public class LongLiteralLowerCaseSuffix extends BugChecker implements LiteralTreeMatcher {
 
   private static final Matcher<LiteralTree> matcher =
-      new Matcher<LiteralTree>() {
-        @Override
-        public boolean matches(LiteralTree literalTree, VisitorState state) {
-          if (literalTree.getKind() == Kind.LONG_LITERAL) {
-            // The javac AST doesn't seem to record whether the suffix is present, or whether it's
-            // an 'l' or 'L'. We have to look at the original source
-            String longLiteral = getLongLiteral(literalTree, state);
-            return longLiteral != null && longLiteral.endsWith("l");
-          } else {
-            return false;
-          }
+      (LiteralTree literalTree, VisitorState state) -> {
+        if (literalTree.getKind() == Kind.LONG_LITERAL) {
+          // The javac AST doesn't seem to record whether the suffix is present, or whether it's
+          // an 'l' or 'L'. We have to look at the original source
+          String longLiteral = getLongLiteral(literalTree, state);
+          return longLiteral != null && longLiteral.endsWith("l");
+        } else {
+          return false;
         }
       };
 
@@ -67,14 +61,12 @@ public class LongLiteralLowerCaseSuffix extends BugChecker implements LiteralTre
    * Extracts the long literal corresponding to a given {@link LiteralTree} node from the source
    * code as a string. Returns null if the source code is not available.
    */
-  @Nullable
-  private static String getLongLiteral(LiteralTree literalTree, VisitorState state) {
-    JCLiteral longLiteral = (JCLiteral) literalTree;
+  private static @Nullable String getLongLiteral(LiteralTree literalTree, VisitorState state) {
     CharSequence sourceFile = state.getSourceCode();
     if (sourceFile == null) {
       return null;
     }
-    int start = longLiteral.getStartPosition();
+    int start = getStartPosition(literalTree);
     java.util.regex.Matcher matcher =
         LONG_LITERAL_PATTERN.matcher(sourceFile.subSequence(start, sourceFile.length()));
     if (matcher.lookingAt()) {

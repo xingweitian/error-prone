@@ -34,6 +34,7 @@ import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.BinaryTree;
+import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MethodInvocationTree;
@@ -58,7 +59,6 @@ import java.util.Set;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "UnnecessaryCheckNotNull",
     summary = "This null check is unnecessary; the expression can never be null",
     severity = ERROR,
     altNames = {"PreconditionsCheckNotNull", "PreconditionsCheckNotNullPrimitive"})
@@ -108,7 +108,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
     ExpressionTree stringLiteralValue = arguments.get(0);
     Fix fix;
     if (arguments.size() == 2) {
-      fix = SuggestedFix.swap(arguments.get(0), arguments.get(1));
+      fix = SuggestedFix.swap(arguments.get(0), arguments.get(1), state);
     } else {
       fix = SuggestedFix.delete(state.getPath().getParentPath().getLeaf());
     }
@@ -137,7 +137,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
     Tree parent = state.getPath().getParentPath().getLeaf();
 
     // Assignment, return, etc.
-    if (parent.getKind() != Kind.EXPRESSION_STATEMENT) {
+    if (!(parent instanceof ExpressionStatementTree)) {
       return describeMatch(
           arg1, SuggestedFix.replace(methodInvocationTree, state.getSourceForNode(arg1)));
     }
@@ -156,7 +156,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
     }
 
     if ((arg1 instanceof BinaryTree
-            || arg1.getKind() == Kind.METHOD_INVOCATION
+            || arg1 instanceof MethodInvocationTree
             || arg1.getKind() == Kind.LOGICAL_COMPLEMENT)
         && state.getTypes().isSameType(ASTHelpers.getType(arg1), state.getSymtab().booleanType)) {
       return describeMatch(arg1, createCheckArgumentOrStateCall(methodInvocationTree, state, arg1));
@@ -199,7 +199,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
     Set<Symbol> symbols = new HashSet<>();
     for (IdentifierTree ident : getVariableUses(tree)) {
       Symbol sym = ASTHelpers.getSymbol(ident);
-      if (ASTHelpers.isLocal(sym)) {
+      if (sym.isDirectlyOrIndirectlyLocal()) {
         symbols.add(sym);
       }
     }
@@ -229,7 +229,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
    * ==> {} x.y.z(s.t) ==> {x,s}
    */
   static List<IdentifierTree> getVariableUses(ExpressionTree tree) {
-    final List<IdentifierTree> freeVars = new ArrayList<>();
+    List<IdentifierTree> freeVars = new ArrayList<>();
 
     new TreeScanner<Void, Void>() {
       @Override
@@ -237,7 +237,7 @@ public class UnnecessaryCheckNotNull extends BugChecker implements MethodInvocat
         if (((JCIdent) node).sym instanceof VarSymbol) {
           freeVars.add(node);
         }
-        return super.visitIdentifier(node, v);
+        return super.visitIdentifier(node, null);
       }
     }.scan(tree, null);
 

@@ -28,88 +28,130 @@ public class GuardedByValidatorTest {
       CompilationTestHelper.newInstance(GuardedByChecker.class, getClass());
 
   @Test
-  public void testPositive() {
+  public void positive() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"This thread\") int x;",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"This thread\") void m() {}",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("This thread")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              int x;
+
+              @GuardedBy("This thread")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              void m() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegative() {
+  public void negative() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  final Object mu = new Object();",
-            "  class Inner {",
-            "    @GuardedBy(\"this\") int x;",
-            "    @GuardedBy(\"Test.this\") int p;",
-            "    @GuardedBy(\"Test.this.mu\") int z;",
-            "    @GuardedBy(\"this\") void m() {}",
-            "    @GuardedBy(\"mu\") int v;",
-            "    @GuardedBy(\"itself\") Object s_;",
-            "  }",
-            "  final Object o = new Object() {",
-            "    @GuardedBy(\"mu\") int x;",
-            "  };",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              final Object mu = new Object();
+
+              class Inner {
+                @GuardedBy("this")
+                int x;
+
+                @GuardedBy("Test.this")
+                int p;
+
+                @GuardedBy("Test.this.mu")
+                int z;
+
+                @GuardedBy("this")
+                void m() {}
+
+                @GuardedBy("mu")
+                int v;
+
+                @GuardedBy("itself")
+                Object s_;
+              }
+
+              final Object o =
+                  new Object() {
+                    @GuardedBy("mu")
+                    int x;
+                  };
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testItself() {
+  public void itself() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  @GuardedBy(\"itself\") Object s_;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("itself")
+              Object s_;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testBadInstanceAccess() {
+  public void badInstanceAccess() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  final Object instanceField = new Object();",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"Test.instanceField\") Object s_;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              final Object instanceField = new Object();
+
+              @GuardedBy("Test.instanceField")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              Object s_;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testClassName() {
+  public void className() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"Test\") Object s_;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("Test")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              Object s_;
+            }
+            """)
         .doTest();
   }
 
@@ -118,28 +160,39 @@ public class GuardedByValidatorTest {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  static class Endpoint {",
-            "    Object getLock() { return null; }",
-            "  }",
-            "  abstract static class Runnable {",
-            "    private Endpoint endpoint;",
-            "    Runnable(Endpoint endpoint) {",
-            "      this.endpoint = endpoint;",
-            "    }",
-            "    abstract void run();",
-            "  }",
-            "  static void m(Endpoint endpoint) {",
-            "    Runnable runnable =",
-            "      new Runnable(endpoint) {",
-            "        // BUG: Diagnostic contains:",
-            "        // Invalid @GuardedBy expression: could not resolve guard",
-            "        @GuardedBy(\"endpoint_.getLock()\") void run() {}",
-            "    };",
-            "  }",
-            "}")
+            """
+            package threadsafety;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              static class Endpoint {
+                Object getLock() {
+                  return null;
+                }
+              }
+
+              abstract static class Runnable {
+                private Endpoint endpoint;
+
+                Runnable(Endpoint endpoint) {
+                  this.endpoint = endpoint;
+                }
+
+                abstract void run();
+              }
+
+              static void m(Endpoint endpoint) {
+                Runnable runnable =
+                    new Runnable(endpoint) {
+                      @GuardedBy("endpoint_.getLock()")
+                      // BUG: Diagnostic contains:
+                      // Invalid @GuardedBy expression: could not resolve guard
+                      void run() {}
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -148,91 +201,128 @@ public class GuardedByValidatorTest {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  static class Endpoint {",
-            "    Object getLock() { return null; }",
-            "  }",
-            "  abstract static class Runnable {",
-            "    private Endpoint endpoint;",
-            "    Runnable(Endpoint endpoint) {",
-            "      this.endpoint = endpoint;",
-            "    }",
-            "    abstract void run();",
-            "  }",
-            "  static void m(Endpoint endpoint) {",
-            "    Runnable runnable =",
-            "      new Runnable(endpoint) {",
-            "        // BUG: Diagnostic contains:",
-            "        // Invalid @GuardedBy expression: could not resolve guard",
-            "        @GuardedBy(\"endpoint.getLock()\") void run() {}",
-            "    };",
-            "  }",
-            "}")
+            """
+            package threadsafety;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              static class Endpoint {
+                Object getLock() {
+                  return null;
+                }
+              }
+
+              abstract static class Runnable {
+                private Endpoint endpoint;
+
+                Runnable(Endpoint endpoint) {
+                  this.endpoint = endpoint;
+                }
+
+                abstract void run();
+              }
+
+              static void m(Endpoint endpoint) {
+                Runnable runnable =
+                    new Runnable(endpoint) {
+                      @GuardedBy("endpoint.getLock()")
+                      // BUG: Diagnostic contains:
+                      // Invalid @GuardedBy expression: could not resolve guard
+                      void run() {}
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testStaticGuardedByInstance() {
+  public void staticGuardedByInstance() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: static member guarded by instance",
-            "  @GuardedBy(\"this\") static int x;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("this")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: static member guarded by instance
+              static int x;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testStaticGuardedByInstanceMethod() {
+  public void staticGuardedByInstanceMethod() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  final Object mu_ = new Object();",
-            "  Object lock() { return mu_; }",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: static member guarded by instance",
-            "  @GuardedBy(\"lock()\") static int x;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              final Object mu_ = new Object();
+
+              Object lock() {
+                return mu_;
+              }
+
+              @GuardedBy("lock()")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: static member guarded by instance
+              static int x;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testStaticGuardedByStatic() {
+  public void staticGuardedByStatic() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  @GuardedBy(\"Test.class\") static int x;",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("Test.class")
+              static int x;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNonExistantMethod() {
+  public void nonExistantMethod() {
     compilationHelper
         .addSourceLines(
             "threadsafety/Test.java",
-            "package threadsafety.Test;",
-            "import javax.annotation.concurrent.GuardedBy;",
-            "class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"lock()\") int x;",
-            "  // BUG: Diagnostic contains:",
-            "  // Invalid @GuardedBy expression: could not resolve guard",
-            "  @GuardedBy(\"lock()\") void m() {}",
-            "}")
+            """
+            package threadsafety.Test;
+
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              @GuardedBy("lock()")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              int x;
+
+              @GuardedBy("lock()")
+              // BUG: Diagnostic contains:
+              // Invalid @GuardedBy expression: could not resolve guard
+              void m() {}
+            }
+            """)
         .doTest();
   }
 }

@@ -19,15 +19,14 @@ package com.google.errorprone.matchers;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ExpressionTree;
-import com.sun.source.tree.Tree;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Utilities for matching annotations.
  *
  * @author mwacker@google.com (Mike Wacker)
  */
-public class AnnotationMatcherUtils {
+public final class AnnotationMatcherUtils {
 
   /**
    * Gets the value for an argument, or null if the argument does not exist.
@@ -36,13 +35,11 @@ public class AnnotationMatcherUtils {
    * @param name the name of the argument whose value to get
    * @return the value of the argument, or null if the argument does not exist
    */
-  @Nullable
-  public static ExpressionTree getArgument(AnnotationTree annotationTree, String name) {
+  public static @Nullable ExpressionTree getArgument(AnnotationTree annotationTree, String name) {
     for (ExpressionTree argumentTree : annotationTree.getArguments()) {
-      if (argumentTree.getKind() != Tree.Kind.ASSIGNMENT) {
+      if (!(argumentTree instanceof AssignmentTree assignmentTree)) {
         continue;
       }
-      AssignmentTree assignmentTree = (AssignmentTree) argumentTree;
       if (!assignmentTree.getVariable().toString().equals(name)) {
         continue;
       }

@@ -16,20 +16,19 @@
 
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
-import com.google.auto.value.AutoValue;
+import static javax.lang.model.SourceVersion.isIdentifier;
+
 import com.google.common.base.CharMatcher;
 import com.google.common.collect.Streams;
 import com.google.errorprone.util.Commented;
 import com.google.errorprone.util.Comments;
-import com.sun.source.tree.ExpressionTree;
+import com.google.errorprone.util.ErrorProneComment;
+import com.google.errorprone.util.ErrorProneComment.ErrorProneCommentStyle;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import com.sun.tools.javac.parser.Tokens.Comment;
-import com.sun.tools.javac.parser.Tokens.Comment.CommentStyle;
 import java.util.Arrays;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.safere.Pattern;
 
 /**
  * Helper methods for checking if a commented argument matches a formal parameter and for generating
@@ -40,9 +39,25 @@ import java.util.stream.Stream;
  */
 public final class NamedParameterComment {
 
-  public static final Pattern PARAMETER_COMMENT_PATTERN =
-      Pattern.compile(
-          "\\s*(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)(\\.\\.\\.)?\\s*=\\s*");
+  private static final CharMatcher ASCII_WHITESPACE = CharMatcher.anyOf(" \t\n\u000b\f\r");
+
+  /// A parsed `/* name= */` or `/* name...= */` parameter comment.
+  public record ParsedParameterComment(String name, boolean varargs) {}
+
+  /// Parses the text of a block comment (without the surrounding `/*` and `*/`) as a named
+  /// parameter comment of the form `\s*(identifier)(\Q...\E)?\s*=\s*`.
+  public static Optional<ParsedParameterComment> parseParameterComment(String s) {
+    s = ASCII_WHITESPACE.trimFrom(s);
+    if (!s.endsWith("=")) {
+      return Optional.empty();
+    }
+    s = ASCII_WHITESPACE.trimTrailingFrom(s.substring(0, s.length() - 1));
+    boolean varargs = s.endsWith("...");
+    if (varargs) {
+      s = s.substring(0, s.length() - 3);
+    }
+    return isIdentifier(s) ? Optional.of(new ParsedParameterComment(s, varargs)) : Optional.empty();
+  }
 
   private static final String PARAMETER_COMMENT_MARKER = "=";
 
@@ -64,87 +79,55 @@ public final class NamedParameterComment {
     NOT_ANNOTATED,
   }
 
-  @AutoValue
-  abstract static class MatchedComment {
-
-    abstract Comment comment();
-
-    abstract MatchType matchType();
-
-    static MatchedComment create(Comment comment, MatchType matchType) {
-      return new AutoValue_NamedParameterComment_MatchedComment(comment, matchType);
+  record MatchedComment(Optional<ErrorProneComment> comment, MatchType matchType) {
+    static MatchedComment create(Optional<ErrorProneComment> comment, MatchType matchType) {
+      return new MatchedComment(comment, matchType);
     }
 
     static MatchedComment notAnnotated() {
-      return new AutoValue_NamedParameterComment_MatchedComment(
-          new Comment() {
-            @Override
-            public String getText() {
-              throw new IllegalArgumentException(
-                  "Attempt to call getText on comment when in NOT_ANNOTATED state");
-            }
-
-            @Override
-            public int getSourcePos(int i) {
-              throw new IllegalArgumentException(
-                  "Attempt to call getText on comment when in NOT_ANNOTATED state");
-            }
-
-            @Override
-            public CommentStyle getStyle() {
-              throw new IllegalArgumentException(
-                  "Attempt to call getText on comment when in NOT_ANNOTATED state");
-            }
-
-            @Override
-            public boolean isDeprecated() {
-              throw new IllegalArgumentException(
-                  "Attempt to call getText on comment when in NOT_ANNOTATED state");
-            }
-          },
-          MatchType.NOT_ANNOTATED);
+      return new MatchedComment(Optional.empty(), MatchType.NOT_ANNOTATED);
     }
   }
 
-  private static boolean isApproximateMatchingComment(Comment comment, String formal) {
-    switch (comment.getStyle()) {
-      case BLOCK:
-      case LINE:
+  private static boolean isApproximateMatchingComment(ErrorProneComment comment, String formal) {
+    return switch (comment.getStyle()) {
+      case BLOCK, LINE -> {
         // sometimes people use comments around arguments for higher level structuring - such as
         // dividing two separate blocks of arguments. In these cases we want to avoid concluding
-        // that its a match. Therefore we also check to make sure that the comment is not really
+        // that it's a match. Therefore we also check to make sure that the comment is not really
         // long and that it doesn't contain acsii-art style markup.
         String commentText = Comments.getTextFromComment(comment);
         boolean textMatches =
             Arrays.asList(commentText.split("[^a-zA-Z0-9_]+", -1)).contains(formal);
         boolean tooLong = commentText.length() > formal.length() + 5 && commentText.length() > 50;
         boolean tooMuchMarkup = CharMatcher.anyOf("-*!@<>").countIn(commentText) > 5;
-        return textMatches && !tooLong && !tooMuchMarkup;
-      default:
-        return false;
-    }
+        yield textMatches && !tooLong && !tooMuchMarkup;
+      }
+      default -> false;
+    };
   }
 
   /**
    * Determine the kind of match we have between the comments on this argument and the formal
    * parameter name.
    */
-  static MatchedComment match(Commented<ExpressionTree> actual, String formal) {
-    Optional<Comment> lastBlockComment =
+  static MatchedComment match(Commented actual, String formal) {
+    Optional<ErrorProneComment> lastBlockComment =
         Streams.findLast(
-            actual.beforeComments().stream().filter(c -> c.getStyle() == CommentStyle.BLOCK));
+            actual.beforeComments().stream()
+                .filter(c -> c.getStyle() == ErrorProneCommentStyle.BLOCK));
 
     if (lastBlockComment.isPresent()) {
-      Matcher m =
-          PARAMETER_COMMENT_PATTERN.matcher(Comments.getTextFromComment(lastBlockComment.get()));
-      if (m.matches()) {
+      Optional<ParsedParameterComment> parsed =
+          parseParameterComment(Comments.getTextFromComment(lastBlockComment.get()));
+      if (parsed.isPresent()) {
         return MatchedComment.create(
-            lastBlockComment.get(),
-            m.group(1).equals(formal) ? MatchType.EXACT_MATCH : MatchType.BAD_MATCH);
+            lastBlockComment,
+            parsed.get().name().equals(formal) ? MatchType.EXACT_MATCH : MatchType.BAD_MATCH);
       }
     }
 
-    Optional<Comment> approximateMatchComment =
+    Optional<ErrorProneComment> approximateMatchComment =
         Stream.concat(actual.beforeComments().stream(), actual.afterComments().stream())
             .filter(comment -> isApproximateMatchingComment(comment, formal))
             .findFirst();
@@ -158,7 +141,7 @@ public final class NamedParameterComment {
           CharMatcher.anyOf("=:")
               .trimTrailingFrom(Comments.getTextFromComment(approximateMatchComment.get()).trim());
       return MatchedComment.create(
-          approximateMatchComment.get(),
+          approximateMatchComment,
           text.equals(formal) ? MatchType.EXACT_MATCH : MatchType.APPROXIMATE_MATCH);
     }
 

@@ -16,8 +16,6 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode.TEXT_MATCH;
-
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
@@ -37,37 +35,40 @@ public final class CheckedExceptionNotThrownTest {
   public void noExceptionThrown_entireThrowsBlockRemoved() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  /**",
-            "   * Frobnicate",
-            "   *",
-            "   * @throws Exception foo",
-            "   */",
-            "  void test() throws Exception {}",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              /**
+               * Frobnicate
+               *
+               * @throws Exception foo
+               */
+              void test() throws Exception {}
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  /**",
-            "   * Frobnicate",
-            "   *",
-            "   */",
-            "  void test() {}",
-            "}")
-        .doTest(TEXT_MATCH);
+            "Test.java",
+            """
+            public final class Test {
+              /** Frobnicate */
+              void test() {}
+            }
+            """)
+        .doTest();
   }
 
   @Test
   public void exceptionActuallyThrown_noChange() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  void test() throws Exception {",
-            "    Thread.sleep(1);",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              void test() throws Exception {
+                Thread.sleep(1);
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -76,11 +77,12 @@ public final class CheckedExceptionNotThrownTest {
   public void overridable_noChange() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public class Test {",
-            "  void test() throws Exception {",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            public class Test {
+              void test() throws Exception {}
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -89,13 +91,16 @@ public final class CheckedExceptionNotThrownTest {
   public void thrownViaGenericChecked() {
     helper
         .addInputLines(
-            "Test.java", //
-            "import java.util.Optional;",
-            "public final class Test {",
-            "  int test(Optional<Integer> x) throws Exception {",
-            "    return x.orElseThrow(() -> new Exception());",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.util.Optional;
+
+            public final class Test {
+              int test(Optional<Integer> x) throws Exception {
+                return x.orElseThrow(() -> new Exception());
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }
@@ -104,21 +109,27 @@ public final class CheckedExceptionNotThrownTest {
   public void thrownViaGenericUnchecked() {
     helper
         .addInputLines(
-            "Test.java", //
-            "import java.util.Optional;",
-            "public final class Test {",
-            "  int test(Optional<Integer> x) throws Exception {",
-            "    return x.orElseThrow(() -> new IllegalStateException());",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.util.Optional;
+
+            public final class Test {
+              int test(Optional<Integer> x) throws Exception {
+                return x.orElseThrow(() -> new IllegalStateException());
+              }
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "import java.util.Optional;",
-            "public final class Test {",
-            "  int test(Optional<Integer> x) {",
-            "    return x.orElseThrow(() -> new IllegalStateException());",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            import java.util.Optional;
+
+            public final class Test {
+              int test(Optional<Integer> x) {
+                return x.orElseThrow(() -> new IllegalStateException());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -126,15 +137,19 @@ public final class CheckedExceptionNotThrownTest {
   public void oneCheckedOneUnchecked() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  void test() throws IllegalStateException, Exception {}",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              void test() throws IllegalStateException, Exception {}
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  void test() throws IllegalStateException {}",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              void test() throws IllegalStateException {}
+            }
+            """)
         .doTest();
   }
 
@@ -142,11 +157,13 @@ public final class CheckedExceptionNotThrownTest {
   public void oneCheckedOneUnchecked_finding() {
     compilationHelper
         .addSourceLines(
-            "Test.java", //
-            "public final class Test {",
-            "  // BUG: Diagnostic contains: (Exception)",
-            "  void test() throws IllegalStateException, Exception {}",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              // BUG: Diagnostic contains: (Exception)
+              void test() throws IllegalStateException, Exception {}
+            }
+            """)
         .doTest();
   }
 
@@ -154,13 +171,15 @@ public final class CheckedExceptionNotThrownTest {
   public void ignoredOnTestMethods() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  @org.junit.Test",
-            "  void test() throws IllegalStateException, Exception {}",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              @org.junit.Test
+              void test() throws IllegalStateException, Exception {}
+            }
+            """)
         .expectUnchanged()
-        .setArgs("-XepCompilingTestOnlyCode")
+        .setTestOnly()
         .doTest();
   }
 
@@ -168,15 +187,19 @@ public final class CheckedExceptionNotThrownTest {
   public void exceptionActuallyThrownInFieldInitializer() {
     helper
         .addInputLines(
-            "Test.java", //
-            "public final class Test {",
-            "  Test() throws Exception {}",
-            "  int f = test();",
-            "  static int test() throws Exception {",
-            "    Thread.sleep(1);",
-            "    return 1;",
-            "  }",
-            "}")
+            "Test.java",
+            """
+            public final class Test {
+              Test() throws Exception {}
+
+              int f = test();
+
+              static int test() throws Exception {
+                Thread.sleep(1);
+                return 1;
+              }
+            }
+            """)
         .expectUnchanged()
         .doTest();
   }

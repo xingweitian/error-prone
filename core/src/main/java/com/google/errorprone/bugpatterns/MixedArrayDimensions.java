@@ -18,8 +18,11 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
 
 import com.google.common.base.CharMatcher;
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.StandardTags;
 import com.google.errorprone.VisitorState;
@@ -33,11 +36,9 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.parser.Tokens.TokenKind;
-import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "MixedArrayDimensions",
     summary = "C-style array declarations should not be used",
     severity = SUGGESTION,
     tags = StandardTags.STYLE)
@@ -66,13 +67,20 @@ public class MixedArrayDimensions extends BugChecker
       if (start >= end) {
         continue;
       }
-      List<ErrorProneToken> tokens = state.getOffsetTokens(start, end);
-      if (tokens.size() > 2 && tokens.get(0).kind() == TokenKind.IDENTIFIER) {
+      ImmutableList<ErrorProneToken> tokens = state.getOffsetTokens(start, end);
+      if (tokens.size() > 2 && tokens.getFirst().kind() == TokenKind.IDENTIFIER) {
         String dim = source.subSequence(start, end).toString();
         int nonWhitespace = CharMatcher.isNot(' ').indexIn(dim);
         int idx = dim.indexOf("[]", nonWhitespace);
         if (idx > nonWhitespace) {
           String replacement = dim.substring(idx) + dim.substring(0, idx);
+          // javacc generates classes in arbitrary packages with violations that are hard to fix.
+          var enclosingClass = enclosingClass(getSymbol(tree));
+          if (enclosingClass != null
+              && (enclosingClass.name.contentEquals("SimpleCharStream")
+                  || enclosingClass.name.contentEquals("SimpleNode"))) {
+            return NO_MATCH;
+          }
           return describeMatch(tree, SuggestedFix.replace(start, end, replacement));
         }
       }

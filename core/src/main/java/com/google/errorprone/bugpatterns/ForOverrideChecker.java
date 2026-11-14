@@ -17,7 +17,10 @@
 package com.google.errorprone.bugpatterns;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.util.ASTHelpers.findSuperMethodInType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
@@ -30,18 +33,14 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.util.TreePath;
-import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Type;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import javax.annotation.Nullable;
+import com.sun.tools.javac.code.Types;
 import javax.lang.model.element.Modifier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Verifies that methods marked {@link com.google.errorprone.annotations.ForOverride} are only
@@ -65,12 +64,17 @@ public class ForOverrideChecker extends BugChecker
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     MethodSymbol method = ASTHelpers.getSymbol(tree);
-    if (method == null) {
+    if (method.isStatic() || method.isConstructor()) {
+      return Description.NO_MATCH;
+    }
+    // Check this before walking the path to find the current class, since almost all invoked
+    // methods neither are nor override @ForOverride methods.
+    ImmutableList<MethodSymbol> overriddenMethods = getOverriddenMethods(state, method);
+    if (overriddenMethods.isEmpty()) {
       return Description.NO_MATCH;
     }
     Type currentClass = getOutermostClass(state);
-
-    if (method.isStatic() || method.isConstructor() || currentClass == null) {
+    if (currentClass == null) {
       return Description.NO_MATCH;
     }
     // allow super.foo() calls to @ForOverride methods from overriding methods
@@ -88,8 +92,6 @@ public class ForOverrideChecker extends BugChecker
         }
       }
     }
-
-    List<MethodSymbol> overriddenMethods = getOverriddenMethods(state, method);
 
     for (Symbol overriddenMethod : overriddenMethods) {
       Type declaringClass = ASTHelpers.outermostClass(overriddenMethod).asType();
@@ -117,10 +119,10 @@ public class ForOverrideChecker extends BugChecker
 
     if (method.getModifiers().contains(Modifier.PUBLIC)
         || method.getModifiers().contains(Modifier.PRIVATE)) {
-      List<MethodSymbol> overriddenMethods = getOverriddenMethods(state, method);
+      ImmutableList<MethodSymbol> overriddenMethods = getOverriddenMethods(state, method);
 
       if (!overriddenMethods.isEmpty()) {
-        MethodSymbol nearestForOverrideMethod = overriddenMethods.get(0);
+        MethodSymbol nearestForOverrideMethod = overriddenMethods.getFirst();
         String customMessage = "must have protected or package-private visibility";
         if (nearestForOverrideMethod.equals(method)) {
           // The method itself is @ForOverride but is too visible
@@ -146,14 +148,13 @@ public class ForOverrideChecker extends BugChecker
    * <p>By 'direct', we mean that if the leaf is part of a field initializer of a class, then it is
    * considered to not be part of any method.
    */
-  @Nullable
-  private static MethodTree findDirectMethod(TreePath path) {
+  private static @Nullable MethodTree findDirectMethod(TreePath path) {
     while (true) {
       path = path.getParentPath();
       if (path != null) {
         Tree leaf = path.getLeaf();
-        if (leaf instanceof MethodTree) {
-          return (MethodTree) leaf;
+        if (leaf instanceof MethodTree methodTree) {
+          return methodTree;
         }
         // if we find a ClassTree before a MethodTree, we must be an initializer
         if (leaf instanceof ClassTree) {
@@ -167,13 +168,10 @@ public class ForOverrideChecker extends BugChecker
 
   /** Returns true if this method invocation is of the form {@code super.foo()} */
   private static boolean isSuperCall(Type type, MethodInvocationTree tree, VisitorState state) {
-    if (tree.getMethodSelect().getKind() == Kind.MEMBER_SELECT) {
-      MemberSelectTree select = (MemberSelectTree) tree.getMethodSelect();
-      if (select.getExpression().getKind() == Kind.IDENTIFIER) {
-        IdentifierTree ident = (IdentifierTree) select.getExpression();
+    if (tree.getMethodSelect() instanceof MemberSelectTree select) {
+      if (select.getExpression() instanceof IdentifierTree ident) {
         return ident.getName().contentEquals("super");
-      } else if (select.getExpression().getKind() == Kind.MEMBER_SELECT) {
-        MemberSelectTree subSelect = (MemberSelectTree) select.getExpression();
+      } else if (select.getExpression() instanceof MemberSelectTree subSelect) {
 
         return subSelect.getIdentifier().contentEquals("super")
             && ASTHelpers.isSameType(ASTHelpers.getType(subSelect.getExpression()), type, state);
@@ -190,71 +188,37 @@ public class ForOverrideChecker extends BugChecker
    * @return a list of methods annotated @ForOverride that the method overrides, including the
    *     method itself if it has the annotation
    */
-  private static List<MethodSymbol> getOverriddenMethods(VisitorState state, MethodSymbol method) {
+  private static ImmutableList<MethodSymbol> getOverriddenMethods(
+      VisitorState state, MethodSymbol method) {
     // Static methods cannot override, only overload.
     if (method.isStatic()) {
       throw new IllegalArgumentException(
           "getOverriddenMethods may not be called on a static method");
     }
 
-    List<MethodSymbol> list = new LinkedList<>();
-    list.add(method);
-
-    // Iterate over supertypes of the type that owns this method, collecting a list of all method
-    // symbols with the same name.  We intentionally exclude interface methods because interface
-    // methods cannot be annotated @ForOverride.  @ForOverride methods must have protected or
-    // package-private visibility, but interface methods have implicit public visibility.
-    Type currType = state.getTypes().supertype(method.owner.type);
-    while (currType != null
-        && currType.tsym != null
-        && !currType.tsym.equals(state.getSymtab().objectType.tsym)
-        && !ASTHelpers.isSameType(currType, Type.noType, state)) {
-      Symbol sym = currType.tsym.members().findFirst(method.name);
-      if (sym instanceof MethodSymbol) {
-        list.add((MethodSymbol) sym);
-      }
-      currType = state.getTypes().supertype(currType);
+    // A loop rather than a stream, since this runs for every method invocation.
+    Types types = state.getTypes();
+    ImmutableList.Builder<MethodSymbol> result = ImmutableList.builder();
+    if (hasAnnotation(method, FOR_OVERRIDE, state)) {
+      result.add(method);
     }
-
-    // Remove methods that either don't have the @ForOverride annotation or don't override the
-    // method in question.
-    Iterator<MethodSymbol> iter = list.iterator();
-    while (iter.hasNext()) {
-      MethodSymbol member = iter.next();
-      if (!hasAnnotation(FOR_OVERRIDE, member)
-          // Note that MethodSymbol.overrides() ignores static-ness, but that's OK since we've
-          // already checked that this method is not static.
-          || !method.overrides(
-              member, (TypeSymbol) member.owner, state.getTypes(), /* checkResult= */ true)) {
-        iter.remove();
+    for (Type type : types.closure(method.owner.type)) {
+      MethodSymbol superMethod = findSuperMethodInType(method, type, types);
+      if (superMethod != null && hasAnnotation(superMethod, FOR_OVERRIDE, state)) {
+        result.add(superMethod);
       }
     }
-
-    return list;
+    return result.build();
   }
 
   /** Get the outermost class/interface/enum of an element, or null if none. */
-  private static Type getOutermostClass(VisitorState state) {
-    TreePath path = state.getPath();
-    Type type = null;
-
-    while (path != null) {
-      if (path.getLeaf().getKind() == Kind.CLASS
-          || path.getLeaf().getKind() == Kind.INTERFACE
-          || path.getLeaf().getKind() == Kind.ENUM) {
-        type = ASTHelpers.getSymbol(path.getLeaf()).type;
-      }
-      path = path.getParentPath();
-    }
-    return type;
-  }
-
-  private static boolean hasAnnotation(String annotation, Symbol member) {
-    for (Attribute.Compound attribute : member.getAnnotationMirrors()) {
-      if (annotation.equals(attribute.type.toString())) {
-        return true;
+  private static @Nullable Type getOutermostClass(VisitorState state) {
+    ClassTree outermostClass = null;
+    for (Tree tree : state.getPath()) {
+      if (tree instanceof ClassTree classTree) {
+        outermostClass = classTree;
       }
     }
-    return false;
+    return ASTHelpers.getType(outermostClass);
   }
 }

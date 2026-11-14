@@ -19,16 +19,16 @@ package com.google.errorprone.refaster;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
-import com.google.common.base.Functions;
-import com.google.common.base.Optional;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.ForOverride;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * A representation of a choice with zero or more options, which may be evaluated lazily or
@@ -56,30 +56,31 @@ public abstract class Choice<T> {
         }
 
         @Override
-        public <R> Choice<R> thenChoose(Function<? super Object, Choice<R>> function) {
+        public <R> Choice<R> flatMap(Function<? super Object, Choice<R>> function) {
           checkNotNull(function);
           return none();
         }
 
         @Override
-        public <R> Choice<R> thenOption(Function<? super Object, Optional<R>> function) {
+        public <R> Choice<R> mapIfPresent(Function<? super Object, Optional<R>> function) {
           checkNotNull(function);
           return none();
         }
 
         @Override
-        public <R> Choice<R> transform(Function<? super Object, R> function) {
+        public <R> Choice<R> map(Function<? super Object, R> function) {
           checkNotNull(function);
           return none();
         }
 
         @Override
-        public Choice<Object> or(Choice<Object> other) {
+        public Choice<Object> concat(Choice<Object> other) {
           return checkNotNull(other);
         }
 
+        @CanIgnoreReturnValue
         @Override
-        public Choice<Object> condition(Predicate<? super Object> predicate) {
+        public Choice<Object> filter(Predicate<? super Object> predicate) {
           checkNotNull(predicate);
           return this;
         }
@@ -97,7 +98,7 @@ public abstract class Choice<T> {
   }
 
   /** Returns a {@code Choice} with only one option, {@code t}. */
-  public static <T> Choice<T> of(final T t) {
+  public static <T> Choice<T> of(T t) {
     checkNotNull(t);
     return new Choice<T>() {
       @Override
@@ -106,27 +107,27 @@ public abstract class Choice<T> {
       }
 
       @Override
-      public Optional<T> first() {
+      public Optional<T> findFirst() {
         return Optional.of(t);
       }
 
       @Override
-      public Choice<T> condition(Predicate<? super T> predicate) {
-        return predicate.apply(t) ? this : Choice.<T>none();
+      public Choice<T> filter(Predicate<? super T> predicate) {
+        return predicate.test(t) ? this : Choice.<T>none();
       }
 
       @Override
-      public <R> Choice<R> thenChoose(Function<? super T, Choice<R>> function) {
+      public <R> Choice<R> flatMap(Function<? super T, Choice<R>> function) {
         return function.apply(t);
       }
 
       @Override
-      public <R> Choice<R> thenOption(Function<? super T, Optional<R>> function) {
+      public <R> Choice<R> mapIfPresent(Function<? super T, Optional<R>> function) {
         return fromOptional(function.apply(t));
       }
 
       @Override
-      public <R> Choice<R> transform(Function<? super T, R> function) {
+      public <R> Choice<R> map(Function<? super T, R> function) {
         return of(function.apply(t));
       }
 
@@ -152,30 +153,23 @@ public abstract class Choice<T> {
     return optional.isPresent() ? of(optional.get()) : Choice.<T>none();
   }
 
-  public static <T> Choice<T> from(final Collection<T> choices) {
-    switch (choices.size()) {
-      case 0:
-        return none();
-      case 1:
-        return of(Iterables.getOnlyElement(choices));
-      default:
-        return new Choice<T>() {
-          @Override
-          protected Iterator<T> iterator() {
-            return choices.iterator();
-          }
+  public static <T> Choice<T> from(Collection<T> choices) {
+    return switch (choices.size()) {
+      case 0 -> none();
+      case 1 -> of(Iterables.getOnlyElement(choices));
+      default ->
+          new Choice<T>() {
+            @Override
+            protected Iterator<T> iterator() {
+              return choices.iterator();
+            }
 
-          @Override
-          public String toString() {
-            return String.format("Choice.from(%s)", choices);
-          }
-        };
-    }
-  }
-
-  /** Returns a choice between any of the options from any of the specified choices. */
-  public static <T> Choice<T> any(final Collection<Choice<T>> choices) {
-    return from(choices).thenChoose(Functions.<Choice<T>>identity());
+            @Override
+            public String toString() {
+              return String.format("Choice.from(%s)", choices);
+            }
+          };
+    };
   }
 
   private Choice() {}
@@ -185,7 +179,6 @@ public abstract class Choice<T> {
     return this::iterator;
   }
 
-  // Currently, this is implemented with an Iterator, but that may change in future!
   @ForOverride
   protected abstract Iterator<T> iterator();
 
@@ -195,9 +188,9 @@ public abstract class Choice<T> {
   }
 
   /** Returns the first valid option from this {@code Choice}. */
-  public Optional<T> first() {
+  public Optional<T> findFirst() {
     Iterator<T> itr = iterator();
-    return itr.hasNext() ? Optional.of(itr.next()) : Optional.<T>absent();
+    return itr.hasNext() ? Optional.of(itr.next()) : Optional.<T>empty();
   }
 
   /**
@@ -205,15 +198,13 @@ public abstract class Choice<T> {
    * the {@code Choice} yielded by this function on the result.
    *
    * <p>The function may be applied lazily or immediately, at the discretion of the implementation.
-   *
-   * <p>This is the monadic bind for {@code Choice}.
    */
-  public <R> Choice<R> thenChoose(final Function<? super T, Choice<R>> function) {
+  public <R> Choice<R> flatMap(Function<? super T, Choice<R>> function) {
     checkNotNull(function);
     if (Thread.interrupted()) {
       throw new RuntimeException(new InterruptedException());
     }
-    final Choice<T> thisChoice = this;
+    Choice<T> thisChoice = this;
     return new Choice<R>() {
       @Override
       protected Iterator<R> iterator() {
@@ -232,37 +223,41 @@ public abstract class Choice<T> {
    *
    * <p>The function may be applied lazily or immediately, at the discretion of the implementation.
    */
-  public <R> Choice<R> thenOption(final Function<? super T, Optional<R>> function) {
+  public <R> Choice<R> mapIfPresent(Function<? super T, Optional<R>> function) {
     checkNotNull(function);
-    final Choice<T> thisChoice = this;
+    Choice<T> thisChoice = this;
     return new Choice<R>() {
       @Override
       protected Iterator<R> iterator() {
-        return Optional.presentInstances(Iterables.transform(thisChoice.asIterable(), function))
+        return Iterables.transform(
+                Iterables.filter(
+                    Iterables.transform(thisChoice.asIterable(), function::apply),
+                    Optional::isPresent),
+                Optional::get)
             .iterator();
       }
     };
   }
 
   /** Maps the choices with the specified function. */
-  public <R> Choice<R> transform(final Function<? super T, R> function) {
+  public <R> Choice<R> map(Function<? super T, R> function) {
     checkNotNull(function);
-    final Choice<T> thisChoice = this;
+    Choice<T> thisChoice = this;
     return new Choice<R>() {
       @Override
       protected Iterator<R> iterator() {
-        return Iterators.transform(thisChoice.iterator(), function);
+        return Iterators.transform(thisChoice.iterator(), function::apply);
       }
     };
   }
 
   /** Returns a choice of the options from this {@code Choice} or from {@code other}. */
-  public Choice<T> or(final Choice<T> other) {
+  public Choice<T> concat(Choice<T> other) {
     checkNotNull(other);
     if (other == none()) {
       return this;
     } else {
-      final Choice<T> thisChoice = this;
+      Choice<T> thisChoice = this;
       return new Choice<T>() {
         @Override
         protected Iterator<T> iterator() {
@@ -271,30 +266,25 @@ public abstract class Choice<T> {
 
         @Override
         public String toString() {
-          return String.format("%s.or(%s)", thisChoice, other);
+          return String.format("%s.concat(%s)", thisChoice, other);
         }
       };
     }
   }
 
-  /** Returns this choice if {@code condition}, otherwise the empty choice. */
-  public Choice<T> condition(boolean condition) {
-    return condition ? this : Choice.<T>none();
-  }
-
   /** Filters the choices to those that satisfy the provided {@code Predicate}. */
-  public Choice<T> condition(final Predicate<? super T> predicate) {
+  public Choice<T> filter(Predicate<? super T> predicate) {
     checkNotNull(predicate);
-    final Choice<T> thisChoice = this;
+    Choice<T> thisChoice = this;
     return new Choice<T>() {
       @Override
       protected Iterator<T> iterator() {
-        return Iterators.filter(thisChoice.iterator(), predicate);
+        return Iterators.filter(thisChoice.iterator(), predicate::test);
       }
 
       @Override
       public String toString() {
-        return String.format("%s.condition(%s)", thisChoice, predicate);
+        return String.format("%s.filter(%s)", thisChoice, predicate);
       }
     };
   }

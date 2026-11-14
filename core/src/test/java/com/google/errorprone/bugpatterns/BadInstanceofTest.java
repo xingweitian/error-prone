@@ -32,31 +32,42 @@ public final class BadInstanceofTest {
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(BadInstanceof.class, getClass());
 
+  private final BugCheckerRefactoringTestHelper refactoringHelper =
+      BugCheckerRefactoringTestHelper.newInstance(BadInstanceof.class, getClass());
+
   @Test
   public void refactoring() {
-    BugCheckerRefactoringTestHelper.newInstance(BadInstanceof.class, getClass())
+    refactoringHelper
         .addInputLines(
             "Test.java",
-            "class A {",
-            "  boolean foo(C c) {",
-            "    return c instanceof A;",
-            "  }",
-            "  boolean notFoo(C c) {",
-            "    return !(c instanceof A);",
-            "  }",
-            "  static class C extends A {}",
-            "}")
+            """
+            class A {
+              boolean foo(C c) {
+                return c instanceof A;
+              }
+
+              boolean notFoo(C c) {
+                return !(c instanceof A);
+              }
+
+              static class C extends A {}
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class A {",
-            "  boolean foo(C c) {",
-            "    return c != null;",
-            "  }",
-            "  boolean notFoo(C c) {",
-            "    return c == null;",
-            "  }",
-            "  static class C extends A {}",
-            "}")
+            """
+            class A {
+              boolean foo(C c) {
+                return c != null;
+              }
+
+              boolean notFoo(C c) {
+                return c == null;
+              }
+
+              static class C extends A {}
+            }
+            """)
         .doTest();
   }
 
@@ -65,20 +76,24 @@ public final class BadInstanceofTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class A {",
-            "  // BUG: Diagnostic contains: `new C()` is a non-null instance of C "
-                + "which is a subtype of A",
-            "  boolean t = new C() instanceof A;",
-            "  boolean foo(C c) {",
-            "    // BUG: Diagnostic contains: `c` is an instance of C which is a subtype of A",
-            "    return c instanceof A;",
-            "  }",
-            "  boolean notFoo(C c) {",
-            "    // BUG: Diagnostic contains: `c` is an instance of C which is a subtype of A",
-            "    return !(c instanceof A);",
-            "  }",
-            "}",
-            "class C extends A {}")
+"""
+class A {
+  // BUG: Diagnostic contains: `new C()` is a non-null instance of C which is a subtype of A
+  boolean t = new C() instanceof A;
+
+  boolean foo(C c) {
+    // BUG: Diagnostic contains: `c` is an instance of C which is a subtype of A
+    return c instanceof A;
+  }
+
+  boolean notFoo(C c) {
+    // BUG: Diagnostic contains: `c` is an instance of C which is a subtype of A
+    return !(c instanceof A);
+  }
+}
+
+class C extends A {}
+""")
         .doTest();
   }
 
@@ -87,12 +102,47 @@ public final class BadInstanceofTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class A {",
-            "  boolean foo(A a) {",
-            "    return a instanceof C;",
-            "  }",
-            "}",
-            "class C extends A {}")
+            """
+            class A {
+              boolean foo(A a) {
+                return a instanceof C;
+              }
+            }
+
+            class C extends A {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void patternMatching_finding() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class A {
+              String foo(String s) {
+                // BUG: Diagnostic contains:
+                return s instanceof String x ? x : "null";
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void patternMatching_noFix() {
+    refactoringHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class A {
+              String foo(String s) {
+                return s instanceof String x ? x : "null";
+              }
+            }
+            """)
+        .expectUnchanged()
         .doTest();
   }
 }

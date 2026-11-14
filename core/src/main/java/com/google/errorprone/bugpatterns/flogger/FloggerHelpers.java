@@ -29,23 +29,22 @@ final class FloggerHelpers {
 
   static char inferFormatSpecifier(Tree piece, VisitorState state) {
     Type type = getType(piece);
+    return inferFormatSpecifier(type, state);
+  }
+
+  static char inferFormatSpecifier(Type type, VisitorState state) {
     if (type == null) {
       return STRING_FORMAT;
     }
-    switch (state.getTypes().unboxedTypeOrType(type).getKind()) {
-      case INT:
-      case LONG:
-        return 'd';
-      case FLOAT:
-      case DOUBLE:
-        return 'g';
-      case BOOLEAN:
-        // %b is identical to %s in Flogger, but not in String.format, so it might be risky
-        // to train people to prefer it. (In format() a Boolean "null" becomes "false",)
-        return STRING_FORMAT;
-      default:
-        return STRING_FORMAT;
-    }
+    return switch (state.getTypes().unboxedTypeOrType(type).getKind()) {
+      case INT, LONG -> 'd';
+      case FLOAT, DOUBLE -> 'g';
+      case BOOLEAN ->
+          // %b is identical to %s in Flogger, but not in String.format, so it might be risky
+          // to train people to prefer it. (In format() a Boolean "null" becomes "false",)
+          STRING_FORMAT;
+      default -> STRING_FORMAT;
+    };
   }
 
   private FloggerHelpers() {}

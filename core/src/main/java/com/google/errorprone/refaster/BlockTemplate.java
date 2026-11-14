@@ -19,7 +19,6 @@ import static java.util.logging.Level.SEVERE;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.base.CharMatcher;
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -30,6 +29,7 @@ import com.google.errorprone.refaster.annotation.UseImportPolicy;
 import com.sun.source.tree.StatementTree;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.lang.annotation.Annotation;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
@@ -76,14 +77,29 @@ public abstract class BlockTemplate extends Template<BlockTemplateMatch> {
       Iterable<? extends UStatement> templateStatements) {
     return new AutoValue_BlockTemplate(
         annotations,
+        ImmutableList.of(),
         ImmutableList.copyOf(typeVariables),
         ImmutableMap.copyOf(expressionArgumentTypes),
         ImmutableList.copyOf(templateStatements));
   }
 
+  @Override
+  public BlockTemplate withRuleTypeVariables(Iterable<UTypeVar> ruleTypeVariables) {
+    return new AutoValue_BlockTemplate(
+        annotations(),
+        ImmutableList.copyOf(ruleTypeVariables),
+        templateTypeVariables(),
+        expressionArgumentTypes(),
+        templateStatements());
+  }
+
   public BlockTemplate withStatements(Iterable<? extends UStatement> templateStatements) {
-    return create(
-        annotations(), templateTypeVariables(), expressionArgumentTypes(), templateStatements);
+    return new AutoValue_BlockTemplate(
+        annotations(),
+        ruleTypeVariables(),
+        templateTypeVariables(),
+        expressionArgumentTypes(),
+        ImmutableList.copyOf(templateStatements));
   }
 
   abstract ImmutableList<UStatement> templateStatements();
@@ -93,90 +109,98 @@ public abstract class BlockTemplate extends Template<BlockTemplateMatch> {
    * list of template statements found consecutively; otherwise, returns an empty list.
    */
   @Override
-  public Iterable<BlockTemplateMatch> match(JCTree tree, Context context) {
+  public Iterable<BlockTemplateMatch> match(
+      JCTree tree, Context context, JCCompilationUnit compilationUnit) {
     // TODO(lowasser): consider nonconsecutive matches?
-    if (tree instanceof JCBlock) {
-      JCBlock block = (JCBlock) tree;
+    if (tree instanceof JCBlock block) {
       ImmutableList<JCStatement> targetStatements = ImmutableList.copyOf(block.getStatements());
-      return matchesStartingAnywhere(block, 0, targetStatements, context)
-          .first()
-          .or(List.<BlockTemplateMatch>nil());
+      return matchesStartingAnywhere(block, 0, targetStatements, context, compilationUnit)
+          .findFirst()
+          .orElse(List.nil());
     }
     return ImmutableList.of();
   }
 
   private Choice<List<BlockTemplateMatch>> matchesStartingAtBeginning(
-      final JCBlock block,
-      final int offset,
-      final ImmutableList<? extends StatementTree> statements,
-      final Context context) {
+      JCBlock block,
+      int offset,
+      ImmutableList<? extends StatementTree> statements,
+      Context context,
+      JCCompilationUnit compilationUnit) {
     if (statements.isEmpty()) {
       return Choice.none();
     }
-    final JCStatement firstStatement = (JCStatement) statements.get(0);
+    JCStatement firstStatement = (JCStatement) statements.getFirst();
     Choice<UnifierWithUnconsumedStatements> choice =
-        Choice.of(UnifierWithUnconsumedStatements.create(new Unifier(context), statements));
+        Choice.of(
+            UnifierWithUnconsumedStatements.create(
+                new Unifier(context, compilationUnit), statements));
     for (UStatement templateStatement : templateStatements()) {
-      choice = choice.thenChoose(templateStatement);
+      choice = choice.flatMap(templateStatement);
     }
-    return choice.thenChoose(
-        (UnifierWithUnconsumedStatements state) -> {
-          Unifier unifier = state.unifier();
-          Inliner inliner = unifier.createInliner();
-          try {
-            Optional<Unifier> checkedUnifier =
-                typecheck(
-                    unifier,
-                    inliner,
-                    new Warner(firstStatement),
-                    expectedTypes(inliner),
-                    actualTypes(inliner));
-            if (checkedUnifier.isPresent()) {
-              int consumedStatements = statements.size() - state.unconsumedStatements().size();
-              BlockTemplateMatch match =
-                  new BlockTemplateMatch(
-                      block, checkedUnifier.get(), offset, offset + consumedStatements);
-              boolean verified =
-                  ExpressionTemplate.trueOrNull(
-                      ExpressionTemplate.PLACEHOLDER_VERIFIER.scan(
-                          templateStatements(), checkedUnifier.get()));
-              if (!verified) {
-                return Choice.none();
-              }
-              return matchesStartingAnywhere(
-                      block,
-                      offset + consumedStatements,
-                      statements.subList(consumedStatements, statements.size()),
-                      context)
-                  .transform(list -> list.prepend(match));
-            }
-          } catch (CouldNotResolveImportException e) {
-            // fall through
+    return choice.flatMap((UnifierWithUnconsumedStatements state) -> {
+      Unifier unifier = state.unifier();
+      Inliner inliner = unifier.createInliner();
+      try {
+        Optional<Unifier> checkedUnifier =
+            typecheck(
+                unifier,
+                inliner,
+                new Warner(firstStatement),
+                expectedTypes(inliner),
+                actualTypes(inliner));
+        if (checkedUnifier.isPresent()) {
+          int consumedStatements = statements.size() - state.unconsumedStatements().size();
+          BlockTemplateMatch match =
+              new BlockTemplateMatch(
+                  block, checkedUnifier.get(), offset, offset + consumedStatements);
+          boolean verified =
+              ExpressionTemplate.trueOrNull(
+                  ExpressionTemplate.PLACEHOLDER_VERIFIER.scan(
+                      templateStatements(), checkedUnifier.get()));
+          if (!verified) {
+            return Choice.none();
           }
-          return Choice.none();
-        });
+          return matchesStartingAnywhere(
+                  block,
+                  offset + consumedStatements,
+                  statements.subList(consumedStatements, statements.size()),
+                  context,
+                  compilationUnit)
+              .map(list -> list.prepend(match));
+        }
+      } catch (CouldNotResolveImportException e) {
+        // fall through
+      }
+      return Choice.none();
+    });
   }
 
   private Choice<List<BlockTemplateMatch>> matchesStartingAnywhere(
       JCBlock block,
       int offset,
-      final ImmutableList<? extends StatementTree> statements,
-      final Context context) {
+      ImmutableList<? extends StatementTree> statements,
+      Context context,
+      JCCompilationUnit compilationUnit) {
     Choice<List<BlockTemplateMatch>> choice = Choice.none();
     for (int i = 0; i < statements.size(); i++) {
       choice =
-          choice.or(
+          choice.concat(
               matchesStartingAtBeginning(
-                  block, offset + i, statements.subList(i, statements.size()), context));
+                  block,
+                  offset + i,
+                  statements.subList(i, statements.size()),
+                  context,
+                  compilationUnit));
     }
-    return choice.or(Choice.of(List.<BlockTemplateMatch>nil()));
+    return choice.concat(Choice.of(List.<BlockTemplateMatch>nil()));
   }
 
   /** Returns a {@code String} representation of a statement, including semicolon. */
-  private static String printStatement(Context context, JCStatement statement) {
+  private static String printStatement(Inliner inliner, JCStatement statement) {
     StringWriter writer = new StringWriter();
     try {
-      pretty(context, writer).printStat(statement);
+      pretty(inliner, writer).printStat(statement);
     } catch (IOException e) {
       throw new AssertionError("StringWriter cannot throw IOExceptions", e);
     }
@@ -187,10 +211,10 @@ public abstract class BlockTemplate extends Template<BlockTemplateMatch> {
    * Returns a {@code String} representation of a sequence of statements, with semicolons and
    * newlines.
    */
-  private static String printStatements(Context context, Iterable<JCStatement> statements) {
+  private static String printStatements(Inliner inliner, Iterable<JCStatement> statements) {
     StringWriter writer = new StringWriter();
     try {
-      pretty(context, writer).printStats(com.sun.tools.javac.util.List.from(statements));
+      pretty(inliner, writer).printStats(com.sun.tools.javac.util.List.from(statements));
     } catch (IOException e) {
       throw new AssertionError("StringWriter cannot throw IOExceptions", e);
     }
@@ -202,11 +226,8 @@ public abstract class BlockTemplate extends Template<BlockTemplateMatch> {
     checkNotNull(match);
     SuggestedFix.Builder fix = SuggestedFix.builder();
     Inliner inliner = match.createInliner();
-    Context context = inliner.getContext();
     if (annotations().containsKey(UseImportPolicy.class)) {
-      ImportPolicy.bind(context, annotations().getInstance(UseImportPolicy.class).value());
-    } else {
-      ImportPolicy.bind(context, ImportPolicy.IMPORT_TOP_LEVEL);
+      inliner.setImportPolicy(annotations().getInstance(UseImportPolicy.class).value());
     }
     ImmutableList<JCStatement> targetStatements = match.getStatements();
     try {
@@ -219,23 +240,23 @@ public abstract class BlockTemplate extends Template<BlockTemplateMatch> {
       int nTargets = targetStatements.size();
       if (nInlined <= nTargets) {
         for (int i = 0; i < nInlined; i++) {
-          fix.replace(targetStatements.get(i), printStatement(context, inlinedStatements.get(i)));
+          fix.replace(targetStatements.get(i), printStatement(inliner, inlinedStatements.get(i)));
         }
         for (int i = nInlined; i < nTargets; i++) {
           fix.delete(targetStatements.get(i));
         }
       } else {
         for (int i = 0; i < nTargets - 1; i++) {
-          fix.replace(targetStatements.get(i), printStatement(context, inlinedStatements.get(i)));
+          fix.replace(targetStatements.get(i), printStatement(inliner, inlinedStatements.get(i)));
         }
         int last = nTargets - 1;
         ImmutableList<JCStatement> remainingInlined = inlinedStatements.subList(last, nInlined);
         fix.replace(
             targetStatements.get(last),
-            CharMatcher.whitespace().trimTrailingFrom(printStatements(context, remainingInlined)));
+            CharMatcher.whitespace().trimTrailingFrom(printStatements(inliner, remainingInlined)));
       }
     } catch (CouldNotResolveImportException e) {
-      logger.log(SEVERE, "Failure to resolve import in replacement", e);
+      logger.log(SEVERE, "Failure to resolve in replacement", e);
     }
     return addImports(inliner, fix);
   }

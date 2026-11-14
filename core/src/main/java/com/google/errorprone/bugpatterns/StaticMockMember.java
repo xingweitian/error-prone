@@ -37,7 +37,6 @@ import javax.lang.model.element.Modifier;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "StaticMockMember",
     summary =
         "@Mock members of test classes shouldn't share state between tests and preferably be"
             + " non-static",
@@ -55,7 +54,7 @@ public final class StaticMockMember extends BugChecker implements VariableTreeMa
     Optional<SuggestedFix> optionalFix =
         SuggestedFixes.removeModifiers(varTree, state, Modifier.STATIC);
 
-    if (!optionalFix.isPresent()) {
+    if (optionalFix.isEmpty()) {
       return NO_MATCH;
     }
     if (SuggestedFixes.compilesWithFix(optionalFix.get(), state)) {

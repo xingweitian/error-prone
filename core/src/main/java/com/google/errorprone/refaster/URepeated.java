@@ -21,7 +21,7 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** A variable that can match a sequence of expressions. */
 @AutoValue
@@ -35,15 +35,14 @@ abstract class URepeated extends UExpression {
   abstract UExpression expression();
 
   @Override
-  @Nullable
-  protected Choice<Unifier> defaultAction(Tree node, @Nullable Unifier unifier) {
+  protected @Nullable Choice<Unifier> defaultAction(Tree node, @Nullable Unifier unifier) {
     return expression().unify(node, unifier);
   }
 
   @Override
   public JCExpression inline(Inliner inliner) throws CouldNotResolveImportException {
     throw new UnsupportedOperationException(
-        "@CountConstraint variables should be inlined inside method invocations or newArray");
+        "@Repeated variables should be inlined inside method invocations or newArray");
   }
 
   @Override
@@ -57,7 +56,7 @@ abstract class URepeated extends UExpression {
   }
 
   /** Gets the binding of the underlying identifier in the unifier. */
-  public JCExpression getUnderlyingBinding(Unifier unifier) {
+  public @Nullable JCExpression getUnderlyingBinding(Unifier unifier) {
     return (unifier == null) ? null : unifier.getBinding(new UFreeIdent.Key(identifier()));
   }
 

@@ -42,26 +42,31 @@ import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import com.sun.tools.javac.tree.JCTree.JCUnary;
 import com.sun.tools.javac.tree.TreeInfo;
 
-/** @author galitch@google.com (Anton Galitch) */
+/**
+ * @author galitch@google.com (Anton Galitch)
+ */
 @BugPattern(
-    name = "UseCorrectAssertInTests",
-    summary = "Java assert is used in test. For testing purposes Assert.* matchers should be used.",
-    severity = SeverityLevel.WARNING)
+    summary =
+        "Java assert is used in testing code. For testing purposes, prefer using Truth-based"
+            + " assertions.",
+    severity = SeverityLevel.ERROR)
 public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMatcher {
   private static final String STATIC_ASSERT_THAT_IMPORT =
       "static com.google.common.truth.Truth.assertThat";
   private static final String STATIC_ASSERT_WITH_MESSAGE_IMPORT =
       "static com.google.common.truth.Truth.assertWithMessage";
 
-  private static final String ASSERT_THAT = "assertThat(%s).";
-  private static final String ASSERT_WITH_MESSAGE = "assertWithMessage(%s).that(%s).";
   private static final String IS_TRUE = "isTrue();";
   private static final String IS_FALSE = "isFalse();";
-  private static final String IS_SAME_AS = "isSameInstanceAs(%s);";
-  private static final String IS_NOT_SAME_AS = "isNotSameInstanceAs(%s);";
-  private static final String IS_EQUAL_TO = "isEqualTo(%s);";
+
   private static final String IS_NULL = "isNull();";
   private static final String IS_NOT_NULL = "isNotNull();";
+
+  private static final String IS_EQUAL_TO = "isEqualTo(%s);";
+  private static final String IS_NOT_EQUAL_TO = "isNotEqualTo(%s);";
+
+  private static final String IS_SAME_AS = "isSameInstanceAs(%s);";
+  private static final String IS_NOT_SAME_AS = "isNotSameInstanceAs(%s);";
 
   public UseCorrectAssertInTests() {}
 
@@ -87,7 +92,7 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
       replaceAssert(fix, foundAssert, state);
     }
     // Emit finding on the first assertion rather than on the method (b/175575632).
-    return describeMatch(assertions.get(0), fix.build());
+    return describeMatch(assertions.getFirst(), fix.build());
   }
 
   private static void replaceAssert(
@@ -106,7 +111,7 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
     if (instanceMethod().anyClass().named("equals").matches(expr, state)) {
       JCMethodInvocation equalsCall = ((JCMethodInvocation) expr);
       JCExpression expr1 = ((JCFieldAccess) ((JCMethodInvocation) expr).meth).selected;
-      JCExpression expr2 = equalsCall.getArguments().get(0);
+      JCExpression expr2 = equalsCall.getArguments().getFirst();
 
       addFix(
           fix,
@@ -119,7 +124,7 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
 
     // case: "assert expr1 == expr2" or "assert expr1 != expr2"
     if (expr.getKind().equals(Kind.EQUAL_TO) || expr.getKind().equals(Kind.NOT_EQUAL_TO)) {
-      suggestFixForSameReference(fix, foundAssert, state, expr.getKind().equals(Kind.EQUAL_TO));
+      suggestFixForEquality(fix, foundAssert, state, expr.getKind().equals(Kind.EQUAL_TO));
       return;
     }
 
@@ -138,12 +143,12 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
 
     if (foundAssert.getDetail() == null) {
       fix.addImport(STATIC_ASSERT_THAT_IMPORT);
-      assertToUse = String.format(ASSERT_THAT, normalizedSourceForExpression(expr, state));
+      assertToUse = String.format("assertThat(%s).", normalizedSourceForExpression(expr, state));
     } else {
       fix.addImport(STATIC_ASSERT_WITH_MESSAGE_IMPORT);
       assertToUse =
           String.format(
-              ASSERT_WITH_MESSAGE,
+              "assertWithMessage(%s).that(%s).",
               convertToString(foundAssert.getDetail(), state),
               normalizedSourceForExpression(expr, state));
     }
@@ -152,7 +157,7 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
   }
 
   /** Handles the case "expr1 == expr2" */
-  private static void suggestFixForSameReference(
+  private static void suggestFixForEquality(
       SuggestedFix.Builder fix, AssertTree foundAssert, VisitorState state, boolean isEqual) {
 
     BinaryTree equalityTree = (BinaryTree) TreeInfo.skipParens((JCTree) foundAssert.getCondition());
@@ -165,6 +170,14 @@ public class UseCorrectAssertInTests extends BugChecker implements MethodTreeMat
     } else if (expr2.getKind() == NULL_LITERAL) {
       // case: "assert expr [op] null"
       addFix(fix, (JCExpression) expr1, foundAssert, state, isEqual ? IS_NULL : IS_NOT_NULL);
+    } else if (ASTHelpers.getType(expr1).isPrimitive() || ASTHelpers.getType(expr2).isPrimitive()) {
+      // case: eg. "assert expr == 1"
+      addFix(
+          fix,
+          (JCExpression) expr1,
+          foundAssert,
+          state,
+          String.format(isEqual ? IS_EQUAL_TO : IS_NOT_EQUAL_TO, state.getSourceForNode(expr2)));
     } else {
       // case: "assert expr1 [op] expr2"
       addFix(

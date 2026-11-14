@@ -1,23 +1,8 @@
+Annotating a method `@Nullable` communicates to tools that the method can return
+null. That means they can check that callers handle a returned null correctly.
 
-Methods that may return `null` should be annotated with `@Nullable`. For
-example, do this:
-
-```java
-public class Foo {
-  @Nullable private String message = null;
-  @Nullable public String getMessage() {
-    return message;
-  }
-}
-```
-
-Not this:
-
-```java
-public class Foo {
-  private String message = null;
-  public String getMessage() {
-    return message;
-  }
-}
-```
+Adding `@Nullable` may require updating callers so that they deal with the
+possibly-null value. This can happen for example with Kotlin callers, or with
+Java callers that are checked for null-safety by static-analysis tools.
+Alternatively, depending on the tool, it may be possible to annotate Java
+callers temporarily with `@SuppressWarnings("nullness")`.

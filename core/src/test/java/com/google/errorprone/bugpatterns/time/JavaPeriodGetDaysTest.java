@@ -15,10 +15,7 @@
  */
 package com.google.errorprone.bugpatterns.time;
 
-import static org.junit.Assume.assumeFalse;
-
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -39,14 +36,18 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static void foo(Period period) {",
-            "    int days = period.getDays();",
-            "    int months = period.getMonths();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static void foo(Period period) {
+                int days = period.getDays();
+                int months = period.getMonths();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -55,14 +56,18 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static int foo(Period period) {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    return period.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static int foo(Period period) {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                return period.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -71,15 +76,18 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import com.google.common.collect.ImmutableMap;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static ImmutableMap<String, Object> foo(Period period) {",
-            "    return ImmutableMap.of(",
-            "        \"months\", period.getMonths(), \"days\", period.getDays());",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import com.google.common.collect.ImmutableMap;
+            import java.time.Period;
+
+            public class TestCase {
+              public static ImmutableMap<String, Object> foo(Period period) {
+                return ImmutableMap.of("months", period.getMonths(), "days", period.getDays());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -89,17 +97,21 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static void foo(Period period) {",
-            "    long months = period.getMonths();",
-            "    if (true) {",
-            "      // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "      int days = period.getDays();",
-            "    }",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static void foo(Period period) {
+                long months = period.getMonths();
+                if (true) {
+                  // BUG: Diagnostic contains: JavaPeriodGetDays
+                  int days = period.getDays();
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -108,17 +120,22 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static void foo(Period period) {",
-            "    long months = period.getMonths();",
-            "  }",
-            "  public static void bar(Period period) {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = period.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static void foo(Period period) {
+                long months = period.getMonths();
+              }
+
+              public static void bar(Period period) {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = period.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -127,13 +144,17 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static void foo(Period period) {",
-            "    long months = period.getMonths();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static void foo(Period period) {
+                long months = period.getMonths();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -142,14 +163,18 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  public static void foo(Period period) {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = period.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              public static void foo(Period period) {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = period.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -158,16 +183,21 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  private static final long months = PERIOD.getMonths();",
-            "  public static void foo() {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = PERIOD.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              private static final Period PERIOD = Period.ZERO;
+              private static final long months = PERIOD.getMonths();
+
+              public static void foo() {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = PERIOD.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -176,13 +206,17 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  static {",
-            "    long months = Period.ZERO.getMonths();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              static {
+                long months = Period.ZERO.getMonths();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -191,14 +225,18 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  static {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = Period.ZERO.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              static {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = Period.ZERO.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -207,12 +245,16 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  private final long months = Period.ZERO.getMonths();",
-            "  private final int days = Period.ZERO.getDays();",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              private final long months = Period.ZERO.getMonths();
+              private final int days = Period.ZERO.getDays();
+            }
+            """)
         .doTest();
   }
 
@@ -221,12 +263,16 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "  private final int days = Period.ZERO.getDays();",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              // BUG: Diagnostic contains: JavaPeriodGetDays
+              private final int days = Period.ZERO.getDays();
+            }
+            """)
         .doTest();
   }
 
@@ -235,20 +281,27 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  public static void foo() {",
-            "    long months = PERIOD.getMonths();",
-            "    Object obj = new Object() {",
-            "      @Override public String toString() {",
-            "        // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "        return String.valueOf(PERIOD.getDays()); ",
-            "      }",
-            "    };",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              private static final Period PERIOD = Period.ZERO;
+
+              public static void foo() {
+                long months = PERIOD.getMonths();
+                Object obj =
+                    new Object() {
+                      @Override
+                      public String toString() {
+                        // BUG: Diagnostic contains: JavaPeriodGetDays
+                        return String.valueOf(PERIOD.getDays());
+                      }
+                    };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -257,16 +310,21 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  Period PERIOD = Period.ZERO;",
-            "  long months = PERIOD.getMonths();",
-            "  Object obj = new Object() {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    long days = PERIOD.getDays();",
-            "  };",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              Period PERIOD = Period.ZERO;
+              long months = PERIOD.getMonths();
+              Object obj =
+                  new Object() {
+                    // BUG: Diagnostic contains: JavaPeriodGetDays
+                    long days = PERIOD.getDays();
+                  };
+            }
+            """)
         .doTest();
   }
 
@@ -275,16 +333,21 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  public static void foo() {",
-            "    Runnable r = () -> PERIOD.getMonths();",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = PERIOD.getDays();",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+
+            public class TestCase {
+              private static final Period PERIOD = Period.ZERO;
+
+              public static void foo() {
+                Runnable r = () -> PERIOD.getMonths();
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = PERIOD.getDays();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -293,19 +356,24 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "import java.util.function.Supplier;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  public void foo() {",
-            "    doSomething(() -> PERIOD.getMonths());",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    int days = PERIOD.getDays();",
-            "  }",
-            "  public void doSomething(Supplier<Integer> supplier) {",
-            "  }",
-            "}")
+            """
+            package test;
+
+            import java.time.Period;
+            import java.util.function.Supplier;
+
+            public class TestCase {
+              private static final Period PERIOD = Period.ZERO;
+
+              public void foo() {
+                doSomething(() -> PERIOD.getMonths());
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                int days = PERIOD.getDays();
+              }
+
+              public void doSomething(Supplier<Integer> supplier) {}
+            }
+            """)
         .doTest();
   }
 
@@ -314,32 +382,21 @@ public class JavaPeriodGetDaysTest {
     compilationHelper
         .addSourceLines(
             "test/TestCase.java",
-            "package test;",
-            "import java.time.Period;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  public static void foo() {",
-            "    // BUG: Diagnostic contains: JavaPeriodGetDays",
-            "    Runnable r = () -> PERIOD.getDays();",
-            "    long months = PERIOD.getMonths();",
-            "  }",
-            "}")
-        .doTest();
-  }
+            """
+            package test;
 
-  @Test
-  public void testByJavaTime() {
-    assumeFalse(RuntimeVersion.isAtLeast9());
-    compilationHelper
-        .addSourceLines(
-            "test/TestCase.java",
-            "package java.time;",
-            "public class TestCase {",
-            "  private static final Period PERIOD = Period.ZERO;",
-            "  public static void foo() {",
-            "    int nanos = PERIOD.getDays();",
-            "  }",
-            "}")
+            import java.time.Period;
+
+            public class TestCase {
+              private static final Period PERIOD = Period.ZERO;
+
+              public static void foo() {
+                // BUG: Diagnostic contains: JavaPeriodGetDays
+                Runnable r = () -> PERIOD.getDays();
+                long months = PERIOD.getMonths();
+              }
+            }
+            """)
         .doTest();
   }
 }

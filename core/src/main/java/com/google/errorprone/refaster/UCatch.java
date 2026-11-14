@@ -22,7 +22,7 @@ import com.google.auto.value.AutoValue;
 import com.sun.source.tree.CatchTree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCCatch;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code UTree} representation of a {@code CatchTree}.
@@ -57,10 +57,9 @@ abstract class UCatch extends UTree<JCCatch> implements CatchTree {
   }
 
   @Override
-  @Nullable
-  public Choice<Unifier> visitCatch(CatchTree node, @Nullable Unifier unifier) {
+  public @Nullable Choice<Unifier> visitCatch(CatchTree node, @Nullable Unifier unifier) {
     return getParameter()
         .unify(node.getParameter(), unifier)
-        .thenChoose(unifications(getBlock(), node.getBlock()));
+        .flatMap(unifications(getBlock(), node.getBlock()));
   }
 }

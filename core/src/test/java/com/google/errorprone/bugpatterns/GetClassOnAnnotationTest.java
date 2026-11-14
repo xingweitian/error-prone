@@ -33,12 +33,14 @@ public class GetClassOnAnnotationTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f(Deprecated deprecated) {",
-            "    // BUG: Diagnostic contains: System.err.println(deprecated.annotationType());",
-            "    System.err.println(deprecated.getClass());",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f(Deprecated deprecated) {
+                // BUG: Diagnostic contains: System.err.println(deprecated.annotationType());
+                System.err.println(deprecated.getClass());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -47,11 +49,40 @@ public class GetClassOnAnnotationTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f(Deprecated deprecated) {",
-            "    System.err.println(this.getClass());",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f(Deprecated deprecated) {
+                System.err.println(this.getClass());
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void i5743() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.lang.annotation.Annotation;
+            import java.util.stream.Stream;
+
+            interface AnnotationLiteral extends Annotation {
+
+              @Override
+              @SuppressWarnings("unchecked")
+              default Class<? extends Annotation> annotationType() {
+                return (Class<? extends Annotation>)
+                    // BUG: Diagnostic contains: annotationType().getInterfaces()
+                    Stream.of(getClass().getInterfaces())
+                        .filter(Annotation.class::isAssignableFrom)
+                        .filter(iface -> !iface.equals(AnnotationLiteral.class))
+                        .findFirst()
+                        .orElseThrow();
+              }
+            }
+            """)
         .doTest();
   }
 }

@@ -40,26 +40,24 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class UnificationTest extends CompilerBasedTest {
 
-  public void expectMatches(final Template<?> template, Match... expected) {
-    final Set<Match> expectedMatches = Sets.newHashSet(expected);
-    TreeScanner matchScanner =
-        new TreeScanner() {
-          @Override
-          public void scan(JCTree tree) {
-            if (tree == null) {
-              return;
-            }
-            for (TemplateMatch templateMatch : template.match(tree, context)) {
-              Match match = Match.create(templateMatch);
-              if (!expectedMatches.remove(match)) {
-                fail(String.format("Unexpected match against template %s:%n%s", template, match));
-              }
-            }
-            super.scan(tree);
-          }
-        };
+  public void expectMatches(Template<?> template, Match... expected) {
+    Set<Match> expectedMatches = Sets.newHashSet(expected);
     for (JCCompilationUnit unit : compilationUnits) {
-      matchScanner.scan(unit);
+      new TreeScanner() {
+        @Override
+        public void scan(JCTree tree) {
+          if (tree == null) {
+            return;
+          }
+          for (TemplateMatch templateMatch : template.match(tree, context, unit)) {
+            Match match = Match.create(templateMatch);
+            if (!expectedMatches.remove(match)) {
+              fail(String.format("Unexpected match against template %s:%n%s", template, match));
+            }
+          }
+          super.scan(tree);
+        }
+      }.scan(unit);
     }
     for (Match missingMatch : expectedMatches) {
       fail(
@@ -432,6 +430,28 @@ public class UnificationTest extends CompilerBasedTest {
                 "y", "\"foo\"",
                 "z", "\"bar\"",
                 "T", "java.lang.String")));
+  }
+
+  @Test
+  public void instanceOf() {
+    // Template: x instanceof String
+    ExpressionTemplate template =
+        ExpressionTemplate.create(
+            ImmutableMap.of("x", UClassType.create("java.lang.Object")),
+            UInstanceOf.create(UFreeIdent.create("x"), UClassIdent.create("java.lang.String")),
+            UPrimitiveType.BOOLEAN);
+
+    compile(
+        "class Foo {",
+        "  public void example(Object x) {",
+        // positive example
+        "    if (x instanceof String) {}",
+        // negative example
+        "    if (x instanceof String s) {}",
+        "  }",
+        "}");
+
+    expectMatches(template, Match.create(ImmutableMap.of("x", "x")));
   }
 
   @Test

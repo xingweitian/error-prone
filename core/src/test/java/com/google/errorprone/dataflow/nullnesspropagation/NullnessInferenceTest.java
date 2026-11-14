@@ -16,6 +16,7 @@
 
 package com.google.errorprone.dataflow.nullnesspropagation;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.fixes.SuggestedFix.replace;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
@@ -40,7 +41,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author bennostein@google.com (Benno Stein) */
+/**
+ * @author bennostein@google.com (Benno Stein)
+ */
 @RunWith(JUnit4.class)
 public class NullnessInferenceTest {
 
@@ -68,142 +71,185 @@ public class NullnessInferenceTest {
   }
 
   @Test
-  public void testIdentity() {
+  public void identity() {
     compilationHelper
         .addSourceLines(
             "IdentityTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class IdentityTest {",
-            "  @Nullable Object nullableObj;",
-            "  @NonNull Object nonnullObj;",
-            "  <T> T id(T t) { return t; }",
-            "  void id_tests() {",
-            "    // BUG: Diagnostic contains: {T=Nullable}",
-            "    inspectInferredGenerics(id(nullableObj));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(nonnullObj));",
-            "  }",
-            "  void literal_tests() {",
-            "    // BUG: Diagnostic contains: {T=Null}",
-            "    inspectInferredGenerics(id(null));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(this));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(5));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(\"hello\"));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(new Object()));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(id(new Object[0]));",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredGenerics;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class IdentityTest {
+  @Nullable Object nullableObj;
+  @NonNull Object nonnullObj;
+
+  <T> T id(T t) {
+    return t;
+  }
+
+  void id_tests() {
+    // BUG: Diagnostic contains: {T=Nullable}
+    inspectInferredGenerics(id(nullableObj));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id(nonnullObj));
+  }
+
+  void literal_tests() {
+    // BUG: Diagnostic contains: {T=Null}
+    inspectInferredGenerics(id(null));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id(this));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id(5));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id("hello"));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id(new Object()));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(id(new Object[0]));
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testAnnotatedGenericMethod() {
+  public void annotatedGenericMethod() {
     compilationHelper
         .addSourceLines(
             "AnnotatedGenericMethodTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import org.checkerframework.checker.nullness.compatqual.NullableDecl;",
-            "import org.checkerframework.checker.nullness.compatqual.NonNullDecl;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class AnnotatedGenericMethodTest {",
-            "  <T> @NonNull T makeNonNull(@Nullable T t) { return t; }",
-            "  <T> @NonNullDecl T makeNonNullDecl(@NullableDecl T t) { return t; }",
-            "  void test_type_anno(Object o) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    makeNonNull(inspectInferredExpression(o));",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(makeNonNull(o));",
-            "  }",
-            "  void test_decl_anno(Object o) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    makeNonNullDecl(inspectInferredExpression(o));",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(makeNonNullDecl(o));",
-            "  }",
-            "  void test_generics(Object o) {",
-            "    // BUG: Diagnostic contains: {}",
-            "    inspectInferredGenerics(makeNonNull(o));",
-            "    // BUG: Diagnostic contains: {}",
-            "    inspectInferredGenerics(makeNonNullDecl(o));",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredGenerics;
+
+import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
+import org.checkerframework.checker.nullness.compatqual.NullableDecl;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class AnnotatedGenericMethodTest {
+  <T> @NonNull T makeNonNull(@Nullable T t) {
+    return t;
+  }
+
+  <T> @NonNullDecl T makeNonNullDecl(@NullableDecl T t) {
+    return t;
+  }
+
+  void test_type_anno(Object o) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    makeNonNull(inspectInferredExpression(o));
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(makeNonNull(o));
+  }
+
+  void test_decl_anno(Object o) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    makeNonNullDecl(inspectInferredExpression(o));
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(makeNonNullDecl(o));
+  }
+
+  void test_generics(Object o) {
+    // BUG: Diagnostic contains: {}
+    inspectInferredGenerics(makeNonNull(o));
+    // BUG: Diagnostic contains: {}
+    inspectInferredGenerics(makeNonNullDecl(o));
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testBoundedGenericMethod() {
+  public void boundedGenericMethod() {
     compilationHelper
         .addSourceLines(
             "AnnotatedGenericMethodTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class AnnotatedGenericMethodTest {",
-            "  <T extends @NonNull Object> T requireNonNull(T t) { return t; }",
-            "  <T extends @NonNull Object> T makeNonNull(@Nullable T t) { return t; }",
-            "  void test_bound_only(Object o) {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(requireNonNull(o));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(requireNonNull(o));",
-            "  }",
-            "  void test_bound_and_param_anno(Object o) {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(makeNonNull(o));",
-            "    // BUG: Diagnostic contains: {T=Non-null}",
-            "    inspectInferredGenerics(makeNonNull(o));",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredGenerics;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class AnnotatedGenericMethodTest {
+  <T extends @NonNull Object> T requireNonNull(T t) {
+    return t;
+  }
+
+  <T extends @NonNull Object> T makeNonNull(@Nullable T t) {
+    return t;
+  }
+
+  void test_bound_only(Object o) {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(requireNonNull(o));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(requireNonNull(o));
+  }
+
+  void test_bound_and_param_anno(Object o) {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(makeNonNull(o));
+    // BUG: Diagnostic contains: {T=Non-null}
+    inspectInferredGenerics(makeNonNull(o));
+  }
+}
+""")
         .doTest();
   }
 
   // Regression test for b/113123074
   @Test
-  public void testUnparameterizedMethodInvocation() {
+  public void unparameterizedMethodInvocation() {
     compilationHelper
         .addSourceLines(
             "IdentityTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class IdentityTest {",
-            "  @NonNull Object returnNonnull(@Nullable Integer i) { return \"hello\"; }",
-            "  @Nullable Object returnNullable(@Nullable Integer i) { return \"hello\"; }",
-            "  Object returnUnannotated(@Nullable Integer i) { return \"hello\"; }",
-            "  void invoke_test() {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(returnNonnull(null));",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(returnNullable(null));",
-            "    // BUG: Diagnostic contains: Optional.empty",
-            "    inspectInferredExpression(returnUnannotated(\"\".hashCode()));",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class IdentityTest {
+  @NonNull Object returnNonnull(@Nullable Integer i) {
+    return "hello";
+  }
+
+  @Nullable Object returnNullable(@Nullable Integer i) {
+    return "hello";
+  }
+
+  Object returnUnannotated(@Nullable Integer i) {
+    return "hello";
+  }
+
+  void invoke_test() {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(returnNonnull(null));
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(returnNullable(null));
+    // BUG: Diagnostic contains: Optional.empty
+    inspectInferredExpression(returnUnannotated("".hashCode()));
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testLists() {
+  public void lists() {
     compilationHelper
         .addSourceLines(
             "ListsTest.java",
@@ -251,150 +297,181 @@ public class NullnessInferenceTest {
   }
 
   @Test
-  public void testReturn() {
+  public void returnCase() {
     compilationHelper
         .addSourceLines(
             "ReturnTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class ReturnTest {",
-            "  List<@NonNull Object> return_tests(Object o1, Object o2) {",
-            "    // BUG: Diagnostic contains: {}",
-            "    inspectInferredGenerics(List.cons(o1, List.cons(o2, List.nil())));",
-            "    // BUG: Diagnostic contains: {Z=Non-null}",
-            "    return inspectInferredGenerics(List.cons(o1, List.cons(o2, List.nil())));",
-            "  }",
-            "}",
-            "abstract class List<T> {",
-            "  abstract T head();",
-            "  static <X> List<X> nil() {return null;}",
-            "  static <Z> List<Z> cons(Z z, List<Z> zs ) {return null;}",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredGenerics;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+
+public class ReturnTest {
+  List<@NonNull Object> return_tests(Object o1, Object o2) {
+    // BUG: Diagnostic contains: {}
+    inspectInferredGenerics(List.cons(o1, List.cons(o2, List.nil())));
+    // BUG: Diagnostic contains: {Z=Non-null}
+    return inspectInferredGenerics(List.cons(o1, List.cons(o2, List.nil())));
+  }
+}
+
+abstract class List<T> {
+  abstract T head();
+
+  static <X> List<X> nil() {
+    return null;
+  }
+
+  static <Z> List<Z> cons(Z z, List<Z> zs) {
+    return null;
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testAssignments() {
+  public void assignments() {
     compilationHelper
         .addSourceLines(
             "AssignmentsTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "public class AssignmentsTest {",
-            "  void assignments_tests(@Nullable Object nullable, Object unknown) {",
-            "    // BUG: Diagnostic contains: {}",
-            "    inspectInferredGenerics(List.cons(unknown, List.nil()));",
-            "    // BUG: Diagnostic contains: {Z=Non-null}",
-            "    List<@NonNull Object> a ="
-                + " inspectInferredGenerics(List.cons(unknown, List.nil()));",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    @NonNull Object b ="
-                + " inspectInferredExpression(List.cons(unknown, List.nil()).head());",
-            "  }",
-            "}",
-            "abstract class List<T> {",
-            "  abstract T head();",
-            "  static <X> List<X> nil() {return null;}",
-            "  static <Z> List<Z> cons(Z z, List<Z> zs ) {return null;}",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredGenerics;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class AssignmentsTest {
+  void assignments_tests(@Nullable Object nullable, Object unknown) {
+    // BUG: Diagnostic contains: {}
+    inspectInferredGenerics(List.cons(unknown, List.nil()));
+    // BUG: Diagnostic contains: {Z=Non-null}
+    List<@NonNull Object> a = inspectInferredGenerics(List.cons(unknown, List.nil()));
+    // BUG: Diagnostic contains: Optional[Non-null]
+    @NonNull Object b = inspectInferredExpression(List.cons(unknown, List.nil()).head());
+  }
+}
+
+abstract class List<T> {
+  abstract T head();
+
+  static <X> List<X> nil() {
+    return null;
+  }
+
+  static <Z> List<Z> cons(Z z, List<Z> zs) {
+    return null;
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testVarArgs() {
+  public void varArgs() {
     compilationHelper
         .addSourceLines(
             "VarArgsTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredGenerics;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "public class VarArgsTest {",
-            "  void foo(@NonNull Object... objects) {}",
-            "  void bar(@Nullable Object... objects) {}",
-            "  void varargs_tests(Object o) {",
-            "    // BUG: Diagnostic contains: Optional.empty",
-            "    inspectInferredExpression(o);",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    foo(inspectInferredExpression(o));",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    foo(o, o, o, inspectInferredExpression(o));",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    bar(inspectInferredExpression(o));",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    bar(o, o, o, inspectInferredExpression(o));",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class VarArgsTest {
+  void foo(@NonNull Object... objects) {}
+
+  void bar(@Nullable Object... objects) {}
+
+  void varargs_tests(Object o) {
+    // BUG: Diagnostic contains: Optional.empty
+    inspectInferredExpression(o);
+    // BUG: Diagnostic contains: Optional[Non-null]
+    foo(inspectInferredExpression(o));
+    // BUG: Diagnostic contains: Optional[Non-null]
+    foo(o, o, o, inspectInferredExpression(o));
+    // BUG: Diagnostic contains: Optional[Nullable]
+    bar(inspectInferredExpression(o));
+    // BUG: Diagnostic contains: Optional[Nullable]
+    bar(o, o, o, inspectInferredExpression(o));
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testAnnotatedAtGenericTypeUse() {
+  public void annotatedAtGenericTypeUse() {
     compilationHelper
         .addSourceLines(
             "AnnotatedAtGenericTypeUseTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.compatqual.NullableDecl;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class AnnotatedAtGenericTypeUseTest {",
-            "  void test(MyInnerClass<@Nullable Object> nullable, "
-                + "MyInnerClass<@NonNull Object> nonnull) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nullable.get());",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nullable.getNonNull());",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nonnull.get());",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nonnull.getNullable());",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nonnull.getNullableDecl());",
-            "  }",
-            "  void testNested_nullable(MyWrapper<MyInnerClass<@Nullable Object>> nullable) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nullable.get().get());",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nullable.get().getNonNull());",
-            "  }",
-            "  void testNested_nonnull(MyWrapper<MyInnerClass<@NonNull Object>> nonnull) {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nonnull.get().get());",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nonnull.get().getNullable());",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nonnull.get().getNullableDecl());",
-            "  }",
-            "  interface MyInnerClass<T> {",
-            "    T get();",
-            "    @NonNull T getNonNull();",
-            "    @Nullable T getNullable();",
-            "    @NullableDecl T getNullableDecl();",
-            "  }",
-            "  interface MyWrapper<T> {",
-            "    T get();",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.compatqual.NullableDecl;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class AnnotatedAtGenericTypeUseTest {
+  void test(MyInnerClass<@Nullable Object> nullable, MyInnerClass<@NonNull Object> nonnull) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nullable.get());
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nullable.getNonNull());
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nonnull.get());
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nonnull.getNullable());
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nonnull.getNullableDecl());
+  }
+
+  void testNested_nullable(MyWrapper<MyInnerClass<@Nullable Object>> nullable) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nullable.get().get());
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nullable.get().getNonNull());
+  }
+
+  void testNested_nonnull(MyWrapper<MyInnerClass<@NonNull Object>> nonnull) {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nonnull.get().get());
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nonnull.get().getNullable());
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nonnull.get().getNullableDecl());
+  }
+
+  interface MyInnerClass<T> {
+    T get();
+
+    @NonNull T getNonNull();
+
+    @Nullable T getNullable();
+
+    @NullableDecl
+    T getNullableDecl();
+  }
+
+  interface MyWrapper<T> {
+    T get();
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testAnnotatedAtGenericTypeDef() {
+  public void annotatedAtGenericTypeDef() {
     compilationHelper
         .addSourceLines(
             "AnnotatedAtGenericTypeDefTest.java",
@@ -438,61 +515,74 @@ public class NullnessInferenceTest {
   }
 
   @Test
-  public void testBoundedAtGenericTypeUse() {
+  public void boundedAtGenericTypeUse() {
     compilationHelper
         .addSourceLines(
             "BoundedAtGenericTypeUseTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class BoundedAtGenericTypeUseTest {",
-            "  void test(MyInnerClass<? extends @Nullable Object> nullable,"
-                + "MyInnerClass<? extends @NonNull Object> nonnull) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nullable.get());",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nonnull.get());",
-            "  }",
-            "  interface MyInnerClass<T> {",
-            "    T get();",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class BoundedAtGenericTypeUseTest {
+  void test(
+      MyInnerClass<? extends @Nullable Object> nullable,
+      MyInnerClass<? extends @NonNull Object> nonnull) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nullable.get());
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nonnull.get());
+  }
+
+  interface MyInnerClass<T> {
+    T get();
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testBoundedAtGenericTypeDef() {
+  public void boundedAtGenericTypeDef() {
     compilationHelper
         .addSourceLines(
             "BoundedAtGenericTypeDefTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class BoundedAtGenericTypeDefTest {",
-            "  void test(NullableElementCollection<?> nullable) {",
-            "    // BUG: Diagnostic contains: Optional[Nullable]",
-            "    inspectInferredExpression(nullable.get());",
-            "  }",
-            "  void test(NonNullElementCollection<?> nonnull) {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(nonnull.get());",
-            "  }",
-            "  interface NullableElementCollection<T extends @Nullable Object> {",
-            "    T get();",
-            "  }",
-            "  interface NonNullElementCollection<T extends @NonNull Object> {",
-            "    T get();",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class BoundedAtGenericTypeDefTest {
+  void test(NullableElementCollection<?> nullable) {
+    // BUG: Diagnostic contains: Optional[Nullable]
+    inspectInferredExpression(nullable.get());
+  }
+
+  void test(NonNullElementCollection<?> nonnull) {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(nonnull.get());
+  }
+
+  interface NullableElementCollection<T extends @Nullable Object> {
+    T get();
+  }
+
+  interface NonNullElementCollection<T extends @NonNull Object> {
+    T get();
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testDefaultAnnotation() {
+  public void defaultAnnotation() {
     compilationHelper
         .addSourceLines(
             "DefaultAnnotationTest.java",
@@ -532,51 +622,61 @@ public class NullnessInferenceTest {
   }
 
   @Test
-  public void testIntersectionBounds() {
+  public void intersectionBounds() {
     compilationHelper
         .addSourceLines(
             "IntersectionBoundsTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class IntersectionBoundsTest {",
-            "  void test(MyBoundedClass<?> bounded) {",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(bounded.get());",
-            "  }",
-            "  interface MyBoundedClass<T extends @NonNull Number & @Nullable Iterable> {",
-            "    T get();",
-            "  }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+public class IntersectionBoundsTest {
+  void test(MyBoundedClass<?> bounded) {
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(bounded.get());
+  }
+
+  interface MyBoundedClass<T extends @NonNull Number & @Nullable Iterable> {
+    T get();
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testAnnotatedMethodTypeParams() {
+  public void annotatedMethodTypeParams() {
     compilationHelper
         .addSourceLines(
             "AnnotatedMethodTypeParamsTest.java",
-            "package com.google.errorprone.dataflow.nullnesspropagation;",
-            "import static com.google.errorprone.dataflow.nullnesspropagation."
-                + "NullnessInferenceTest.inspectInferredExpression;",
-            "import org.checkerframework.checker.nullness.qual.Nullable;",
-            "import org.checkerframework.checker.nullness.qual.NonNull;",
-            "public class AnnotatedMethodTypeParamsTest {",
-            "  public void test() {",
-            "    Object o = new Object();",
-            "    // BUG: Diagnostic contains: Optional[Non-null]",
-            "    inspectInferredExpression(AnnotatedMethodTypeParamsTest.<@NonNull Object>id(o));",
-            "  }",
-            "  static <T> T id(T t) { return t; }",
-            "}")
+"""
+package com.google.errorprone.dataflow.nullnesspropagation;
+
+import static com.google.errorprone.dataflow.nullnesspropagation.NullnessInferenceTest.inspectInferredExpression;
+
+import org.checkerframework.checker.nullness.qual.NonNull;
+
+public class AnnotatedMethodTypeParamsTest {
+  public void test() {
+    Object o = new Object();
+    // BUG: Diagnostic contains: Optional[Non-null]
+    inspectInferredExpression(AnnotatedMethodTypeParamsTest.<@NonNull Object>id(o));
+  }
+
+  static <T> T id(T t) {
+    return t;
+  }
+}
+""")
         .doTest();
   }
 
   /** BugPattern to test inference of nullness qualifiers */
   @BugPattern(
-      name = "NullnessInferenceChecker",
       summary = "Test checker for NullnessInferenceTest",
       explanation =
           "Outputs an error for each call to inspectInferredExpression and inspectInferredGenerics,"
@@ -603,7 +703,8 @@ public class NullnessInferenceTest {
         InferredNullability inferenceRes =
             NullnessQualifierInference.getInferredNullability(
                 ASTHelpers.findEnclosingNode(root, MethodTree.class));
-        assert methodInvocation.getArguments().get(0).getKind() == Kind.METHOD_INVOCATION;
+        assertThat(methodInvocation.getArguments().get(0).getKind())
+            .isEqualTo(Kind.METHOD_INVOCATION);
         MethodInvocationTree callsiteToInspect =
             (MethodInvocationTree) methodInvocation.getArguments().get(0);
         return describeMatch(

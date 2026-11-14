@@ -63,7 +63,6 @@ import javax.lang.model.element.Element;
 
 /** Flags checked exceptions which are claimed to be thrown, but are not. */
 @BugPattern(
-    name = "CheckedExceptionNotThrown",
     summary =
         "This method cannot throw a checked exception that it claims to. This may cause consumers"
             + " of the API to incorrectly attempt to handle, or propagate, this exception.",
@@ -90,12 +89,11 @@ public final class CheckedExceptionNotThrown extends BugChecker implements Metho
 
     ImmutableList<ExpressionTree> canActuallyBeThrown =
         tree.getThrows().stream()
-            .filter(
-                et -> {
-                  Type type = getType(et);
-                  return !isCheckedExceptionType(type, state)
-                      || thrownExceptions.stream().anyMatch(t -> isSubtype(t, type, state));
-                })
+            .filter(et -> {
+              Type type = getType(et);
+              return !isCheckedExceptionType(type, state)
+                  || thrownExceptions.stream().anyMatch(t -> isSubtype(t, type, state));
+            })
             .collect(toImmutableList());
 
     if (tree.getThrows().equals(canActuallyBeThrown)) {
@@ -125,12 +123,13 @@ public final class CheckedExceptionNotThrown extends BugChecker implements Metho
         canActuallyBeThrown.isEmpty()
             ? deleteEntireThrowsClause(tree, state)
             : SuggestedFix.replace(
-                getStartPosition(tree.getThrows().get(0)),
+                getStartPosition(tree.getThrows().getFirst()),
                 state.getEndPosition(getLast(tree.getThrows())),
                 canActuallyBeThrown.stream().map(state::getSourceForNode).collect(joining(", ")));
-    SuggestedFix fix =
-        SuggestedFix.builder().merge(fixJavadoc(thrownTypes, state)).merge(throwsFix).build();
-    return buildDescription(tree.getThrows().get(0)).setMessage(description).addFix(fix).build();
+    SuggestedFix fix = fixJavadoc(thrownTypes, state).toBuilder().merge(throwsFix).build();
+    ExpressionTree firstUnthrown =
+        tree.getThrows().stream().filter(x -> !canActuallyBeThrown.contains(x)).findFirst().get();
+    return buildDescription(firstUnthrown).setMessage(description).addFix(fix).build();
   }
 
   private static Stream<Tree> treesToScanForCheckedExceptions(MethodTree tree, VisitorState state) {
@@ -188,7 +187,7 @@ public final class CheckedExceptionNotThrown extends BugChecker implements Metho
 
     int startPos =
         ErrorProneTokens.getTokens(
-                state.getSourceCode().subSequence(methodStartPos, endPos).toString(),
+                state.getSourceCode(methodStartPos, endPos).toString(),
                 methodStartPos,
                 state.context)
             .stream()

@@ -37,7 +37,6 @@ import javax.lang.model.element.Modifier;
 
 /** Check for public static final declaration of Arrays. */
 @BugPattern(
-    name = "MutablePublicArray",
     summary =
         "Non-empty arrays are mutable, so this `public static final` array is not a constant"
             + " and can be modified by clients of this class.  Prefer an ImmutableList, or provide"
@@ -68,13 +67,12 @@ public class MutablePublicArray extends BugChecker implements VariableTreeMatche
       return false;
     }
     ExpressionTree initializer = arrayExpression.getInitializer();
-    if (!(initializer instanceof JCNewArray)) {
+    if (!(initializer instanceof JCNewArray newArray)) {
       return false;
     }
-    JCNewArray newArray = (JCNewArray) initializer;
     if (!newArray.getDimensions().isEmpty()) {
       return !newArray.getDimensions().stream()
-          .allMatch(e -> Objects.equals(0, ASTHelpers.constValue(e, Integer.class)));
+          .allMatch(e -> Objects.equals(ASTHelpers.constValue(e, Integer.class), 0));
     }
     // For in line array initializer.
     return newArray.getInitializers() != null && !newArray.getInitializers().isEmpty();

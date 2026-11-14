@@ -45,13 +45,15 @@ import java.util.stream.Collectors;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "ComputeIfAbsentAmbiguousReference",
     summary = "computeIfAbsent passes the map key to the provided class's constructor",
     severity = ERROR)
 public final class ComputeIfAbsentAmbiguousReference extends BugChecker
     implements MethodInvocationTreeMatcher {
   private static final Matcher<ExpressionTree> COMPUTE_IF_ABSENT =
-      instanceMethod().onDescendantOf("java.util.Map").named("computeIfAbsent");
+      instanceMethod()
+          .onDescendantOf("java.util.Map")
+          .named("computeIfAbsent")
+          .withParameters("java.lang.Object", "java.util.function.Function");
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
@@ -59,19 +61,17 @@ public final class ComputeIfAbsentAmbiguousReference extends BugChecker
       return NO_MATCH;
     }
     ExpressionTree mappingFunctionArg = tree.getArguments().get(1);
-    if (!(mappingFunctionArg instanceof MemberReferenceTree)) {
+    if (!(mappingFunctionArg instanceof MemberReferenceTree memberReferenceTree)) {
       return NO_MATCH;
     }
-    MemberReferenceTree memberReferenceTree = (MemberReferenceTree) mappingFunctionArg;
     if (memberReferenceTree.getMode() != ReferenceMode.NEW) {
       return NO_MATCH;
     }
     ExpressionTree expressionTree = memberReferenceTree.getQualifierExpression();
     Symbol symbol = ASTHelpers.getSymbol(expressionTree);
-    if (!(symbol instanceof ClassSymbol)) {
+    if (!(symbol instanceof ClassSymbol classSymbol)) {
       return NO_MATCH;
     }
-    ClassSymbol classSymbol = (ClassSymbol) symbol;
     ImmutableList<MethodSymbol> constructors = ASTHelpers.getConstructors(classSymbol);
     List<MethodSymbol> zeroArgConstructors =
         constructors.stream()
@@ -88,8 +88,7 @@ public final class ComputeIfAbsentAmbiguousReference extends BugChecker
       return NO_MATCH;
     }
     ExpressionTree onlyArgument = tree.getArguments().get(0);
-    if (onlyArgument instanceof IdentifierTree) {
-      IdentifierTree onlyArgumentIdentifier = (IdentifierTree) onlyArgument;
+    if (onlyArgument instanceof IdentifierTree onlyArgumentIdentifier) {
       Name constructorParamName = oneArgConstructors.get(0).getParameters().get(0).getSimpleName();
       if (constructorParamName.equals(onlyArgumentIdentifier.getName())) {
         return NO_MATCH;

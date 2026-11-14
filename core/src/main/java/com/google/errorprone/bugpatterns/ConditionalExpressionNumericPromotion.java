@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.suppliers.Suppliers.typeFromString;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -26,15 +27,17 @@ import com.google.errorprone.bugpatterns.BugChecker.ConditionalExpressionTreeMat
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.suppliers.Supplier;
 import com.google.errorprone.util.ASTHelpers;
-import com.google.errorprone.util.ASTHelpers.TargetType;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ConditionalExpressionTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.tools.javac.code.Type;
 
-/** @author awturner@google.com (Andy Turner) */
+/**
+ * @author awturner@google.com (Andy Turner)
+ */
 @BugPattern(
-    name = "ConditionalExpressionNumericPromotion",
     summary =
         "A conditional expression with numeric operands of differing types will perform binary "
             + "numeric promotion of the operands; when these operands are of reference types, "
@@ -64,7 +67,7 @@ public class ConditionalExpressionNumericPromotion extends BugChecker
       return NO_MATCH;
     }
 
-    TargetType targetType = ASTHelpers.targetType(state);
+    TargetType targetType = TargetType.targetType(state);
     if (targetType == null) {
       return NO_MATCH;
     }
@@ -72,7 +75,7 @@ public class ConditionalExpressionNumericPromotion extends BugChecker
       return NO_MATCH;
     }
 
-    Type numberType = state.getTypeFromString("java.lang.Number");
+    Type numberType = JAVA_LANG_NUMBER.get(state);
     if (ASTHelpers.isSubtype(targetType.type(), numberType, state)
         && !ASTHelpers.isSameType(targetType.type(), numberType, state)) {
       return NO_MATCH;
@@ -85,4 +88,6 @@ public class ConditionalExpressionNumericPromotion extends BugChecker
     builder.prefixWith(falseExpression, prefix).postfixWith(falseExpression, ")");
     return describeMatch(conditionalExpression, builder.build());
   }
+
+  private static final Supplier<Type> JAVA_LANG_NUMBER = typeFromString("java.lang.Number");
 }

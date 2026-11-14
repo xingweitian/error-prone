@@ -16,10 +16,7 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static org.junit.Assume.assumeTrue;
-
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -35,49 +32,53 @@ public class DefaultPackageTest {
       CompilationTestHelper.newInstance(DefaultPackage.class, getClass());
 
   @Test
-  public void testPositiveCases() {
+  public void positiveCases() {
     compilationHelper
         .addSourceLines(
-            "Test.java", //
-            "// BUG: Diagnostic contains: DefaultPackage",
-            "class Test {",
-            "}")
+            "Test.java",
+            """
+            // BUG: Diagnostic contains: DefaultPackage
+            class Test {}
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases_classWithGenerated() {
+  public void negativeCases_classWithGenerated() {
     compilationHelper
         .addSourceLines(
-            "Test.java", //
-            (RuntimeVersion.isAtLeast9()
-                ? "import javax.annotation.processing.Generated;"
-                : "import javax.annotation.Generated;"),
-            "@Generated(\"generator\")",
-            "class Test {",
-            "}")
+            "Test.java",
+            """
+            import javax.annotation.processing.Generated;
+
+            @Generated("generator")
+            class Test {}
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases_classWithWarningSuppressed() {
+  public void negativeCases_classWithWarningSuppressed() {
     compilationHelper
         .addSourceLines(
-            "in/Test.java", //
-            "@SuppressWarnings(\"DefaultPackage\")",
-            "class Test {",
-            "}")
+            "in/Test.java",
+            """
+            @SuppressWarnings("DefaultPackage")
+            class Test {}
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases_classWithPackage() {
+  public void negativeCases_classWithPackage() {
     compilationHelper
         .addSourceLines(
-            "in/Test.java", //
-            "package in;",
-            "class Test {",
-            "}")
+            "in/Test.java",
+            """
+            package in;
+
+            class Test {}
+            """)
         .doTest();
   }
 
@@ -86,21 +87,25 @@ public class DefaultPackageTest {
   public void trailingComma() {
     compilationHelper
         .addSourceLines(
-            "T.java", //
-            "package a;",
-            "class T {};")
+            "T.java",
+            """
+            package a;
+
+            class T {}
+            ;
+            """)
         .doTest();
   }
 
   @Test
   public void moduleInfo() {
-    assumeTrue(RuntimeVersion.isAtLeast9());
 
     compilationHelper
         .addSourceLines(
-            "module-info.java", //
-            "module testmodule {",
-            "}")
+            "module-info.java",
+            """
+            module testmodule {}
+            """)
         .doTest();
   }
 }

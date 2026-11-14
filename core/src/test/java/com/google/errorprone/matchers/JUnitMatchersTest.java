@@ -24,44 +24,56 @@ import com.google.errorprone.CompilationTestHelper;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.MethodTree;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author epmjohnston@google.com (Emily Johnston) */
+/**
+ * @author epmjohnston@google.com (Emily Johnston)
+ */
 @RunWith(JUnit4.class)
 public final class JUnitMatchersTest {
 
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(JUnitVersionMatcher.class, getClass());
+  private final CompilationTestHelper junit5CompilationHelper =
+      CompilationTestHelper.newInstance(JUnit5MethodMatcher.class, getClass());
 
   @Test
   public void runWithAnnotationOnClass_shouldBeJUnit4() {
     compilationHelper
         .addSourceLines(
             "RunWithAnnotationOnClass.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "@RunWith(JUnit4.class)",
-            "// BUG: Diagnostic contains: Version:JUnit4",
-            "public class RunWithAnnotationOnClass {}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+
+            @RunWith(JUnit4.class)
+            // BUG: Diagnostic contains: Version:JUnit4
+            public class RunWithAnnotationOnClass {}
+            """)
         .doTest();
   }
 
   @Test
-  public void testAnnotationOnMethod_shouldBeJUnit4() {
+  public void annotationOnMethod_shouldBeJUnit4() {
     compilationHelper
         .addSourceLines(
             "TestAnnotationOnMethod.java",
-            "import org.junit.Test;",
-            "// BUG: Diagnostic contains: Version:JUnit4",
-            "public class TestAnnotationOnMethod {",
-            "  @Test",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.Test;
+
+            // BUG: Diagnostic contains: Version:JUnit4
+            public class TestAnnotationOnMethod {
+              @Test
+              public void someTest() {}
+            }
+            """)
         .doTest();
   }
 
@@ -70,32 +82,44 @@ public final class JUnitMatchersTest {
     compilationHelper
         .addSourceLines(
             "BeforeAnnotationOnMethod.java",
-            "import org.junit.Before;",
-            "public class BeforeAnnotationOnMethod {",
-            "  @Before",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.Before;
+
+            public class BeforeAnnotationOnMethod {
+              @Before
+              public void someTest() {}
+            }
+            """)
         .addSourceLines(
             "BeforeClassAnnotationOnMethod.java",
-            "import org.junit.BeforeClass;",
-            "public class BeforeClassAnnotationOnMethod {",
-            "  @BeforeClass",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.BeforeClass;
+
+            public class BeforeClassAnnotationOnMethod {
+              @BeforeClass
+              public void someTest() {}
+            }
+            """)
         .addSourceLines(
             "AfterAnnotationOnMethod.java",
-            "import org.junit.After;",
-            "public class AfterAnnotationOnMethod {",
-            "  @After",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.After;
+
+            public class AfterAnnotationOnMethod {
+              @After
+              public void someTest() {}
+            }
+            """)
         .addSourceLines(
             "AfterClassAnnotationOnMethod.java",
-            "import org.junit.AfterClass;",
-            "public class AfterClassAnnotationOnMethod {",
-            "  @AfterClass",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.AfterClass;
+
+            public class AfterClassAnnotationOnMethod {
+              @AfterClass
+              public void someTest() {}
+            }
+            """)
         .doTest();
   }
 
@@ -104,11 +128,14 @@ public final class JUnitMatchersTest {
     compilationHelper
         .addSourceLines(
             "TestIgnoreAnnotation.java",
-            "import org.junit.Ignore;",
-            "public class TestIgnoreAnnotation {",
-            "  @Ignore",
-            "  public void someTest() {}",
-            "}")
+            """
+            import org.junit.Ignore;
+
+            public class TestIgnoreAnnotation {
+              @Ignore
+              public void someTest() {}
+            }
+            """)
         .doTest();
   }
 
@@ -129,29 +156,40 @@ public final class JUnitMatchersTest {
     compilationHelper
         .addSourceLines(
             "MyRule.java",
-            "import org.junit.rules.TestRule;",
-            "import org.junit.runners.model.Statement;",
-            "import org.junit.runner.Description;",
-            "public class MyRule implements TestRule {",
-            "  public Statement apply(Statement s, Description d) { return null; }",
-            "}")
+            """
+            import org.junit.rules.TestRule;
+            import org.junit.runner.Description;
+            import org.junit.runners.model.Statement;
+
+            public class MyRule implements TestRule {
+              public Statement apply(Statement s, Description d) {
+                return null;
+              }
+            }
+            """)
         .addSourceLines(
             "TestRuleAnnotation.java",
-            "import org.junit.Rule;",
-            "public class TestRuleAnnotation {",
-            "  @Rule public final MyRule r = new MyRule();",
-            "}")
+            """
+            import org.junit.Rule;
+
+            public class TestRuleAnnotation {
+              @Rule public final MyRule r = new MyRule();
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testCaseDescendant_shouldBeJUnit3() {
+  public void caseDescendant_shouldBeJUnit3() {
     compilationHelper
         .addSourceLines(
             "TestCaseDescendant.java",
-            "import junit.framework.TestCase;",
-            "// BUG: Diagnostic contains: Version:JUnit3",
-            "public class TestCaseDescendant extends TestCase {}")
+            """
+            import junit.framework.TestCase;
+
+            // BUG: Diagnostic contains: Version:JUnit3
+            public class TestCaseDescendant extends TestCase {}
+            """)
         .doTest();
   }
 
@@ -160,32 +198,104 @@ public final class JUnitMatchersTest {
     compilationHelper
         .addSourceLines(
             "AmbiguousRunWith.java",
-            "import junit.framework.TestCase;",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.junit.Test;",
-            "@RunWith(JUnit4.class)",
-            "// BUG: Diagnostic contains: Version:Both",
-            "public class AmbiguousRunWith extends TestCase {",
-            "  public void someTest() {}",
-            "}")
+            """
+            import junit.framework.TestCase;
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+
+            @RunWith(JUnit4.class)
+            // BUG: Diagnostic contains: Version:Both
+            public class AmbiguousRunWith extends TestCase {
+              public void someTest() {}
+            }
+            """)
         .addSourceLines(
             "AmbiguousTest.java",
-            "import junit.framework.TestCase;",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.junit.Test;",
-            "// BUG: Diagnostic contains: Version:Both",
-            "public class AmbiguousTest extends TestCase {",
-            "  @Test",
-            "  public void someTest() {}",
-            "}")
+            """
+            import junit.framework.TestCase;
+            import org.junit.Test;
+
+            // BUG: Diagnostic contains: Version:Both
+            public class AmbiguousTest extends TestCase {
+              @Test
+              public void someTest() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void junit5Matchers() {
+    junit5CompilationHelper
+        .addSourceLines(
+            "org/junit/jupiter/api/Test.java",
+            """
+            package org.junit.jupiter.api;
+
+            public @interface Test {}
+            """)
+        .addSourceLines(
+            "org/junit/jupiter/api/TestFactory.java",
+            """
+            package org.junit.jupiter.api;
+
+            public @interface TestFactory {}
+            """)
+        .addSourceLines(
+            "org/junit/jupiter/api/BeforeEach.java",
+            """
+            package org.junit.jupiter.api;
+
+            public @interface BeforeEach {}
+            """)
+        .addSourceLines(
+            "org/junit/jupiter/api/TestTemplate.java",
+            """
+            package org.junit.jupiter.api;
+
+            public @interface TestTemplate {}
+            """)
+        .addSourceLines(
+            "org/junit/jupiter/params/ParameterizedTest.java",
+            """
+            package org.junit.jupiter.params;
+
+            @org.junit.jupiter.api.TestTemplate
+            public @interface ParameterizedTest {}
+            """)
+        .addSourceLines(
+            "JUnit5Methods.java",
+            """
+            public class JUnit5Methods {
+              @org.junit.jupiter.api.Test
+              // BUG: Diagnostic contains: [JUNIT5_TEST_METHOD, JUNIT5_TEST_OR_LIFECYCLE_METHOD]
+              void test() {}
+
+              @org.junit.jupiter.api.TestFactory
+              // BUG: Diagnostic contains: [JUNIT5_TEST_METHOD, JUNIT5_TEST_OR_LIFECYCLE_METHOD]
+              Object testFactory() {
+                return null;
+              }
+
+              @org.junit.jupiter.api.BeforeEach
+              // BUG: Diagnostic contains: [JUNIT5_LIFECYCLE_METHOD, JUNIT5_TEST_OR_LIFECYCLE_METHOD]
+              void setUp() {}
+
+              @org.junit.jupiter.params.ParameterizedTest
+              // BUG: Diagnostic contains: [JUNIT5_TEST_METHOD, JUNIT5_TEST_OR_LIFECYCLE_METHOD]
+              void parameterizedTest() {}
+
+              @org.junit.Test
+              public void junit4Test() {}
+
+              void notATest() {}
+            }
+            """)
         .doTest();
   }
 
   /** Helper class to surface which version of JUnit a class looks like to Error Prone. */
   @BugPattern(
-      name = "JUnitVersionMatcher",
       summary = "Matches on JUnit test classes, emits description with its JUnit version.",
       severity = SeverityLevel.WARNING)
   public static class JUnitVersionMatcher extends BugChecker implements ClassTreeMatcher {
@@ -210,6 +320,30 @@ public final class JUnitMatchersTest {
       }
       assertThat(versions).hasSize(1);
       return this.buildDescription(tree).setMessage("Version:" + versions.get(0)).build();
+    }
+  }
+
+  /** Helper class to surface which JUnit 5 matchers a method matches. */
+  @BugPattern(
+      summary = "Matches JUnit 5 test and lifecycle methods.",
+      severity = SeverityLevel.WARNING)
+  public static class JUnit5MethodMatcher extends BugChecker implements MethodTreeMatcher {
+
+    @Override
+    public Description matchMethod(MethodTree tree, VisitorState state) {
+      List<String> matches = new ArrayList<>();
+      if (JUnitMatchers.JUNIT5_TEST_METHOD.matches(tree, state)) {
+        matches.add("JUNIT5_TEST_METHOD");
+      }
+      if (JUnitMatchers.JUNIT5_LIFECYCLE_METHOD.matches(tree, state)) {
+        matches.add("JUNIT5_LIFECYCLE_METHOD");
+      }
+      if (JUnitMatchers.JUNIT5_TEST_OR_LIFECYCLE_METHOD.matches(tree, state)) {
+        matches.add("JUNIT5_TEST_OR_LIFECYCLE_METHOD");
+      }
+      return matches.isEmpty()
+          ? Description.NO_MATCH
+          : this.buildDescription(tree).setMessage(matches.toString()).build();
     }
   }
 }

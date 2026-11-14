@@ -17,6 +17,7 @@
 package com.google.errorprone.bugpatterns.android;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -33,24 +34,25 @@ import javax.lang.model.element.ElementKind;
 
 /**
  * Replacement of misleading <a
- * href="http://developer.android.com/reference/android/R.string.html">android.R.string</a>
+ * href="https://developer.android.com/reference/android/R.string.html">android.R.string</a>
  * constants with more intuitive ones.
  *
  * @author kmb@google.com (Kevin Bierhoff)
  */
 @BugPattern(
-    name = "MislabeledAndroidString",
     summary = "Certain resources in `android.R.string` have names that do not match their content",
     severity = ERROR)
 public class MislabeledAndroidString extends BugChecker implements MemberSelectTreeMatcher {
 
   private static final String R_STRING_CLASSNAME = "android.R.string";
+
   /** Maps problematic resources defined in {@value #R_STRING_CLASSNAME} to their replacements. */
   @VisibleForTesting
   static final ImmutableMap<String, String> MISLEADING =
       ImmutableMap.of(
           "yes", "ok",
           "no", "cancel");
+
   /** Maps all resources appearing in {@link #MISLEADING} to an assumed meaning. */
   @VisibleForTesting
   static final ImmutableMap<String, String> ASSUMED_MEANINGS =
@@ -71,7 +73,7 @@ public class MislabeledAndroidString extends BugChecker implements MemberSelectT
     if (symbol == null
         || symbol.owner == null
         || symbol.getKind() != ElementKind.FIELD
-        || !symbol.isStatic()
+        || !isStatic(symbol)
         || !R_STRING_CLASSNAME.contentEquals(symbol.owner.getQualifiedName())) {
       return Description.NO_MATCH;
     }

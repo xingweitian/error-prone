@@ -42,10 +42,7 @@ import java.util.List;
 import java.util.Set;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "RedundantThrows",
-    summary = "Thrown exception is a subtype of another",
-    severity = WARNING)
+@BugPattern(summary = "Thrown exception is a subtype of another", severity = WARNING)
 public class RedundantThrows extends BugChecker implements MethodTreeMatcher {
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
@@ -80,10 +77,10 @@ public class RedundantThrows extends BugChecker implements MethodTreeMatcher {
       return NO_MATCH;
     }
     // sort by order in input
-    List<ExpressionTree> delete =
+    ImmutableList<ExpressionTree> delete =
         ImmutableList.<ExpressionTree>copyOf(
             Iterables.filter(tree.getThrows(), Predicates.in(toRemove)));
-    return buildDescription(delete.get(0))
+    return buildDescription(delete.getFirst())
         .setMessage("Redundant throws clause: " + oxfordJoin("; ", messages))
         .addFix(SuggestedFixes.deleteExceptions(tree, state, delete))
         .build();

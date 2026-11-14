@@ -19,9 +19,12 @@ import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
+import static com.google.errorprone.matchers.method.ParameterPredicates.arrayOf;
+import static com.google.errorprone.matchers.method.ParameterPredicates.onlyTypeParameter;
 import static com.google.errorprone.util.ASTHelpers.getType;
 
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
@@ -33,9 +36,10 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import java.util.List;
 
-/** @author mariasam@google.com (Maria Sam) on 6/27/17. */
+/**
+ * @author mariasam@google.com (Maria Sam) on 6/27/17.
+ */
 @BugPattern(
-    name = "CollectionToArraySafeParameter",
     summary =
         "The type of the array parameter of Collection.toArray "
             + "needs to be compatible with the array type",
@@ -43,8 +47,13 @@ import java.util.List;
 public class CollectionToArraySafeParameter extends BugChecker
     implements MethodInvocationTreeMatcher {
 
+  private static final ClassName JAVA_UTIL_COLLECTION = ClassName.of("java.util.Collection");
+
   private static final Matcher<ExpressionTree> TO_ARRAY_MATCHER =
-      instanceMethod().onDescendantOf("java.util.Collection").withSignature("<T>toArray(T[])");
+      instanceMethod()
+          .onDescendantOf(JAVA_UTIL_COLLECTION)
+          .named("toArray")
+          .withParametersMatching(arrayOf(onlyTypeParameter()));
 
   @Override
   public Description matchMethodInvocation(
@@ -62,7 +71,7 @@ public class CollectionToArraySafeParameter extends BugChecker
     Type collectionType =
         types.asSuper(
             ASTHelpers.getReceiverType(methodInvocationTree),
-            visitorState.getSymbolFromString("java.util.Collection"));
+            JAVA_UTIL_COLLECTION.symbol(visitorState));
     List<Type> typeArguments = collectionType.getTypeArguments();
 
     if (!typeArguments.isEmpty()

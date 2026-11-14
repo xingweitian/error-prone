@@ -22,13 +22,26 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author epmjohnston@google.com (Emily P.M. Johnston) */
+/**
+ * @author epmjohnston@google.com (Emily P.M. Johnston)
+ */
 @RunWith(JUnit4.class)
 public final class FragmentInjectionTest {
 
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(FragmentInjection.class, getClass())
-          .addSourceFile("testdata/stubs/android/preference/PreferenceActivity.java")
+          .addSourceLines(
+              "PreferenceActivity.java",
+              """
+              package android.preference;
+
+              @SuppressWarnings("FragmentInjection")
+              public class PreferenceActivity {
+                protected boolean isValidFragment(String className) {
+                  return true;
+                }
+              }
+              """)
           .setArgs(ImmutableList.of("-XDandroidCompatible=true"));
 
   @Test
@@ -36,9 +49,12 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "// BUG: Diagnostic contains: does not implement isValidFragment",
-            "class MyPrefActivity extends PreferenceActivity {}")
+            """
+            import android.preference.PreferenceActivity;
+
+            // BUG: Diagnostic contains: does not implement isValidFragment
+            class MyPrefActivity extends PreferenceActivity {}
+            """)
         .doTest();
   }
 
@@ -47,13 +63,16 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "// BUG: Diagnostic contains: does not implement isValidFragment",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  protected boolean isValidFragment(String fragment, String unused) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            // BUG: Diagnostic contains: does not implement isValidFragment
+            class MyPrefActivity extends PreferenceActivity {
+              protected boolean isValidFragment(String fragment, String unused) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -62,13 +81,16 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -77,14 +99,18 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  static final boolean known = true;",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return known;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              static final boolean known = true;
+
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                return known;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -93,12 +119,15 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              protected boolean isValidFragment(String fragment) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -121,13 +150,17 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  boolean unknown;",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return unknown;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              boolean unknown;
+
+              protected boolean isValidFragment(String fragment) {
+                return unknown;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -136,15 +169,18 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    if (\"VALID_FRAGMENT\".equals(fragment)) {",
-            "      return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              protected boolean isValidFragment(String fragment) {
+                if ("VALID_FRAGMENT".equals(fragment)) {
+                  return true;
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -153,28 +189,33 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "class MyPrefActivity {",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            class MyPrefActivity {
+              protected boolean isValidFragment(String fragment) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void isValidFragmentImpelementedOnSuperClass() {
+  public void isValidFragmentImplementedOnSuperClass() {
     compilationHelper
         .addSourceLines(
             "MySuperPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MySuperPrefActivity extends PreferenceActivity {",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    if (\"VALID_FRAGMENT\".equals(fragment)) {",
-            "      return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MySuperPrefActivity extends PreferenceActivity {
+              protected boolean isValidFragment(String fragment) {
+                if ("VALID_FRAGMENT".equals(fragment)) {
+                  return true;
+                }
+                return false;
+              }
+            }
+            """)
         .addSourceLines(
             "MyPrefActivity.java",
             // Okay, implemented on super class.
@@ -183,19 +224,22 @@ public final class FragmentInjectionTest {
   }
 
   @Test
-  public void isValidFragmentImpelementedOnAbstractSuperClass() {
+  public void isValidFragmentImplementedOnAbstractSuperClass() {
     compilationHelper
         .addSourceLines(
             "MySuperPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "abstract class MySuperPrefActivity extends PreferenceActivity {",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    if (\"VALID_FRAGMENT\".equals(fragment)) {",
-            "      return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            abstract class MySuperPrefActivity extends PreferenceActivity {
+              protected boolean isValidFragment(String fragment) {
+                if ("VALID_FRAGMENT".equals(fragment)) {
+                  return true;
+                }
+                return false;
+              }
+            }
+            """)
         .addSourceLines(
             "MyPrefActivity.java",
             // Okay, implemented on super class.
@@ -224,8 +268,10 @@ public final class FragmentInjectionTest {
             "abstract class MyAbstractPrefActivity extends PreferenceActivity {}")
         .addSourceLines(
             "MyPrefActivity.java",
-            "// BUG: Diagnostic contains: does not implement isValidFragment",
-            "class MyPrefActivity extends MyAbstractPrefActivity {}")
+            """
+            // BUG: Diagnostic contains: does not implement isValidFragment
+            class MyPrefActivity extends MyAbstractPrefActivity {}
+            """)
         .doTest();
   }
 
@@ -234,13 +280,16 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyAbstractPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "abstract class MyAbstractPrefActivity extends PreferenceActivity {",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            abstract class MyAbstractPrefActivity extends PreferenceActivity {
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -251,16 +300,19 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    if (\"VALID_FRAGMENT\".equals(fragment)) {",
-            "      throw new RuntimeException(\"Not a valid fragment!\");",
-            "    }",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                if ("VALID_FRAGMENT".equals(fragment)) {
+                  throw new RuntimeException("Not a valid fragment!");
+                }
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -269,16 +321,19 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    if (\"VALID_FRAGMENT\".equals(fragment)) {",
-            "      return true;",
-            "    }",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                if ("VALID_FRAGMENT".equals(fragment)) {
+                  return true;
+                }
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -287,14 +342,17 @@ public final class FragmentInjectionTest {
     compilationHelper
         .addSourceLines(
             "MyPrefActivity.java",
-            "import android.preference.PreferenceActivity;",
-            "class MyPrefActivity extends PreferenceActivity {",
-            "  // BUG: Diagnostic contains: isValidFragment unconditionally returns true",
-            "  protected boolean isValidFragment(String fragment) {",
-            "    final boolean constTrue = true;",
-            "    return constTrue;",
-            "  }",
-            "}")
+            """
+            import android.preference.PreferenceActivity;
+
+            class MyPrefActivity extends PreferenceActivity {
+              // BUG: Diagnostic contains: isValidFragment unconditionally returns true
+              protected boolean isValidFragment(String fragment) {
+                final boolean constTrue = true;
+                return constTrue;
+              }
+            }
+            """)
         .doTest();
   }
 }

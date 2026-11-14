@@ -24,6 +24,7 @@ import static com.google.errorprone.matchers.Matchers.not;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
@@ -33,7 +34,6 @@ import com.google.errorprone.matchers.Matchers;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
@@ -49,7 +49,6 @@ import javax.lang.model.element.Modifier;
  * @author Sumit Bhagwani (bhagwani@google.com)
  */
 @BugPattern(
-    name = "ParcelableCreator",
     summary = "Detects classes which implement Parcelable but don't have CREATOR",
     severity = SeverityLevel.ERROR)
 public class ParcelableCreator extends BugChecker implements ClassTreeMatcher {
@@ -58,9 +57,12 @@ public class ParcelableCreator extends BugChecker implements ClassTreeMatcher {
   private static final Matcher<ClassTree> PARCELABLE_MATCHER =
       allOf(isDirectImplementationOf("android.os.Parcelable"), not(hasModifier(Modifier.ABSTRACT)));
 
+  private static final ClassName ANDROID_OS_PARCELABLE_CREATOR =
+      ClassName.of("android.os.Parcelable$Creator");
+
   private static final Matcher<VariableTree> PARCELABLE_CREATOR_MATCHER =
       allOf(
-          Matchers.isSubtypeOf("android.os.Parcelable$Creator"),
+          Matchers.isSubtypeOf(ANDROID_OS_PARCELABLE_CREATOR),
           hasModifier(Modifier.STATIC),
           hasModifier(Modifier.PUBLIC));
 
@@ -73,18 +75,17 @@ public class ParcelableCreator extends BugChecker implements ClassTreeMatcher {
       return Description.NO_MATCH;
     }
 
-    Symbol parcelableCreatorSymbol = state.getSymbolFromString("android.os.Parcelable$Creator");
+    Symbol parcelableCreatorSymbol = ANDROID_OS_PARCELABLE_CREATOR.symbol(state);
     if (parcelableCreatorSymbol == null) {
       return Description.NO_MATCH;
     }
 
     ClassType classType = ASTHelpers.getType(tree);
     for (Tree member : tree.getMembers()) {
-      if (member.getKind() != Kind.VARIABLE) {
+      if (!(member instanceof VariableTree variableTree)) {
         continue;
       }
 
-      VariableTree variableTree = (VariableTree) member;
       if (PARCELABLE_CREATOR_MATCHER.matches(variableTree, state)) {
         if (isVariableClassCreator(variableTree, state, classType, parcelableCreatorSymbol)) {
           return Description.NO_MATCH;

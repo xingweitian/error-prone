@@ -26,6 +26,7 @@ import com.google.errorprone.bugpatterns.BugChecker.BinaryTreeMatcher;
 import com.google.errorprone.dataflow.nullnesspropagation.Nullness;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
+import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
@@ -42,10 +43,14 @@ import java.util.Optional;
  * Abstract implementation of a BugPattern that detects the use of reference equality to compare
  * classes with value semantics.
  *
- * <p>See e.g. {@link NumericEquality}, {@link OptionalEquality}, {@link
- * ProtoStringFieldReferenceEquality}, and {@link StringEquality}.
+ * <p>See e.g. {@link OptionalEquality}, {@link ProtoStringFieldReferenceEquality}.
  *
  * @author cushon@google.com (Liam Miller-Cushon)
+ */
+/*
+ * TODO: cl/931296006 - Convert this to a CompilationUnitTreeMatcher so that ReferenceEquality
+ * doesn't need to override it into one? It might perform worse, though, for users who run the other
+ * subclasses during normal builds.
  */
 public abstract class AbstractReferenceEquality extends BugChecker implements BinaryTreeMatcher {
 
@@ -57,20 +62,24 @@ public abstract class AbstractReferenceEquality extends BugChecker implements Bi
   protected abstract boolean matchArgument(ExpressionTree tree, VisitorState state);
 
   @Override
-  public final Description matchBinary(BinaryTree tree, VisitorState state) {
+  public Description matchBinary(BinaryTree tree, VisitorState state) {
+    return doMatchBinary(tree, state, this::matchArgument);
+  }
+
+  final Description doMatchBinary(
+      BinaryTree tree, VisitorState state, Matcher<ExpressionTree> argumentMatcher) {
     switch (tree.getKind()) {
-      case EQUAL_TO:
-      case NOT_EQUAL_TO:
-        break;
-      default:
+      case EQUAL_TO, NOT_EQUAL_TO -> {}
+      default -> {
         return Description.NO_MATCH;
+      }
     }
     if (tree.getLeftOperand().getKind() == Kind.NULL_LITERAL
-        || !matchArgument(tree.getLeftOperand(), state)) {
+        || !argumentMatcher.matches(tree.getLeftOperand(), state)) {
       return Description.NO_MATCH;
     }
     if (tree.getRightOperand().getKind() == Kind.NULL_LITERAL
-        || !matchArgument(tree.getRightOperand(), state)) {
+        || !argumentMatcher.matches(tree.getRightOperand(), state)) {
       return Description.NO_MATCH;
     }
 
@@ -104,21 +113,12 @@ public abstract class AbstractReferenceEquality extends BugChecker implements Bi
 
     // If the lhs is possibly-null, provide both options.
     if (nullness != NONNULL) {
-      if (state.isAndroidCompatible()) {
-        builder.addFix(
-            SuggestedFix.builder()
-                .replace(
-                    tree, String.format("%sObjects.equal(%s, %s)", prefix, lhsSource, rhsSource))
-                .addImport("com.google.common.base.Objects")
-                .build());
-      } else {
-        builder.addFix(
-            SuggestedFix.builder()
-                .replace(
-                    tree, String.format("%sObjects.equals(%s, %s)", prefix, lhsSource, rhsSource))
-                .addImport("java.util.Objects")
-                .build());
-      }
+      SuggestedFix.Builder fix = SuggestedFix.builder();
+      String objects = SuggestedFixes.qualifyType(state, fix, "java.util.Objects");
+      builder.addFix(
+          fix.replace(
+                  tree, String.format("%s%s.equals(%s, %s)", prefix, objects, lhsSource, rhsSource))
+              .build());
     }
     if (nullness != NULL) {
       builder.addFix(
@@ -155,10 +155,9 @@ public abstract class AbstractReferenceEquality extends BugChecker implements Bi
     // If the other half of this or statement is foo.equals(bar) or Objects.equals(foo, bar)
     // replace the or statement with the other half as already written.
     ExpressionTree otherExpression = ASTHelpers.stripParentheses(p.getRightOperand());
-    if (!(otherExpression instanceof MethodInvocationTree)) {
+    if (!(otherExpression instanceof MethodInvocationTree other)) {
       return Optional.empty();
     }
-    MethodInvocationTree other = (MethodInvocationTree) otherExpression;
 
     // a == b || Objects.equals(a, b) => Objects.equals(a, b)
     if (EQUALS_STATIC_METHODS.matches(other, state)) {

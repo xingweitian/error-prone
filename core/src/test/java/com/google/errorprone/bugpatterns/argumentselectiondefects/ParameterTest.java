@@ -16,6 +16,7 @@
 
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
@@ -44,7 +45,6 @@ public class ParameterTest {
    * of the second one.
    */
   @BugPattern(
-      name = "IsFirstAssignableToSecond",
       severity = SeverityLevel.ERROR,
       summary = "Print whether the type of the first argument is assignable to the second one")
   public static class IsFirstAssignableToSecond extends BugChecker
@@ -52,7 +52,8 @@ public class ParameterTest {
 
     @Override
     public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
-      List<Parameter> arguments = Parameter.createListFromExpressionTrees(tree.getArguments());
+      ImmutableList<Parameter> arguments =
+          Parameter.createListFromExpressionTrees(tree.getArguments());
       if (arguments.size() != 2) {
         return Description.NO_MATCH;
       }
@@ -67,12 +68,14 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(IsFirstAssignableToSecond.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  void target(Integer integer, int i) {",
-            "    // BUG: Diagnostic contains: true",
-            "    target(integer, i);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              void target(Integer integer, int i) {
+                // BUG: Diagnostic contains: true
+                target(integer, i);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -81,12 +84,14 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(IsFirstAssignableToSecond.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  void target(Object obj, Integer integer) {",
-            "    // BUG: Diagnostic contains: false",
-            "    target(obj, integer);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              void target(Object obj, Integer integer) {
+                // BUG: Diagnostic contains: false
+                target(obj, integer);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -95,20 +100,19 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(IsFirstAssignableToSecond.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  void target(Integer integer, Object obj) {",
-            "    // BUG: Diagnostic contains: true",
-            "    target(integer, obj);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              void target(Integer integer, Object obj) {
+                // BUG: Diagnostic contains: true
+                target(integer, obj);
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A {@link BugChecker} that prints the name extracted for the first argument */
-  @BugPattern(
-      name = "PrintNameOfFirstArgument",
-      severity = SeverityLevel.ERROR,
-      summary = "Print the name of the first argument")
+  @BugPattern(severity = SeverityLevel.ERROR, summary = "Print the name of the first argument")
   public static class PrintNameOfFirstArgument extends BugChecker
       implements MethodInvocationTreeMatcher {
 
@@ -128,13 +132,16 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: Test",
-            "    target(this);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: Test
+                target(this);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -143,13 +150,16 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: String",
-            "    target(new String());",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: String
+                target(new String());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -158,14 +168,18 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract Object getValue();",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: Value",
-            "    target(getValue());",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract Object getValue();
+
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: Value
+                target(getValue());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -174,14 +188,18 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract Object get();",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: Test",
-            "    target(get());",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract Object get();
+
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: Test
+                target(get());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -190,16 +208,20 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Other {",
-            "  abstract Object get();",
-            "}",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test(Other otherObject) {",
-            "    // BUG: Diagnostic contains: otherObject",
-            "    target(otherObject.get());",
-            "  }",
-            "}")
+            """
+            abstract class Other {
+              abstract Object get();
+            }
+
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test(Other otherObject) {
+                // BUG: Diagnostic contains: otherObject
+                target(otherObject.get());
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -208,16 +230,20 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Other {",
-            "  abstract Object get();",
-            "}",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: Object",
-            "    target(new Object() {});",
-            "  }",
-            "}")
+            """
+            abstract class Other {
+              abstract Object get();
+            }
+
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: Object
+                target(new Object() {});
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -226,20 +252,24 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Other {",
-            "  abstract Object get();",
-            "}",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    new Object() {",
-            "      void test() {",
-            "        // BUG: Diagnostic contains: Object",
-            "        target(this);",
-            "      }",
-            "    };",
-            "  }",
-            "}")
+            """
+            abstract class Other {
+              abstract Object get();
+            }
+
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                new Object() {
+                  void test() {
+                    // BUG: Diagnostic contains: Object
+                    target(this);
+                  }
+                };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -248,23 +278,28 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintNameOfFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Other {",
-            "  abstract Object get();",
-            "}",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    new Object() {",
-            "      Integer get() {",
-            "        return 1;",
-            "      }",
-            "      void test() {",
-            "        // BUG: Diagnostic contains: Object",
-            "        target(get());",
-            "      }",
-            "    };",
-            "  }",
-            "}")
+            """
+            abstract class Other {
+              abstract Object get();
+            }
+
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                new Object() {
+                  Integer get() {
+                    return 1;
+                  }
+
+                  void test() {
+                    // BUG: Diagnostic contains: Object
+                    target(get());
+                  }
+                };
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -300,7 +335,6 @@ public class ParameterTest {
 
   /** A {@link BugChecker} that prints whether the first argument is constant */
   @BugPattern(
-      name = "PrintIsConstantFirstArgument",
       severity = SeverityLevel.ERROR,
       summary = "Print whether the first argument is constant")
   public static class PrintIsConstantFirstArgument extends BugChecker
@@ -312,7 +346,7 @@ public class ParameterTest {
       if (arguments.isEmpty()) {
         return Description.NO_MATCH;
       }
-      List<Parameter> parameters = Parameter.createListFromExpressionTrees(arguments);
+      ImmutableList<Parameter> parameters = Parameter.createListFromExpressionTrees(arguments);
       Parameter first = Iterables.getFirst(parameters, null);
       return buildDescription(tree).setMessage(String.valueOf(first.constant())).build();
     }
@@ -323,13 +357,16 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintIsConstantFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: true",
-            "    target(1);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: true
+                target(1);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -338,13 +375,16 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintIsConstantFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: true",
-            "    target(Double.MAX_VALUE);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test() {
+                // BUG: Diagnostic contains: true
+                target(Double.MAX_VALUE);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -353,13 +393,16 @@ public class ParameterTest {
     CompilationTestHelper.newInstance(PrintIsConstantFirstArgument.class, getClass())
         .addSourceLines(
             "Test.java",
-            "abstract class Test {",
-            "  abstract void target(Object o);",
-            "  void test(Object o) {",
-            "    // BUG: Diagnostic contains: false",
-            "    target(o);",
-            "  }",
-            "}")
+            """
+            abstract class Test {
+              abstract void target(Object o);
+
+              void test(Object o) {
+                // BUG: Diagnostic contains: false
+                target(o);
+              }
+            }
+            """)
         .doTest();
   }
 }

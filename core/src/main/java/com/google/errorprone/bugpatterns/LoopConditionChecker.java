@@ -38,6 +38,7 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ForLoopTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.LiteralTree;
+import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.UnaryTree;
@@ -47,10 +48,7 @@ import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "LoopConditionChecker",
-    summary = "Loop condition is never modified in loop body.",
-    severity = ERROR)
+@BugPattern(summary = "Loop condition is never modified in loop body.", severity = ERROR)
 public class LoopConditionChecker extends BugChecker
     implements ForLoopTreeMatcher, DoWhileLoopTreeMatcher, WhileLoopTreeMatcher {
 
@@ -109,23 +107,28 @@ public class LoopConditionChecker extends BugChecker
 
     private final ImmutableSet.Builder<Symbol.VarSymbol> conditionVars;
 
-    public LoopConditionVisitor(ImmutableSet.Builder<Symbol.VarSymbol> conditionVars) {
+    LoopConditionVisitor(ImmutableSet.Builder<Symbol.VarSymbol> conditionVars) {
       this.conditionVars = conditionVars;
     }
 
     @Override
     public Boolean visitIdentifier(IdentifierTree tree, Void unused) {
       Symbol sym = ASTHelpers.getSymbol(tree);
-      if (sym instanceof Symbol.VarSymbol) {
+      if (sym instanceof Symbol.VarSymbol varSymbol) {
         switch (sym.getKind()) {
-          case LOCAL_VARIABLE:
-          case PARAMETER:
-            conditionVars.add((Symbol.VarSymbol) sym);
+          case LOCAL_VARIABLE, PARAMETER, BINDING_VARIABLE -> {
+            conditionVars.add(varSymbol);
             return true;
-          default: // fall out
+          }
+          default -> {}
         }
       }
-      return false;
+      return ASTHelpers.constValue(tree) != null;
+    }
+
+    @Override
+    public Boolean visitMemberSelect(MemberSelectTree tree, Void unused) {
+      return ASTHelpers.constValue(tree) != null;
     }
 
     @Override
@@ -148,7 +151,7 @@ public class LoopConditionChecker extends BugChecker
   /** Scan for updates to the given variables. */
   private static class UpdateScanner extends TreeScanner<Void, Void> {
 
-    public static boolean scan(Tree tree, ImmutableSet<Symbol.VarSymbol> variables) {
+    static boolean scan(Tree tree, ImmutableSet<Symbol.VarSymbol> variables) {
       UpdateScanner scanner = new UpdateScanner(variables);
       tree.accept(scanner, null);
       return scanner.modified;
@@ -157,40 +160,36 @@ public class LoopConditionChecker extends BugChecker
     private boolean modified = false;
     private final ImmutableSet<Symbol.VarSymbol> variables;
 
-    public UpdateScanner(ImmutableSet<Symbol.VarSymbol> variables) {
+    UpdateScanner(ImmutableSet<Symbol.VarSymbol> variables) {
       this.variables = variables;
     }
 
     @Override
     public Void visitUnary(UnaryTree tree, Void unused) {
       switch (tree.getKind()) {
-        case POSTFIX_INCREMENT:
-        case PREFIX_INCREMENT:
-        case POSTFIX_DECREMENT:
-        case PREFIX_DECREMENT:
-          check(tree.getExpression());
-          break;
-        default: // fall out
+        case POSTFIX_INCREMENT, PREFIX_INCREMENT, POSTFIX_DECREMENT, PREFIX_DECREMENT ->
+            check(tree.getExpression());
+        default -> {}
       }
-      return super.visitUnary(tree, unused);
+      return super.visitUnary(tree, null);
     }
 
     @Override
     public Void visitMethodInvocation(MethodInvocationTree tree, Void unused) {
       check(ASTHelpers.getReceiver(tree));
-      return super.visitMethodInvocation(tree, unused);
+      return super.visitMethodInvocation(tree, null);
     }
 
     @Override
     public Void visitAssignment(AssignmentTree tree, Void unused) {
       check(tree.getVariable());
-      return super.visitAssignment(tree, unused);
+      return super.visitAssignment(tree, null);
     }
 
     @Override
     public Void visitCompoundAssignment(CompoundAssignmentTree tree, Void unused) {
       check(tree.getVariable());
-      return super.visitCompoundAssignment(tree, unused);
+      return super.visitCompoundAssignment(tree, null);
     }
 
     private void check(ExpressionTree expression) {

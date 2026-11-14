@@ -16,9 +16,11 @@
 
 package com.google.errorprone.refaster;
 
+import static com.google.errorprone.util.ErrorProneLog.deferredDiagnosticHandler;
+import static com.google.errorprone.util.ErrorProneLog.getDiagnostics;
 import static java.util.logging.Level.FINE;
 
-import com.google.common.base.Optional;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableClassToInstanceMap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -29,21 +31,20 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.refaster.PlaceholderMethod.PlaceholderExpressionKey;
 import com.google.errorprone.refaster.UTypeVar.TypeWithExpression;
 import com.google.errorprone.refaster.annotation.NoAutoboxing;
-import com.sun.source.tree.Tree.Kind;
+import com.sun.source.tree.ModifiersTree;
 import com.sun.tools.javac.code.Kinds.KindSelector;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ForAll;
-import com.sun.tools.javac.code.Type.MethodType;
+import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Attr;
 import com.sun.tools.javac.comp.AttrContext;
 import com.sun.tools.javac.comp.Enter;
 import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.comp.Resolve;
-import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCCatch;
@@ -69,14 +70,19 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.logging.Logger;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Abstract superclass for templates that can be used to search and replace in a Java syntax tree.
@@ -87,23 +93,23 @@ import javax.annotation.Nullable;
 public abstract class Template<M extends TemplateMatch> implements Serializable {
   private static final Logger logger = Logger.getLogger(Template.class.toString());
 
-  public static final boolean AUTOBOXING_DEFAULT = true;
-
   public abstract ImmutableClassToInstanceMap<Annotation> annotations();
+
+  public abstract ImmutableList<UTypeVar> ruleTypeVariables();
 
   public abstract ImmutableList<UTypeVar> templateTypeVariables();
 
+  public abstract Template<M> withRuleTypeVariables(Iterable<UTypeVar> ruleTypeVariables);
+
   public abstract ImmutableMap<String, UType> expressionArgumentTypes();
 
-  public abstract Iterable<M> match(JCTree tree, Context context);
+  public abstract Iterable<M> match(
+      JCTree tree, Context context, JCCompilationUnit compilationUnit);
 
   public abstract Fix replace(M match);
 
-  Iterable<UTypeVar> typeVariables(Context context) {
-    ImmutableList<UTypeVar> ruleTypeVars = context.get(RefasterRule.RULE_TYPE_VARS);
-    return Iterables.concat(
-        (ruleTypeVars == null) ? ImmutableList.<UTypeVar>of() : ruleTypeVars,
-        templateTypeVariables());
+  Iterable<UTypeVar> typeVariables() {
+    return Iterables.concat(ruleTypeVariables(), templateTypeVariables());
   }
 
   boolean autoboxing() {
@@ -125,10 +131,10 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
       String argName = argNames.get(i);
       Optional<JCExpression> singleBinding =
           inliner.getOptionalBinding(new UFreeIdent.Key(argName));
-      if (!singleBinding.isPresent()) {
+      if (singleBinding.isEmpty()) {
         Optional<java.util.List<JCExpression>> exprs =
             inliner.getOptionalBinding(new URepeated.Key(argName));
-        if (!exprs.isPresent() || exprs.get().isEmpty()) {
+        if (exprs.isEmpty() || exprs.get().isEmpty()) {
           // It is a repeated template variable and matches no expressions.
           continue;
         }
@@ -138,8 +144,16 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     for (PlaceholderExpressionKey key :
         Ordering.natural()
             .immutableSortedCopy(
-                Iterables.filter(inliner.bindings.keySet(), PlaceholderExpressionKey.class))) {
-      result.add(key.method.returnType().inline(inliner));
+                Iterables.filter(
+                    inliner.bindings.asMap().keySet(), PlaceholderExpressionKey.class))) {
+      Type type = key.method.returnType().inline(inliner);
+      // Skip void placeholder expressions, because
+      // a) if the expected type is void, any actual type is acceptable
+      // b) these types are used as the argument types in a synthetic MethodType, and method
+      //    argument types cannot be void
+      if (!type.getTag().equals(TypeTag.VOID)) {
+        result.add(type);
+      }
     }
     return List.from(result);
   }
@@ -149,7 +163,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
    * bound to the @BeforeTemplate method parameters, concatenated with the types of the expressions
    * bound to expression placeholders, sorted by the name of the placeholder method.
    */
-  protected List<Type> actualTypes(Inliner inliner) {
+  protected List<Type> actualTypes(Inliner inliner) throws CouldNotResolveImportException {
     ArrayList<Type> result = new ArrayList<>();
     ImmutableList<String> argNames = expressionArgumentTypes().keySet().asList();
     for (int i = 0; i < expressionArgumentTypes().size(); i++) {
@@ -176,13 +190,17 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     for (PlaceholderExpressionKey key :
         Ordering.natural()
             .immutableSortedCopy(
-                Iterables.filter(inliner.bindings.keySet(), PlaceholderExpressionKey.class))) {
-      result.add(inliner.getBinding(key).type);
+                Iterables.filter(
+                    inliner.bindings.asMap().keySet(), PlaceholderExpressionKey.class))) {
+      Type keyType = key.method.returnType().inline(inliner);
+      // See comment in `expectedTypes` for why we skip void placeholder keys.
+      if (!keyType.getTag().equals(TypeTag.VOID)) {
+        result.add(inliner.getBinding(key).type);
+      }
     }
     return List.from(result);
   }
 
-  @Nullable
   protected Optional<Unifier> typecheck(
       Unifier unifier,
       Inliner inliner,
@@ -191,13 +209,14 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
       List<Type> actualTypes) {
     try {
       ImmutableList<UTypeVar> freeTypeVars = freeTypeVars(unifier);
-      infer(
-          warner,
-          inliner,
-          inliner.<Type>inlineList(freeTypeVars),
-          expectedTypes,
-          inliner.symtab().voidType,
-          actualTypes);
+      var unused =
+          infer(
+              warner,
+              inliner,
+              inliner.<Type>inlineList(freeTypeVars),
+              expectedTypes,
+              inliner.symtab().voidType,
+              actualTypes);
 
       for (UTypeVar var : freeTypeVars) {
         Type instantiationForVar =
@@ -213,15 +232,15 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
       }
 
       if (!checkBounds(unifier, inliner, warner)) {
-        return Optional.absent();
+        return Optional.empty();
       }
       return Optional.of(unifier);
     } catch (CouldNotResolveImportException e) {
       logger.log(FINE, "Failure to resolve an import", e);
-      return Optional.absent();
+      return Optional.empty();
     } catch (InferException e) {
       logger.log(FINE, "No valid instantiation found: " + e.getMessage());
-      return Optional.absent();
+      return Optional.empty();
     }
   }
 
@@ -230,13 +249,13 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     Types types = unifier.types();
     ListBuffer<Type> varsBuffer = new ListBuffer<>();
     ListBuffer<Type> bindingsBuffer = new ListBuffer<>();
-    for (UTypeVar typeVar : typeVariables(unifier.getContext())) {
+    for (UTypeVar typeVar : typeVariables()) {
       varsBuffer.add(inliner.inlineAsVar(typeVar));
       bindingsBuffer.add(unifier.getBinding(typeVar.key()).type());
     }
     List<Type> vars = varsBuffer.toList();
     List<Type> bindings = bindingsBuffer.toList();
-    for (UTypeVar typeVar : typeVariables(unifier.getContext())) {
+    for (UTypeVar typeVar : typeVariables()) {
       List<Type> bounds = types.getBounds(inliner.inlineAsVar(typeVar));
       bounds = types.subst(bounds, vars, bindings);
       if (!types.isSubtypeUnchecked(unifier.getBinding(typeVar.key()).type(), bounds, warner)) {
@@ -249,10 +268,10 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     return true;
   }
 
-  protected static Pretty pretty(Context context, final Writer writer) {
-    final JCCompilationUnit unit = context.get(JCCompilationUnit.class);
+  protected static Pretty pretty(Inliner inliner, Writer writer) {
+    JCCompilationUnit unit = inliner.compilationUnit();
     try {
-      final String unitContents = unit.getSourceFile().getCharContent(false).toString();
+      String unitContents = unit.getSourceFile().getCharContent(false).toString();
       return new Pretty(writer, true) {
         {
           // Work-around for b/22196513
@@ -276,18 +295,11 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
 
         @Override
         public void printExpr(JCTree tree, int prec) throws IOException {
-          EndPosTable endPositions = unit.endPositions;
-          /*
-           * Modifiers, and specifically flags like final, appear to just need weird special
-           * handling.
-           *
-           * Note: we can't use {@code TreeInfo.getEndPos()} or {@code JCTree.getEndPosition()}
-           * here, because they will return the end position of an enclosing AST node for trees
-           * whose real end positions aren't stored.
-           */
-          int endPos = endPositions.getEndPos(tree);
+          // Modifiers, and specifically flags like final, appear to just need weird special
+          // handling.
+          int endPos = getEndPos(tree, unit);
           boolean hasRealEndPosition = endPos != Position.NOPOS;
-          if (tree.getKind() != Kind.MODIFIERS && hasRealEndPosition) {
+          if (!(tree instanceof ModifiersTree) && hasRealEndPosition) {
             writer.append(unitContents.substring(tree.getStartPosition(), endPos));
           } else {
             super.printExpr(tree, prec);
@@ -313,10 +325,8 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
 
         @Override
         public void printStat(JCTree tree) throws IOException {
-          if (tree instanceof JCExpressionStatement
-              && ((JCExpressionStatement) tree).getExpression() instanceof JCMethodInvocation) {
-            JCMethodInvocation invocation =
-                (JCMethodInvocation) ((JCExpressionStatement) tree).getExpression();
+          if (tree instanceof JCExpressionStatement jCExpressionStatement
+              && jCExpressionStatement.getExpression() instanceof JCMethodInvocation invocation) {
             JCExpression select = invocation.getMethodSelect();
             if (select != null && select.toString().equals("Refaster.emitComment")) {
               String commentLiteral =
@@ -400,7 +410,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
   private static class InferException extends Exception {
     final Collection<JCDiagnostic> diagnostics;
 
-    public InferException(Collection<JCDiagnostic> diagnostics) {
+    InferException(Collection<JCDiagnostic> diagnostics) {
       this.diagnostics = diagnostics;
     }
 
@@ -427,7 +437,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     Symtab symtab = inliner.symtab();
 
     Type methodType =
-        new MethodType(expectedArgTypes, returnType, List.<Type>nil(), symtab.methodClass);
+        new Type.MethodType(expectedArgTypes, returnType, List.<Type>nil(), symtab.methodClass);
     if (!freeTypeVariables.isEmpty()) {
       methodType = new ForAll(freeTypeVariables, methodType);
     }
@@ -466,12 +476,13 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
     // Type inference sometimes produces diagnostics, so we need to catch them to avoid interfering
     // with the enclosing compilation.
     Log.DeferredDiagnosticHandler handler =
-        new Log.DeferredDiagnosticHandler(Log.instance(inliner.getContext()));
+        deferredDiagnosticHandler(Log.instance(inliner.getContext()));
     try {
-      MethodType result =
+      Type.MethodType result =
           callCheckMethod(warner, inliner, resultInfo, actualArgTypes, methodSymbol, site, env);
-      if (!handler.getDiagnostics().isEmpty()) {
-        throw new InferException(handler.getDiagnostics());
+      Collection<JCDiagnostic> diagnostics = getDiagnostics(handler);
+      if (!diagnostics.isEmpty()) {
+        throw new InferException(diagnostics);
       }
       return result;
     } finally {
@@ -480,7 +491,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
   }
 
   /** Reflectively instantiate the package-private {@code MethodResolutionPhase} enum. */
-  private static Object newMethodResolutionPhase(boolean autoboxing) {
+  private static @Nullable Object newMethodResolutionPhase(boolean autoboxing) {
     for (Class<?> c : Resolve.class.getDeclaredClasses()) {
       if (!c.getName().equals("com.sun.tools.javac.comp.Resolve$MethodResolutionPhase")) {
         continue;
@@ -498,7 +509,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
    * Reflectively invoke Resolve.checkMethod(), which despite being package-private is apparently
    * the only useful entry-point into javac8's type inference implementation.
    */
-  private MethodType callCheckMethod(
+  private Type.MethodType callCheckMethod(
       Warner warner,
       Inliner inliner,
       Object resultInfo,
@@ -521,7 +532,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
               List.class,
               Warner.class);
       checkMethod.setAccessible(true);
-      return (MethodType)
+      return (Type.MethodType)
           checkMethod.invoke(
               Resolve.instance(inliner.getContext()),
               env,
@@ -529,7 +540,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
               methodSymbol,
               resultInfo,
               actualArgTypes,
-              /*freeTypeVariables=*/ List.<Type>nil(),
+              /* freeTypeVariables */ List.<Type>nil(),
               warner);
     } catch (InvocationTargetException e) {
       if (e.getCause() instanceof Resolve.InapplicableMethodException) {
@@ -549,7 +560,7 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
    */
   private ImmutableList<UTypeVar> freeTypeVars(Unifier unifier) {
     ImmutableList.Builder<UTypeVar> builder = ImmutableList.builder();
-    for (UTypeVar var : typeVariables(unifier.getContext())) {
+    for (UTypeVar var : typeVariables()) {
       if (unifier.getBinding(var.key()) == null) {
         builder.add(var);
       }
@@ -565,5 +576,58 @@ public abstract class Template<M extends TemplateMatch> implements Serializable 
       fix.addStaticImport(staticImportToAdd);
     }
     return fix.build();
+  }
+
+  /**
+   * Note: we can't use {@code TreeInfo.getEndPos()} or {@code JCTree.getEndPosition()} here,
+   * because they will return the end position of an enclosing AST node for trees whose real end
+   * positions aren't stored.
+   */
+  private static int getEndPos(JCTree tree, JCCompilationUnit unit) {
+    try {
+      return (int) GET_END_POS_HANDLE.invokeExact(unit, tree);
+    } catch (Throwable e) {
+      Throwables.throwIfUnchecked(e);
+      throw new AssertionError(e);
+    }
+  }
+
+  private static final MethodHandle GET_END_POS_HANDLE = getEndPosMethodHandle();
+
+  private static MethodHandle getEndPosMethodHandle() {
+    Class<?> endPosTableClass;
+    try {
+      endPosTableClass = Class.forName("com.sun.tools.javac.tree.EndPosTable");
+    } catch (ClassNotFoundException e) {
+      endPosTableClass = null;
+    }
+    MethodHandles.Lookup lookup = MethodHandles.lookup();
+    if (endPosTableClass == null) {
+      try {
+        // JDK versions after https://bugs.openjdk.org/browse/JDK-8372948
+        // (unit, tree) -> tree.endpos
+        return MethodHandles.dropArguments(
+            lookup
+                .findVarHandle(JCTree.class, "endpos", int.class)
+                .toMethodHandle(VarHandle.AccessMode.GET),
+            0,
+            JCCompilationUnit.class);
+      } catch (ReflectiveOperationException e) {
+        throw new LinkageError(e.getMessage(), e);
+      }
+    }
+    try {
+      // JDK versions before https://bugs.openjdk.org/browse/JDK-8372948
+      // (unit, tree) -> unit.endPositions.getEndPos(tree)
+      return MethodHandles.filterArguments(
+          lookup.findVirtual(
+              endPosTableClass, "getEndPos", MethodType.methodType(int.class, JCTree.class)),
+          0,
+          lookup
+              .findVarHandle(JCCompilationUnit.class, "endPositions", endPosTableClass)
+              .toMethodHandle(VarHandle.AccessMode.GET));
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError(e.getMessage(), e);
+    }
   }
 }

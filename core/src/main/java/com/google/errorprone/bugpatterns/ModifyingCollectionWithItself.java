@@ -22,11 +22,9 @@ import static com.google.errorprone.bugpatterns.ReplacementVariableFinder.fixesB
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
-import static com.google.errorprone.matchers.Matchers.isSubtypeOf;
 import static com.google.errorprone.matchers.Matchers.receiverSameAsArgument;
 import static com.google.errorprone.matchers.Matchers.variableType;
-import static com.sun.source.tree.Tree.Kind.IDENTIFIER;
-import static com.sun.source.tree.Tree.Kind.MEMBER_SELECT;
+import static com.google.errorprone.predicates.TypePredicates.isDescendantOf;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -40,6 +38,8 @@ import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
@@ -47,11 +47,10 @@ import java.util.List;
 import java.util.function.Predicate;
 import javax.lang.model.element.ElementKind;
 
-/** @author scottjohnson@google.com (Scott Johnson) */
-@BugPattern(
-    name = "ModifyingCollectionWithItself",
-    summary = "Using a collection function with itself as the argument.",
-    severity = ERROR)
+/**
+ * @author scottjohnson@google.com (Scott Johnson)
+ */
+@BugPattern(summary = "Using a collection function with itself as the argument.", severity = ERROR)
 public class ModifyingCollectionWithItself extends BugChecker
     implements MethodInvocationTreeMatcher {
 
@@ -118,7 +117,7 @@ public class ModifyingCollectionWithItself extends BugChecker
       ExpressionTree argument) {
     List<Fix> fixes;
     // this.a.addAll(...);
-    if (receiver.getKind() == MEMBER_SELECT) {
+    if (receiver instanceof MemberSelectTree) {
       // Only inspect method parameters, unlikely to want to this.a.addAll(b), where b is another
       // field.
       fixes =
@@ -126,7 +125,8 @@ public class ModifyingCollectionWithItself extends BugChecker
               argument, isCollectionVariable(state), state);
     } else {
       // a.addAll(...)
-      Preconditions.checkState(receiver.getKind() == IDENTIFIER, "receiver.getKind is identifier");
+      Preconditions.checkState(
+          receiver instanceof IdentifierTree, "receiver.getKind is identifier");
 
       boolean lhsIsField = ASTHelpers.getSymbol(receiver).getKind() == ElementKind.FIELD;
       fixes =
@@ -143,8 +143,8 @@ public class ModifyingCollectionWithItself extends BugChecker
     return fixes;
   }
 
-  private static Predicate<JCVariableDecl> isCollectionVariable(final VisitorState state) {
-    return var -> variableType(isSubtypeOf("java.util.Collection")).matches(var, state);
+  private static Predicate<JCVariableDecl> isCollectionVariable(VisitorState state) {
+    return var -> variableType(isDescendantOf("java.util.Collection")).matches(var, state);
   }
 
   private static ImmutableList<Fix> literalReplacement(

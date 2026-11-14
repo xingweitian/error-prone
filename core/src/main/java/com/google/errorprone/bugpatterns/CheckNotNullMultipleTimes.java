@@ -37,6 +37,7 @@ import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
+import com.sun.source.tree.SwitchExpressionTree;
 import com.sun.source.tree.SwitchTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TryTree;
@@ -49,7 +50,6 @@ import java.util.Map;
 
 /** Checks for the same variable being checked against null twice in a method. */
 @BugPattern(
-    name = "CheckNotNullMultipleTimes",
     severity = ERROR,
     summary = "A variable was checkNotNulled multiple times. Did you mean to check something else?")
 public final class CheckNotNullMultipleTimes extends BugChecker implements MethodTreeMatcher {
@@ -66,16 +66,16 @@ public final class CheckNotNullMultipleTimes extends BugChecker implements Metho
       public Void visitMethodInvocation(MethodInvocationTree tree, Void unused) {
         List<? extends ExpressionTree> arguments = tree.getArguments();
         if (!arguments.isEmpty()
-            && arguments.get(0) instanceof IdentifierTree
+            && arguments.getFirst() instanceof IdentifierTree
             // Only consider side-effects-only calls to checkNotNull: it turns out people often
             // intentionally write repeated null-checks for the same variable when using the result
             // as a value, and we would have many false positives if we counted those.
             && getCurrentPath().getParentPath().getLeaf() instanceof StatementTree
             && CHECK_NOT_NULL.matches(tree, state)) {
-          Symbol symbol = getSymbol(arguments.get(0));
-          if (symbol instanceof VarSymbol && isConsideredFinal(symbol)) {
-            variables.add((VarSymbol) symbol);
-            lastCheck.put((VarSymbol) symbol, tree);
+          Symbol symbol = getSymbol(arguments.getFirst());
+          if (symbol instanceof VarSymbol varSymbol && isConsideredFinal(symbol)) {
+            variables.add(varSymbol);
+            lastCheck.put(varSymbol, tree);
           }
         }
         return super.visitMethodInvocation(tree, null);
@@ -85,6 +85,11 @@ public final class CheckNotNullMultipleTimes extends BugChecker implements Metho
       // top-level conditional branches.
       @Override
       public Void visitSwitch(SwitchTree tree, Void unused) {
+        return null;
+      }
+
+      @Override
+      public Void visitSwitchExpression(SwitchExpressionTree tree, Void unused) {
         return null;
       }
 

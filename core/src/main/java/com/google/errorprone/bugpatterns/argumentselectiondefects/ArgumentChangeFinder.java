@@ -16,8 +16,9 @@
 
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
-import com.google.auto.value.AutoValue;
+import com.google.auto.value.AutoBuilder;
 import com.google.common.collect.ImmutableList;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.function.Function;
 
 /**
@@ -28,36 +29,31 @@ import java.util.function.Function;
  * match on the bi-partite graph mapping parameters to assignable arguments.
  *
  * @author andrewrice@google.com (Andrew Rice)
+ * @param distanceFunction The distance function to use when comparing formal and actual parameters.
+ *     The function should return 0 for highly similar names and larger positive values as names are
+ *     more different.
+ * @param heuristics List of heuristics to apply to eliminate spurious suggestions.
  */
-@AutoValue
-abstract class ArgumentChangeFinder {
-
-  /**
-   * The distance function to use when comparing formal and actual parameters. The function should
-   * return 0 for highly similar names and larger positive values as names are more different.
-   */
-  abstract Function<ParameterPair, Double> distanceFunction();
-
-  /** List of heuristics to apply to eliminate spurious suggestions. */
-  abstract ImmutableList<Heuristic> heuristics();
-
+record ArgumentChangeFinder(
+    Function<ParameterPair, Double> distanceFunction, ImmutableList<Heuristic> heuristics) {
   static Builder builder() {
-    return new AutoValue_ArgumentChangeFinder.Builder();
+    return new AutoBuilder_ArgumentChangeFinder_Builder();
   }
 
-  @AutoValue.Builder
+  @AutoBuilder
   abstract static class Builder {
 
-    /** Set the distance function that {@code ArgumentChangeFinder} should use. */
+    /** Set the distance function that {@link ArgumentChangeFinder} should use. */
     abstract Builder setDistanceFunction(Function<ParameterPair, Double> distanceFunction);
 
     abstract ImmutableList.Builder<Heuristic> heuristicsBuilder();
 
     /**
-     * Add the given heuristic to the list to be considered by {@code ArugmentChangeFinder} for
+     * Add the given heuristic to the list to be considered by {@link ArgumentChangeFinder} for
      * eliminating spurious findings. Heuristics are applied in order so add more expensive checks
      * last.
      */
+    @CanIgnoreReturnValue
     Builder addHeuristic(Heuristic heuristic) {
       heuristicsBuilder().add(heuristic);
       return this;
@@ -91,15 +87,22 @@ abstract class ArgumentChangeFinder {
     Costs costs = new Costs(formals, actuals);
 
     /* Set the distance between a pair to Inf if not assignable */
-    costs
-        .viablePairs()
-        .filter(ParameterPair::isAlternativePairing)
-        .filter(p -> !p.actual().isAssignableTo(p.formal(), invocationInfo.state()))
-        .forEach(p -> costs.invalidatePair(p));
+    boolean anyAssignable = false;
+    for (Parameter formal : formals) {
+      for (Parameter actual : actuals) {
+        if (formal.index() != actual.index()) {
+          if (actual.isAssignableTo(formal, invocationInfo.state())) {
+            anyAssignable = true;
+          } else {
+            costs.invalidatePair(ParameterPair.create(formal, actual));
+          }
+        }
+      }
+    }
 
     /* If there are no formal parameters which are assignable to any alternative actual parameters
     then we can stop without trying to look for permutations */
-    if (costs.viablePairs().noneMatch(ParameterPair::isAlternativePairing)) {
+    if (!anyAssignable) {
       return Changes.empty();
     }
 

@@ -17,8 +17,10 @@
 package com.google.errorprone.util;
 
 import static com.google.errorprone.util.ASTHelpers.enclosingClass;
+import static com.google.errorprone.util.ASTHelpers.enclosingPackage;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.errorprone.VisitorState;
 import com.sun.source.tree.ClassTree;
@@ -89,8 +91,7 @@ public enum Visibility implements Comparable<Visibility> {
     public boolean shouldBeVisible(Symbol symbol, VisitorState state) {
       JCCompilationUnit compilationUnit = (JCCompilationUnit) state.getPath().getCompilationUnit();
       PackageSymbol packge = compilationUnit.packge;
-      // TODO(ghm): Should we handle the default (unnamed) package here?
-      return symbol.packge().equals(packge);
+      return enclosingPackage(symbol).map(p -> p.equals(packge)).orElse(false);
     }
 
     @Override
@@ -107,7 +108,7 @@ public enum Visibility implements Comparable<Visibility> {
       }
       Symbol symbol = getSymbol(tree);
       ClassTree classTree = ASTHelpers.findEnclosingNode(state.getPath(), ClassTree.class);
-      if (symbol.isStatic()) {
+      if (isStatic(symbol)) {
         if (classTree == null) {
           return false;
         }
@@ -117,16 +118,16 @@ public enum Visibility implements Comparable<Visibility> {
       if (tree instanceof NewClassTree) {
         return false;
       }
-      if (!(tree instanceof ExpressionTree)) {
+      if (!(tree instanceof ExpressionTree expressionTree)) {
         return hasEnclosingClassExtending(enclosingClass(symbol).type, state, classTree);
       }
-      if (tree instanceof MemberSelectTree
-          && ((MemberSelectTree) tree).getIdentifier().contentEquals("super")) {
+      if (tree instanceof MemberSelectTree memberSelectTree
+          && memberSelectTree.getIdentifier().contentEquals("super")) {
         // Allow qualified super calls.
         return true;
       }
       if (tree instanceof MemberSelectTree || tree instanceof MemberReferenceTree) {
-        ExpressionTree receiver = ASTHelpers.getReceiver((ExpressionTree) tree);
+        ExpressionTree receiver = ASTHelpers.getReceiver(expressionTree);
         return receiver.toString().equals("super")
             || hasEnclosingClassOfSuperType(getType(receiver), state, classTree);
       }

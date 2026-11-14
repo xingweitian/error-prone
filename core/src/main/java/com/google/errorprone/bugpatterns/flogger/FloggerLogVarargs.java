@@ -35,9 +35,10 @@ import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 
-/** @author Graeme Morgan (ghm@google.com) */
+/**
+ * @author Graeme Morgan (ghm@google.com)
+ */
 @BugPattern(
-    name = "FloggerLogVarargs",
     summary = "logVarargs should be used to pass through format strings and arguments.",
     severity = ERROR)
 public final class FloggerLogVarargs extends BugChecker implements MethodInvocationTreeMatcher {
@@ -58,7 +59,7 @@ public final class FloggerLogVarargs extends BugChecker implements MethodInvocat
     }
     // Heuristically, a compile time constant format string might be intended to be used with an
     // actual array, but a non-CTC probably isn't.
-    return ASTHelpers.constValue(tree.getArguments().get(0)) == null
+    return ASTHelpers.constValue(tree.getArguments().getFirst()) == null
         ? describeMatch(tree, SuggestedFixes.renameMethodInvocation(tree, "logVarargs", state))
         : NO_MATCH;
   }

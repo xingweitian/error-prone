@@ -31,160 +31,183 @@ public class NonOverridingEqualsTest {
   // Positive cases
 
   @Test
-  public void testFlagsSimpleCovariantEqualsMethod() {
+  public void flagsSimpleCovariantEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains: Did you mean '@Override'",
-            "  public boolean equals(Test other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains: Did you mean '@Override'
+              public boolean equals(Test other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   // The following two tests are really to help debug the construction of the suggested fixes.
 
   @Test
-  public void testFlagsComplicatedCovariantEqualsMethod() {
+  public void flagsComplicatedCovariantEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  int i, j, k;",
-            "  // BUG: Diagnostic contains: Did you mean '@Override'",
-            "  public boolean equals(Test other) {",
-            "    if (i == other.i && j == other.j && k == other.k) {",
-            "      return true;",
-            "    }",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              int i, j, k;
+
+              // BUG: Diagnostic contains: Did you mean '@Override'
+              public boolean equals(Test other) {
+                if (i == other.i && j == other.j && k == other.k) {
+                  return true;
+                }
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsAnotherComplicatedCovariantEqualsMethod() {
+  public void flagsAnotherComplicatedCovariantEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  boolean isInVersion;",
-            "  String str;",
-            "  // BUG: Diagnostic contains: Did you mean '@Override'",
-            "  public boolean equals(Test that) {",
-            "    return (this.isInVersion == that.isInVersion)",
-            "        && this.str.equals(that.str);",
-            "  }",
-            "}")
+            """
+            public class Test {
+              boolean isInVersion;
+              String str;
+
+              // BUG: Diagnostic contains: Did you mean '@Override'
+              public boolean equals(Test that) {
+                return (this.isInVersion == that.isInVersion) && this.str.equals(that.str);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsAbstractCovariantEqualsMethod() {
+  public void flagsAbstractCovariantEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public abstract class Test {",
-            "  // BUG: Diagnostic contains: Did you mean '@Override'",
-            "  public abstract boolean equals(Test other);",
-            "}")
+            """
+            public abstract class Test {
+              // BUG: Diagnostic contains: Did you mean '@Override'
+              public abstract boolean equals(Test other);
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsNativeCovariantEqualsMethod() {
+  public void flagsNativeCovariantEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains: Did you mean '@Override'",
-            "  public native boolean equals(Test other);",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains: Did you mean '@Override'
+              public native boolean equals(Test other);
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsIfMethodTakesUnrelatedType() {
+  public void flagsIfMethodTakesUnrelatedType() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  public boolean equals(Integer other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              public boolean equals(Integer other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsBoxedBooleanReturnType() {
+  public void flagsBoxedBooleanReturnType() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  public Boolean equals(Test other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              public Boolean equals(Test other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsCovariantEqualsMethodInEnum() {
+  public void flagsCovariantEqualsMethodInEnum() {
     compilationHelper
         .addSourceLines(
             "Planet.java",
-            "public enum Planet {",
-            "  MERCURY,",
-            "  VENUS,",
-            "  EARTH,",
-            "  MARS,",
-            "  JUPITER,",
-            "  SATURN,",
-            "  URANUS,",
-            "  NEPTUNE;", // Pluto: never forget
-            "  // BUG: Diagnostic contains: enum instances can safely be compared by reference "
-                + "equality",
-            "  // Did you mean to remove this line?",
-            "  public boolean equals(Planet other) {",
-            "    return this == other;",
-            "  }",
-            "}")
+"""
+public enum Planet {
+  MERCURY,
+  VENUS,
+  EARTH,
+  MARS,
+  JUPITER,
+  SATURN,
+  URANUS,
+  NEPTUNE;
+
+  // BUG: Diagnostic contains: enum instances can safely be compared by reference equality
+  // Did you mean to remove this line?
+  public boolean equals(Planet other) {
+    return this == other;
+  }
+}
+""")
         .doTest();
   }
 
   @Test
-  public void testFlagsPrivateEqualsMethod() {
+  public void flagsPrivateEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  private boolean equals(Test other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              private boolean equals(Test other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testFlagsEvenIfAnotherMethodOverridesEquals() {
+  public void flagsEvenIfAnotherMethodOverridesEquals() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains: either inline it into the callers or rename it",
-            "  private boolean equals(Test other) {",
-            "    return false;",
-            "  }",
-            "  @Override public boolean equals(Object other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains: either inline it into the callers or rename it
+              private boolean equals(Test other) {
+                return false;
+              }
+
+              @Override
+              public boolean equals(Object other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -194,57 +217,66 @@ public class NonOverridingEqualsTest {
    * single-argument static equals method...
    */
   @Test
-  public void testFlagsStaticEqualsMethod() {
+  public void flagsStaticEqualsMethod() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  // BUG: Diagnostic contains:",
-            "  public static boolean equals(Test other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              // BUG: Diagnostic contains:
+              public static boolean equals(Test other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   // Negative cases
 
   @Test
-  public void testDontFlagMethodThatOverridesEquals() {
+  public void dontFlagMethodThatOverridesEquals() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  @Override public boolean equals(Object other) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              @Override
+              public boolean equals(Object other) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testDontFlagEqualsMethodWithMoreThanOneParameter() {
+  public void dontFlagEqualsMethodWithMoreThanOneParameter() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public boolean equals(Test other, String s) {",
-            "    return false;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public boolean equals(Test other, String s) {
+                return false;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testDontFlagIfWrongReturnType() {
+  public void dontFlagIfWrongReturnType() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "public class Test {",
-            "  public int equals(Test other) {",
-            "    return -1;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public int equals(Test other) {
+                return -1;
+              }
+            }
+            """)
         .doTest();
   }
 }

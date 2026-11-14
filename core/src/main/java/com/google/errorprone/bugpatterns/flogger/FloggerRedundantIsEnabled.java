@@ -22,8 +22,6 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
-import static com.sun.source.tree.Tree.Kind.BLOCK;
-import static com.sun.source.tree.Tree.Kind.EXPRESSION_STATEMENT;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -47,13 +45,15 @@ import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
-/** @author mariasam@google.com (Maria Sam) */
+/**
+ * @author mariasam@google.com (Maria Sam)
+ */
 @BugPattern(
-    name = "FloggerRedundantIsEnabled",
     summary =
         "Logger level check is already implied in the log() call. "
-            + "An explicit at[Level]().isEnabled() check is redundant.",
+            + "An explicit atLEVEL().isEnabled() check is redundant.",
     severity = WARNING)
 public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatcher {
 
@@ -65,9 +65,9 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
           .onDescendantOf(FLOGGER)
           .namedAnyOf(
               "atInfo", "atConfig", "atFine", "atFiner", "atFinest", "atWarning", "atSevere")
-          .withParameters();
+          .withNoParameters();
   private static final Matcher<ExpressionTree> IS_ENABLED =
-      instanceMethod().onDescendantOf(FLOGGER_API).named("isEnabled").withParameters();
+      instanceMethod().onDescendantOf(FLOGGER_API).named("isEnabled").withNoParameters();
   private static final Matcher<ExpressionTree> LOG =
       instanceMethod().onDescendantOf(FLOGGER_API).named("log");
 
@@ -80,7 +80,7 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
 
     // If then-block contains exactly one expression and it is a `log` invocation, extract it.
     Optional<MethodInvocationTree> methodCall = extractLoneLogInvocation(ifTree, state);
-    if (!methodCall.isPresent()) {
+    if (methodCall.isEmpty()) {
       return NO_MATCH;
     }
     MethodInvocationTree logInvocation = methodCall.get();
@@ -111,8 +111,8 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
       IfTree ifTree, VisitorState state) {
     // Get lone statement from then-block.
     StatementTree thenStatement = ifTree.getThenStatement();
-    while (thenStatement.getKind() == BLOCK) {
-      List<? extends StatementTree> statements = ((BlockTree) thenStatement).getStatements();
+    while (thenStatement instanceof BlockTree blockTree) {
+      List<? extends StatementTree> statements = blockTree.getStatements();
       if (statements.size() != 1) {
         return Optional.empty();
       }
@@ -120,8 +120,8 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
     }
 
     // Check if that lone statement is a Flogger `log` method invocation, and cast.
-    if (thenStatement.getKind() == EXPRESSION_STATEMENT) {
-      ExpressionTree thenExpression = ((ExpressionStatementTree) thenStatement).getExpression();
+    if (thenStatement instanceof ExpressionStatementTree expressionStatementTree) {
+      ExpressionTree thenExpression = expressionStatementTree.getExpression();
       if (LOG.matches(thenExpression, state)) {
         return Optional.of((MethodInvocationTree) thenExpression);
       }
@@ -135,8 +135,8 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
         new SimpleTreeVisitor<ExpressionTree, Void>() {
 
           @Override
-          protected ExpressionTree defaultAction(Tree tree, Void unused) {
-            return tree instanceof ExpressionTree ? (ExpressionTree) tree : null;
+          protected @Nullable ExpressionTree defaultAction(Tree tree, Void unused) {
+            return tree instanceof ExpressionTree expressionTree ? expressionTree : null;
           }
 
           @Override
@@ -187,10 +187,9 @@ public class FloggerRedundantIsEnabled extends BugChecker implements IfTreeMatch
 
     private final ExpressionTree logInvocation;
     private final VisitorState state;
-    public Optional<SuggestedFix> fix;
+    Optional<SuggestedFix> fix;
 
-    public LoggerIsEnabledBinaryIfConditionScanner(
-        ExpressionTree logInvocation, VisitorState state) {
+    LoggerIsEnabledBinaryIfConditionScanner(ExpressionTree logInvocation, VisitorState state) {
       this.logInvocation = logInvocation;
       this.state = state;
       this.fix = Optional.empty();

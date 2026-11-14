@@ -41,10 +41,7 @@ import com.sun.tools.javac.code.Types;
  * @author bill.pugh@gmail.com (Bill Pugh)
  * @author eaftan@google.com (Eddie Aftandilian)
  */
-@BugPattern(
-    name = "BadShiftAmount",
-    summary = "Shift by an amount that is out of range",
-    severity = ERROR)
+@BugPattern(summary = "Shift by an amount that is out of range", severity = ERROR)
 public class BadShiftAmount extends BugChecker implements BinaryTreeMatcher {
 
   /**
@@ -55,30 +52,27 @@ public class BadShiftAmount extends BugChecker implements BinaryTreeMatcher {
    * promoted to int. See JLS 5.6.1.
    */
   private static final Matcher<BinaryTree> BAD_SHIFT_AMOUNT_INT =
-      new Matcher<BinaryTree>() {
-        @Override
-        public boolean matches(BinaryTree tree, VisitorState state) {
-          Type leftType = ASTHelpers.getType(tree.getLeftOperand());
-          Types types = state.getTypes();
-          Symtab symtab = state.getSymtab();
-          if (!(types.isSameType(leftType, symtab.intType))
-              && !(types.isSameType(leftType, symtab.byteType))
-              && !(types.isSameType(leftType, symtab.shortType))
-              && !(types.isSameType(leftType, symtab.charType))) {
-            return false;
-          }
-
-          ExpressionTree rightOperand = tree.getRightOperand();
-          if (rightOperand instanceof LiteralTree) {
-            Object rightValue = ((LiteralTree) rightOperand).getValue();
-            if (rightValue instanceof Number) {
-              int intValue = ((Number) rightValue).intValue();
-              return intValue < 0 || intValue > 31;
-            }
-          }
-
+      (BinaryTree tree, VisitorState state) -> {
+        Type leftType = ASTHelpers.getType(tree.getLeftOperand());
+        Types types = state.getTypes();
+        Symtab symtab = state.getSymtab();
+        if (!(types.isSameType(leftType, symtab.intType))
+            && !(types.isSameType(leftType, symtab.byteType))
+            && !(types.isSameType(leftType, symtab.shortType))
+            && !(types.isSameType(leftType, symtab.charType))) {
           return false;
         }
+
+        ExpressionTree rightOperand = tree.getRightOperand();
+        if (rightOperand instanceof LiteralTree literalTree) {
+          Object rightValue = literalTree.getValue();
+          if (rightValue instanceof Number number) {
+            int intValue = number.intValue();
+            return intValue < 0 || intValue > 31;
+          }
+        }
+
+        return false;
       };
 
   public static final Matcher<BinaryTree> BINARY_TREE_MATCHER =

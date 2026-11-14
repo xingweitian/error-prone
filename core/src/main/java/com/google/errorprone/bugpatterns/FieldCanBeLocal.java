@@ -18,15 +18,13 @@ package com.google.errorprone.bugpatterns;
 
 import static com.google.common.collect.Iterables.getLast;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
-import static com.google.errorprone.util.ASTHelpers.getAnnotation;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.MoreAnnotations.targetsElement;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Multimap;
 import com.google.common.collect.MultimapBuilder;
-import com.google.common.collect.Sets;
+import com.google.common.collect.SetMultimap;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
@@ -44,49 +42,52 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import java.lang.annotation.ElementType;
-import java.lang.annotation.Target;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.inject.Inject;
 import javax.lang.model.element.ElementKind;
 
 /** Flags fields which can be replaced with local variables. */
 @BugPattern(
-    name = "FieldCanBeLocal",
     altNames = {"unused", "Unused"},
     summary = "This field can be replaced with a local variable in the methods that use it.",
     severity = SUGGESTION,
     documentSuppression = false)
 public final class FieldCanBeLocal extends BugChecker implements CompilationUnitTreeMatcher {
-  private static final ImmutableSet<ElementType> VALID_ON_LOCAL_VARIABLES =
-      Sets.immutableEnumSet(ElementType.LOCAL_VARIABLE, ElementType.TYPE_USE);
+  private final WellKnownKeep wellKnownKeep;
+
+  @Inject
+  FieldCanBeLocal(WellKnownKeep wellKnownKeep) {
+    this.wellKnownKeep = wellKnownKeep;
+  }
 
   @Override
   public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
     Map<VarSymbol, TreePath> potentialFields = new LinkedHashMap<>();
-    Multimap<VarSymbol, TreePath> unconditionalAssignments =
+    SetMultimap<VarSymbol, TreePath> unconditionalAssignments =
         MultimapBuilder.linkedHashKeys().linkedHashSetValues().build();
-    Multimap<VarSymbol, Tree> uses = MultimapBuilder.linkedHashKeys().linkedHashSetValues().build();
+    SetMultimap<VarSymbol, TreePath> uses =
+        MultimapBuilder.linkedHashKeys().linkedHashSetValues().build();
 
-    new SuppressibleTreePathScanner<Void, Void>() {
+    new SuppressibleTreePathScanner<Void, Void>(state) {
       @Override
       public Void visitVariable(VariableTree variableTree, Void unused) {
         VarSymbol symbol = getSymbol(variableTree);
-        if (symbol != null
-            && symbol.getKind() == ElementKind.FIELD
+        if (symbol.getKind() == ElementKind.FIELD
             && symbol.isPrivate()
             && canBeLocal(variableTree)
-        ) {
+            && !wellKnownKeep.shouldKeep(variableTree)
+            && !symbol.getSimpleName().toString().startsWith("unused")) {
           potentialFields.put(symbol, getCurrentPath());
         }
         return null;
@@ -101,15 +102,9 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
       }
 
       private boolean canBeUsedOnLocalVariable(AnnotationTree annotationTree) {
-        // TODO(b/137842683): Should this (and all other places using getAnnotation with Target) be
-        // replaced with annotation mirror traversals?
-        // This is safe given we know that Target does not have Class fields.
-        Target target = getAnnotation(annotationTree, Target.class);
-        if (target == null) {
-          return true;
-        }
-        return !Sets.intersection(VALID_ON_LOCAL_VARIABLES, ImmutableSet.copyOf(target.value()))
-            .isEmpty();
+        Symbol symbol = getSymbol(annotationTree);
+        return targetsElement(symbol, ElementType.LOCAL_VARIABLE)
+            || targetsElement(symbol, ElementType.TYPE_USE);
       }
     }.scan(state.getPath(), null);
 
@@ -118,11 +113,11 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
 
       @Override
       public Void visitClass(ClassTree classTree, Void unused) {
-        if (isSuppressed(classTree)) {
+        if (isSuppressed(classTree, state)) {
           return null;
         }
         inMethod = false;
-        return super.visitClass(classTree, unused);
+        return super.visitClass(classTree, null);
       }
 
       @Override
@@ -159,10 +154,9 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
           public Void visitAssignment(AssignmentTree assignmentTree, Void unused) {
             scan(assignmentTree.getExpression(), null);
             Symbol symbol = getSymbol(assignmentTree.getVariable());
-            if (!(symbol instanceof VarSymbol)) {
+            if (!(symbol instanceof VarSymbol varSymbol)) {
               return scan(assignmentTree.getVariable(), null);
             }
-            VarSymbol varSymbol = (VarSymbol) symbol;
             if (!potentialFields.containsKey(varSymbol)) {
               return scan(assignmentTree.getVariable(), null);
             }
@@ -189,11 +183,10 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
 
           private void handleIdentifier(Tree tree) {
             Symbol symbol = getSymbol(tree);
-            if (!(symbol instanceof VarSymbol)) {
+            if (!(symbol instanceof VarSymbol varSymbol)) {
               return;
             }
-            VarSymbol varSymbol = (VarSymbol) symbol;
-            uses.put(varSymbol, tree);
+            uses.put(varSymbol, getCurrentPath());
             if (!unconditionallyAssigned.contains(varSymbol)) {
               potentialFields.remove(varSymbol);
             }
@@ -249,6 +242,14 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
       if (assignmentLocations.isEmpty()) {
         continue;
       }
+      // Don't emit findings if the _only_ uses of the field are assignments: we'll be overlapping
+      // with UnusedVariable.
+      if (uses.get(varSymbol).stream()
+          .allMatch(tp ->
+              tp.getParentPath().getLeaf() instanceof AssignmentTree parent
+                  && parent.getVariable() == tp.getLeaf())) {
+        continue;
+      }
       SuggestedFix.Builder fix = SuggestedFix.builder();
       VariableTree variableTree = (VariableTree) declarationSite.getLeaf();
       String type = state.getSourceForNode(variableTree.getType());
@@ -276,17 +277,17 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
         }
       }
       // Strip "this." off any uses of the field.
-      for (Tree usage : uses.get(varSymbol)) {
+      for (TreePath usagePath : uses.get(varSymbol)) {
+        var usage = usagePath.getLeaf();
         if (deletedTrees.contains(usage)
-            || usage.getKind() == Kind.IDENTIFIER
-            || usage.getKind() != Kind.MEMBER_SELECT) {
+            || usage instanceof IdentifierTree
+            || !(usage instanceof MemberSelectTree memberSelectTree)) {
           continue;
         }
-        ExpressionTree selected = ((MemberSelectTree) usage).getExpression();
-        if (!(selected instanceof IdentifierTree)) {
+        ExpressionTree selected = memberSelectTree.getExpression();
+        if (!(selected instanceof IdentifierTree ident)) {
           continue;
         }
-        IdentifierTree ident = (IdentifierTree) selected;
         if (ident.getName().contentEquals("this")) {
           fix.replace(getStartPosition(ident), state.getEndPosition(ident) + 1, "");
         }
@@ -304,7 +305,7 @@ public final class FieldCanBeLocal extends BugChecker implements CompilationUnit
     return state
         .getSourceCode()
         .subSequence(
-            getStartPosition(annotations.get(0)), state.getEndPosition(getLast(annotations)))
+            getStartPosition(annotations.getFirst()), state.getEndPosition(getLast(annotations)))
         .toString();
   }
 }

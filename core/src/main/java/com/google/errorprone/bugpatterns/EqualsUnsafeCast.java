@@ -31,11 +31,11 @@ import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.InstanceOfTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.TypeCastTree;
 import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.code.Symbol;
@@ -49,14 +49,11 @@ import java.util.List;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "EqualsUnsafeCast",
     summary =
         "The contract of #equals states that it should return false for incompatible types, "
             + "while this implementation may throw ClassCastException.",
     severity = WARNING)
 public final class EqualsUnsafeCast extends BugChecker implements MethodTreeMatcher {
-
-  private static final String INSTANCEOF_CHECK = "if (!(%s instanceof %s)) { return false; }";
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
@@ -89,7 +86,7 @@ public final class EqualsUnsafeCast extends BugChecker implements MethodTreeMatc
       public Void visitTypeCast(TypeCastTree node, Void unused) {
         ExpressionTree expression = node.getExpression();
         if (!methodInvoked
-            && expression.getKind() == Kind.IDENTIFIER
+            && expression instanceof IdentifierTree
             && parameter.equals(getSymbol(expression))
             && checkedTypes.stream().noneMatch(t -> isSubtype(t, getType(node.getType()), state))) {
           StatementTree enclosingStatement =
@@ -100,7 +97,7 @@ public final class EqualsUnsafeCast extends BugChecker implements MethodTreeMatc
                   SuggestedFix.prefixWith(
                       enclosingStatement,
                       String.format(
-                          INSTANCEOF_CHECK,
+                          "if (!(%s instanceof %s)) { return false; }",
                           state.getSourceForNode(expression),
                           state.getSourceForNode(node.getType())))));
         }

@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author cushon@google.com (Liam Miller-Cushon) */
+/**
+ * @author cushon@google.com (Liam Miller-Cushon)
+ */
 @RunWith(JUnit4.class)
 public class OptionalEqualityTest {
 
@@ -29,46 +31,55 @@ public class OptionalEqualityTest {
       CompilationTestHelper.newInstance(OptionalEquality.class, getClass());
 
   @Test
-  public void testPositiveCase_equal() {
+  public void positiveCase_equal() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Optional;",
-            "class Test {",
-            "  boolean f(Optional<Integer> a, Optional<Integer> b) {",
-            "    // BUG: Diagnostic contains: a.equals(b)",
-            "    return a == b;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f(Optional<Integer> a, Optional<Integer> b) {
+                // BUG: Diagnostic contains: a.equals(b)
+                return a == b;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testPositiveCase_notEqual() {
+  public void positiveCase_notEqual() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Optional;",
-            "class Test {",
-            "  boolean f(Optional<Integer> a, Optional<Integer> b) {",
-            "    // BUG: Diagnostic contains: !a.equals(b)",
-            "    return a != b;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f(Optional<Integer> a, Optional<Integer> b) {
+                // BUG: Diagnostic contains: !a.equals(b)
+                return a != b;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
+  public void negativeCase() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Optional;",
-            "class Test {",
-            "  boolean f(Optional<Integer> b) {",
-            "    return b == null;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f(Optional<Integer> b) {
+                return b == null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -77,15 +88,39 @@ public class OptionalEqualityTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Optional;",
-            "class Test {",
-            "  boolean f(Optional<Integer> a) {",
-            "    Optional<Integer> b = Optional.of(42);",
-            "    // BUG: Diagnostic contains:",
-            "    // Did you mean 'return Objects.equals(a, b);' or 'return a.equals(b);'?",
-            "    return a == b;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f(Optional<Integer> a) {
+                Optional<Integer> b = Optional.of(42);
+                // BUG: Diagnostic contains: Did you mean 'return Objects.equals(a, b);' or 'return
+                // a.equals(b);'?
+                return a == b;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void maybeNull_prefersAlreadyImportedHelper() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import com.google.common.base.Objects;
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f(Optional<Integer> a) {
+                Optional<Integer> b = Optional.of(42);
+                // BUG: Diagnostic contains: Did you mean 'return java.util.Objects.equals(a, b);'
+                // or 'return a.equals(b);'?
+                return a == b;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -94,15 +129,18 @@ public class OptionalEqualityTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.base.Optional;",
-            "class Test {",
-            "  boolean f() {",
-            "    Optional<Integer> a = null;",
-            "    Optional<Integer> b = Optional.of(42);",
-            "    // BUG: Diagnostic contains: Did you mean 'return Objects.equals(a, b);'?",
-            "    return a == b;",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Optional;
+
+            class Test {
+              boolean f() {
+                Optional<Integer> a = null;
+                Optional<Integer> b = Optional.of(42);
+                // BUG: Diagnostic contains: Did you mean 'return Objects.equals(a, b);'?
+                return a == b;
+              }
+            }
+            """)
         .doTest();
   }
 }

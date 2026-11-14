@@ -19,23 +19,34 @@ import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getGeneratedBy;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasExplicitSource;
+import static com.google.errorprone.util.ASTHelpers.isGeneratedConstructor;
 import static com.google.errorprone.util.FindIdentifiers.findIdent;
 import static com.sun.tools.javac.code.Kinds.KindSelector.VAL_TYP;
+import static java.util.stream.Collectors.toCollection;
 
 import com.google.common.base.Ascii;
 import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Table;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
+import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.source.util.TreePath;
@@ -43,43 +54,83 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.PackageSymbol;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
-import com.sun.tools.javac.util.Position;
+import com.sun.tools.javac.code.Type;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.inject.Inject;
 import javax.lang.model.element.Name;
 
 /** Flags uses of fully qualified names which are not ambiguous if imported. */
 @BugPattern(
-    name = "UnnecessarilyFullyQualified",
     severity = SeverityLevel.WARNING,
     summary = "This fully qualified name is unambiguous to the compiler if imported.")
 public final class UnnecessarilyFullyQualified extends BugChecker
     implements CompilationUnitTreeMatcher {
 
-  private static final ImmutableSet<String> EXEMPTED_NAMES =
-      ImmutableSet.of(
-          "Annotation");
+  private static final ImmutableSet<String> EXEMPTED_NAMES = ImmutableSet.of("Annotation");
+
+  /**
+   * Exempted types that fully qualified name usages are acceptable for their nested types when
+   * importing the enclosing type is ambiguous.
+   *
+   * <p>Some types are meant to provide a namespace; therefore, imports for their nested types can
+   * be confusing.
+   *
+   * <p>For instance, unlike its name suggests, {@code org.immutables.value.Value.Immutable} is used
+   * to generate immutable value types, and its import can be misleading. So, importing {@code
+   * org.immutables.value.Value} and using {@code @Value.Immutable} is more favorable than importing
+   * {@code org.immutables.value.Value.Immutable} and using {@code @Immutable}.
+   */
+  private final ImmutableSet<String> exemptedEnclosingTypes;
+
+  private final boolean batchFindings;
+
+  @Inject
+  UnnecessarilyFullyQualified(ErrorProneFlags errorProneFlags) {
+    this.exemptedEnclosingTypes = errorProneFlags.getSetOrEmpty("BadImport:BadEnclosingTypes");
+    this.batchFindings =
+        errorProneFlags.getBoolean("UnnecessarilyFullyQualified:BatchFindings").orElse(false);
+  }
 
   @Override
   public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
     if (tree.getTypeDecls().stream()
-        .anyMatch(
-            t -> getSymbol(tree) != null && !getGeneratedBy(getSymbol(tree), state).isEmpty())) {
+        .anyMatch(t -> getSymbol(tree) != null && !getGeneratedBy(getSymbol(tree)).isEmpty())) {
       return NO_MATCH;
     }
     if (isPackageInfo(tree)) {
       return NO_MATCH;
     }
     Table<Name, TypeSymbol, List<TreePath>> table = HashBasedTable.create();
-    Set<Name> identifiersSeen = new HashSet<>();
-    new SuppressibleTreePathScanner<Void, Void>() {
+    SetMultimap<Name, TypeSymbol> identifiersSeen = HashMultimap.create();
+    new SuppressibleTreePathScanner<Void, Void>(state) {
       @Override
       public Void visitImport(ImportTree importTree, Void unused) {
         return null;
+      }
+
+      @Override
+      public Void visitClass(ClassTree tree, Void unused) {
+        scan(tree.getModifiers(), null);
+        scan(tree.getTypeParameters(), null);
+        // Some anonymous classes have an extends clause which is fully qualified. Just ignore it.
+        if (!getSymbol(tree).isAnonymous()) {
+          scan(tree.getExtendsClause(), null);
+          scan(tree.getImplementsClause(), null);
+        }
+        scan(tree.getMembers(), null);
+        return null;
+      }
+
+      @Override
+      public Void visitMethod(MethodTree tree, Void unused) {
+        // Some generated constructors sneak in a fully qualified argument.
+        return isGeneratedConstructor(tree) ? null : super.visitMethod(tree, null);
       }
 
       @Override
@@ -92,7 +143,10 @@ public final class UnnecessarilyFullyQualified extends BugChecker
 
       @Override
       public Void visitIdentifier(IdentifierTree identifierTree, Void unused) {
-        identifiersSeen.add(identifierTree.getName());
+        Type type = getType(identifierTree);
+        if (type != null) {
+          identifiersSeen.put(identifierTree.getName(), type.tsym);
+        }
         return null;
       }
 
@@ -109,18 +163,15 @@ public final class UnnecessarilyFullyQualified extends BugChecker
         if (!isFullyQualified(tree)) {
           return;
         }
-        if (BadImport.BAD_NESTED_CLASSES.contains(tree.getIdentifier().toString())) {
-          if (tree.getExpression() instanceof MemberSelectTree
-              && getSymbol(tree.getExpression()) instanceof ClassSymbol) {
-            handle(new TreePath(path, tree.getExpression()));
-          }
+        if (isBadNestedClass(tree) || isExemptedEnclosingType(tree)) {
+          handle(new TreePath(path, tree.getExpression()));
           return;
         }
         Symbol symbol = getSymbol(tree);
         if (!(symbol instanceof ClassSymbol)) {
           return;
         }
-        if (state.getEndPosition(tree) == Position.NOPOS) {
+        if (!hasExplicitSource(tree, state)) {
           return;
         }
         List<TreePath> treePaths = table.get(tree.getIdentifier(), symbol.type.tsym);
@@ -129,6 +180,23 @@ public final class UnnecessarilyFullyQualified extends BugChecker
           table.put(tree.getIdentifier(), symbol.type.tsym, treePaths);
         }
         treePaths.add(path);
+      }
+
+      private boolean isBadNestedClass(MemberSelectTree tree) {
+        return BadImport.BAD_NESTED_CLASSES.contains(tree.getIdentifier().toString());
+      }
+
+      private boolean isExemptedEnclosingType(MemberSelectTree tree) {
+        ExpressionTree expression = tree.getExpression();
+        if (!(expression instanceof MemberSelectTree)) {
+          return false;
+        }
+        Symbol symbol = getSymbol(expression);
+        if (!(symbol instanceof ClassSymbol)) {
+          return false;
+        }
+
+        return exemptedEnclosingTypes.contains(symbol.getQualifiedName().toString());
       }
 
       private boolean isFullyQualified(MemberSelectTree tree) {
@@ -158,11 +226,13 @@ public final class UnnecessarilyFullyQualified extends BugChecker
       if (types.size() > 1) {
         continue;
       }
+      TypeSymbol type = getOnlyElement(types.keySet());
       // Skip weird Android classes which don't look like classes.
       if (Ascii.isLowerCase(name.charAt(0))) {
         continue;
       }
-      if (identifiersSeen.contains(name)) {
+      // Don't replace if this name is already used in the file to refer to a _different_ type.
+      if (identifiersSeen.get(name).stream().anyMatch(s -> !s.equals(type))) {
         continue;
       }
       String nameString = name.toString();
@@ -170,25 +240,43 @@ public final class UnnecessarilyFullyQualified extends BugChecker
         continue;
       }
       List<TreePath> pathsToFix = getOnlyElement(types.values());
-      if (pathsToFix.stream()
-          .anyMatch(path -> findIdent(nameString, state.withPath(path), VAL_TYP) != null)) {
+      Set<Symbol> meaningAtUsageSites =
+          pathsToFix.stream()
+              .map(path -> findIdent(nameString, state.withPath(path), VAL_TYP))
+              .collect(toCollection(HashSet::new));
+      // Don't report a finding if the simple name has a different meaning elsewhere.
+      if (meaningAtUsageSites.stream().anyMatch(s -> s != null && !s.equals(type))) {
         continue;
       }
       SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
-      fixBuilder.addImport(getOnlyElement(types.keySet()).getQualifiedName().toString());
+      // Only add the import if any of the usage sites don't already resolve to this type.
+      if (meaningAtUsageSites.stream().anyMatch(Objects::isNull)) {
+        fixBuilder.addImport(getOnlyElement(types.keySet()).getQualifiedName().toString());
+      }
       for (TreePath path : pathsToFix) {
         fixBuilder.replace(path.getLeaf(), nameString);
       }
       SuggestedFix fix = fixBuilder.build();
       for (TreePath path : pathsToFix) {
-        state.reportMatch(describeMatch(path.getLeaf(), fix));
+        state.reportMatch(
+            buildDescription(path.getLeaf())
+                .addFix(fix)
+                .setMessage(
+                    String.format(
+                        "The fully qualified name '%s' is unambiguous to the compiler if imported,"
+                            + " prefer using the name '%s'.",
+                        type.getQualifiedName(), nameString))
+                .build());
+        if (this.batchFindings) {
+          break;
+        }
       }
     }
     return NO_MATCH;
   }
 
   private static boolean isPackageInfo(CompilationUnitTree tree) {
-    String name = tree.getSourceFile().getName();
+    String name = ASTHelpers.getFileName(tree);
     int idx = name.lastIndexOf('/');
     if (idx != -1) {
       name = name.substring(idx + 1);

@@ -17,21 +17,22 @@
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static java.util.Objects.requireNonNull;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Streams;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.names.NamingConventions;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.Tree;
 import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.code.Symbol;
@@ -43,16 +44,14 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.comp.Check;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Represents either a formal or actual parameter and its position in the argument list.
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-@AutoValue
-abstract class Parameter {
-
+final class Parameter {
   private static final ImmutableSet<String> METHODNAME_PREFIXES_TO_REMOVE =
       ImmutableSet.of("get", "set", "is");
 
@@ -62,50 +61,79 @@ abstract class Parameter {
   /** We use this placeholder to indicate a name which we couldn't get a canonical string for. */
   @VisibleForTesting static final String NAME_NOT_PRESENT = "*NOT_PRESENT*";
 
-  abstract String name();
+  private final Type type;
+  private final int index;
+  private final @Nullable VarSymbol symbol;
+  private final @Nullable Tree tree;
 
-  abstract Type type();
+  /**
+   * Computed on first use, since most calls are rejected before any names are compared, and the
+   * name of each parameter is used for many pairs once they are.
+   */
+  private @Nullable String name;
 
-  abstract int index();
-
-  abstract String text();
-
-  abstract Kind kind();
-
-  abstract boolean constant();
-
-  static ImmutableList<Parameter> createListFromVarSymbols(List<VarSymbol> varSymbols) {
-    return Streams.mapWithIndex(
-            varSymbols.stream(),
-            (s, i) ->
-                new AutoValue_Parameter(
-                    s.getSimpleName().toString(),
-                    s.asType(),
-                    (int) i,
-                    s.getSimpleName().toString(),
-                    Kind.IDENTIFIER,
-                    false))
-        .collect(toImmutableList());
+  private Parameter(Type type, int index, @Nullable VarSymbol symbol, @Nullable Tree tree) {
+    this.type = type;
+    this.index = index;
+    this.symbol = symbol;
+    this.tree = tree;
   }
 
-  static ImmutableList<Parameter> createListFromExpressionTrees(
-      List<? extends ExpressionTree> trees) {
-    return Streams.mapWithIndex(
-            trees.stream(),
-            (t, i) ->
-                new AutoValue_Parameter(
-                    getArgumentName(t),
-                    Optional.ofNullable(ASTHelpers.getResultType(t)).orElse(Type.noType),
-                    (int) i,
-                    t.toString(),
-                    t.getKind(),
-                    ASTHelpers.constValue(t) != null))
-        .collect(toImmutableList());
+  static ImmutableList<Parameter> createListFromVarSymbols(List<VarSymbol> varSymbols) {
+    ImmutableList.Builder<Parameter> result = ImmutableList.builder();
+    int index = 0;
+    for (VarSymbol s : varSymbols) {
+      result.add(new Parameter(s.asType(), index++, s, /* tree= */ null));
+    }
+    return result.build();
+  }
+
+  static ImmutableList<Parameter> createListFromExpressionTrees(List<? extends Tree> trees) {
+    ImmutableList.Builder<Parameter> result = ImmutableList.builder();
+    int index = 0;
+    for (Tree t : trees) {
+      Type type =
+          t instanceof ExpressionTree expressionTree
+              ? ASTHelpers.getResultType(expressionTree)
+              : ASTHelpers.getType(t);
+      result.add(new Parameter(type != null ? type : Type.noType, index++, /* symbol= */ null, t));
+    }
+    return result.build();
   }
 
   static ImmutableList<Parameter> createListFromVariableTrees(List<? extends VariableTree> trees) {
     return createListFromVarSymbols(
         trees.stream().map(ASTHelpers::getSymbol).collect(toImmutableList()));
+  }
+
+  Type type() {
+    return type;
+  }
+
+  int index() {
+    return index;
+  }
+
+  String name() {
+    if (name == null) {
+      name =
+          symbol != null
+              ? symbol.getSimpleName().toString()
+              : getArgumentName(requireNonNull(tree));
+    }
+    return name;
+  }
+
+  String text() {
+    return tree != null ? tree.toString() : name();
+  }
+
+  Kind kind() {
+    return tree != null ? tree.getKind() : Kind.IDENTIFIER;
+  }
+
+  boolean constant() {
+    return tree != null && ASTHelpers.constValue(tree) != null;
   }
 
   /**
@@ -162,54 +190,50 @@ abstract class Parameter {
    * will return the marker for an unknown name.
    */
   @VisibleForTesting
-  static String getArgumentName(ExpressionTree expressionTree) {
-    switch (expressionTree.getKind()) {
-      case MEMBER_SELECT:
-        return ((MemberSelectTree) expressionTree).getIdentifier().toString();
-      case NULL_LITERAL:
-        // null could match anything pretty well
-        return NAME_NULL;
-      case IDENTIFIER:
-        IdentifierTree idTree = (IdentifierTree) expressionTree;
+  static String getArgumentName(Tree tree) {
+    return switch (tree) {
+      case VariableTree variableTree -> variableTree.getName().toString();
+      case MemberSelectTree memberSelectTree -> memberSelectTree.getIdentifier().toString();
+      // null could match anything pretty well
+      case LiteralTree literalTree when tree.getKind().equals(Kind.NULL_LITERAL) -> NAME_NULL;
+      case IdentifierTree identifierTree -> {
+        IdentifierTree idTree = (IdentifierTree) tree;
         if (idTree.getName().contentEquals("this")) {
           // for the 'this' keyword the argument name is the name of the object's class
           Symbol sym = ASTHelpers.getSymbol(idTree);
-          return sym != null ? getClassName(ASTHelpers.enclosingClass(sym)) : NAME_NOT_PRESENT;
+          yield sym != null ? getClassName(ASTHelpers.enclosingClass(sym)) : NAME_NOT_PRESENT;
         } else {
           // if we have a variable, just extract its name
-          return idTree.getName().toString();
+          yield idTree.getName().toString();
         }
-      case METHOD_INVOCATION:
-        MethodInvocationTree methodInvocationTree = (MethodInvocationTree) expressionTree;
+      }
+      case MethodInvocationTree methodInvocationTree -> {
         MethodSymbol methodSym = ASTHelpers.getSymbol(methodInvocationTree);
-        if (methodSym != null) {
-          String name = methodSym.getSimpleName().toString();
-          List<String> terms = NamingConventions.splitToLowercaseTerms(name);
-          String firstTerm = Iterables.getFirst(terms, null);
-          if (METHODNAME_PREFIXES_TO_REMOVE.contains(firstTerm)) {
-            if (terms.size() == 1) {
-              ExpressionTree receiver = ASTHelpers.getReceiver(methodInvocationTree);
-              if (receiver == null) {
-                return getClassName(ASTHelpers.enclosingClass(methodSym));
-              }
-              // recursively try to get a name from the receiver
-              return getArgumentName(receiver);
-            } else {
-              return name.substring(firstTerm.length());
+        String name = methodSym.getSimpleName().toString();
+        ImmutableList<String> terms = NamingConventions.splitToLowercaseTerms(name);
+        String firstTerm = Iterables.getFirst(terms, null);
+        if (METHODNAME_PREFIXES_TO_REMOVE.contains(firstTerm)) {
+          if (terms.size() == 1) {
+            ExpressionTree receiver = ASTHelpers.getReceiver(methodInvocationTree);
+            if (receiver == null) {
+              yield getClassName(ASTHelpers.enclosingClass(methodSym));
             }
+            // recursively try to get a name from the receiver
+            yield getArgumentName(receiver);
           } else {
-            return name;
+            yield name.substring(firstTerm.length());
           }
         } else {
-          return NAME_NOT_PRESENT;
+          yield name;
         }
-      case NEW_CLASS:
-        MethodSymbol constructorSym = ASTHelpers.getSymbol((NewClassTree) expressionTree);
-        return constructorSym != null && constructorSym.owner != null
+      }
+      case NewClassTree newClassTree -> {
+        MethodSymbol constructorSym = ASTHelpers.getSymbol(newClassTree);
+        yield constructorSym.owner != null
             ? getClassName((ClassSymbol) constructorSym.owner)
             : NAME_NOT_PRESENT;
-      default:
-        return NAME_NOT_PRESENT;
-    }
+      }
+      default -> NAME_NOT_PRESENT;
+    };
   }
 }

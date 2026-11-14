@@ -16,38 +16,39 @@
 
 package com.google.errorprone.bugpatterns.argumentselectiondefects;
 
-import com.google.auto.value.AutoValue;
+import static com.google.errorprone.util.ASTHelpers.canonicalConstructor;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+
+import com.google.common.base.CharMatcher;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.VisitorState;
-import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.BindingPatternTree;
+import com.sun.source.tree.DeconstructionPatternTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Holds information about the method invocation (or new class construction) that we are processing.
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-@AutoValue
-abstract class InvocationInfo {
-
-  abstract Tree tree();
-
-  abstract MethodSymbol symbol();
-
-  abstract ImmutableList<? extends ExpressionTree> actualParameters();
-
-  abstract ImmutableList<VarSymbol> formalParameters();
-
-  abstract VisitorState state();
+record InvocationInfo(
+    Tree tree,
+    MethodSymbol symbol,
+    ImmutableList<Tree> actualParameters,
+    ImmutableList<VarSymbol> formalParameters,
+    VisitorState state) {
+  private static final CharMatcher ASCII_DIGIT = CharMatcher.inRange('0', '9');
 
   static InvocationInfo createFromMethodInvocation(
       MethodInvocationTree tree, MethodSymbol symbol, VisitorState state) {
-    return new AutoValue_InvocationInfo(
+    return new InvocationInfo(
         tree,
         symbol,
         ImmutableList.copyOf(tree.getArguments()),
@@ -57,12 +58,32 @@ abstract class InvocationInfo {
 
   static InvocationInfo createFromNewClass(
       NewClassTree tree, MethodSymbol symbol, VisitorState state) {
-    return new AutoValue_InvocationInfo(
+    return new InvocationInfo(
         tree,
         symbol,
         ImmutableList.copyOf(tree.getArguments()),
         getFormalParametersWithoutVarArgs(symbol),
         state);
+  }
+
+  static @Nullable InvocationInfo createFromDeconstructionPattern(
+      DeconstructionPatternTree tree, VisitorState state) {
+    var symbol = getSymbol(tree.getDeconstructor());
+    if (!(symbol instanceof ClassSymbol cs)) {
+      return null;
+    }
+
+    var constructor = canonicalConstructor(cs, state);
+    ImmutableList.Builder<Tree> actuals = ImmutableList.builder();
+    ImmutableList.Builder<VarSymbol> formals = ImmutableList.builder();
+    for (int i = 0; i < constructor.getParameters().size(); ++i) {
+      // Skip over anything that isn't binding. There might be nested patterns here, or "_"s.
+      if (tree.getNestedPatterns().get(i) instanceof BindingPatternTree) {
+        actuals.add(((BindingPatternTree) tree.getNestedPatterns().get(i)).getVariable());
+        formals.add(constructor.getParameters().get(i));
+      }
+    }
+    return new InvocationInfo(tree, constructor, actuals.build(), formals.build(), state);
   }
 
   private static ImmutableList<VarSymbol> getFormalParametersWithoutVarArgs(
@@ -73,8 +94,7 @@ abstract class InvocationInfo {
     other sources. When it does this for an inner class sometimes it returns the implicit this
     pointer for the outer class as the first name (but not the first type). If we see this, then
     just abort */
-    if (!formalParameters.isEmpty()
-        && formalParameters.get(0).getSimpleName().toString().matches("this\\$[0-9]+")) {
+    if (!formalParameters.isEmpty() && isOuterThisParameter(formalParameters.getFirst())) {
       return ImmutableList.of();
     }
 
@@ -84,5 +104,13 @@ abstract class InvocationInfo {
         invokedMethodSymbol.isVarArgs() ? formalParameters.size() - 1 : formalParameters.size();
 
     return ImmutableList.copyOf(formalParameters.subList(0, size));
+  }
+
+  private static boolean isOuterThisParameter(VarSymbol parameter) {
+    String prefix = "this$";
+    String name = parameter.getSimpleName().toString();
+    return name.startsWith(prefix)
+        && name.length() > prefix.length()
+        && ASCII_DIGIT.matchesAllOf(name.substring(prefix.length()));
   }
 }

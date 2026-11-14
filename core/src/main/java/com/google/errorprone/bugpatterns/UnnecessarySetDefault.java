@@ -21,6 +21,8 @@ import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.CLASS_TYPE;
+import static com.google.errorprone.suppliers.Suppliers.OBJECT_TYPE;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.CharMatcher;
@@ -62,16 +64,14 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "UnnecessarySetDefault",
-    summary = "Unnecessary call to NullPointerTester#setDefault",
-    severity = SUGGESTION)
+@BugPattern(summary = "Unnecessary call to NullPointerTester#setDefault", severity = SUGGESTION)
 public class UnnecessarySetDefault extends BugChecker implements MethodInvocationTreeMatcher {
 
   private static final Matcher<ExpressionTree> SET_DEFAULT =
       instanceMethod()
           .onExactClass("com.google.common.testing.NullPointerTester")
-          .withSignature("<T>setDefault(java.lang.Class<T>,T)");
+          .named("setDefault")
+          .withParametersOfType(CLASS_TYPE, OBJECT_TYPE);
 
   @VisibleForTesting
   static final ImmutableMap<String, Matcher<ExpressionTree>> DEFAULTS =
@@ -206,7 +206,7 @@ public class UnnecessarySetDefault extends BugChecker implements MethodInvocatio
           .put("OptionalInt.class", factoryMatcher(OptionalInt.class, "empty"))
           .put("OptionalLong.class", factoryMatcher(OptionalLong.class, "empty"))
           .put("OptionalDouble.class", factoryMatcher(OptionalDouble.class, "empty"))
-          .build();
+          .buildOrThrow();
 
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
@@ -243,7 +243,7 @@ public class UnnecessarySetDefault extends BugChecker implements MethodInvocatio
   }
 
   private static Matcher<ExpressionTree> factoryMatcher(Class<?> clazz, String name) {
-    return staticMethod().onClass(clazz.getCanonicalName()).named(name).withParameters();
+    return staticMethod().onClass(clazz.getCanonicalName()).named(name).withNoParameters();
   }
 
   static Matcher<ExpressionTree> sourceMatcher(String source) {

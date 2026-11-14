@@ -47,20 +47,15 @@ public class MethodInvocation implements Matcher<ExpressionTree> {
 
   @Override
   public boolean matches(ExpressionTree expressionTree, VisitorState state) {
-    if (!(expressionTree instanceof MethodInvocationTree)) {
-      return false;
-    }
-
-    MethodInvocationTree tree = (MethodInvocationTree) expressionTree;
-
-    return methodSelectMatcher.matches(tree.getMethodSelect(), state)
+    return expressionTree instanceof MethodInvocationTree tree
+        && methodSelectMatcher.matches(tree.getMethodSelect(), state)
         && methodArgumentMatcher.matches(tree, state);
   }
 
   private static class MethodArgumentMatcher
       extends ChildMultiMatcher<MethodInvocationTree, ExpressionTree> {
 
-    public MethodArgumentMatcher(MatchType matchType, Matcher<ExpressionTree> nodeMatcher) {
+    MethodArgumentMatcher(MatchType matchType, Matcher<ExpressionTree> nodeMatcher) {
       super(matchType, nodeMatcher);
     }
 

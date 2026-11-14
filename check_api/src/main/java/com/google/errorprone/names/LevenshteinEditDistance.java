@@ -28,7 +28,7 @@ import com.google.common.primitives.Ints;
  *
  * @author eaftan@google.com (Eddie Aftandilian)
  */
-public class LevenshteinEditDistance {
+public final class LevenshteinEditDistance {
 
   private LevenshteinEditDistance() {
     /* disallow instantiation */
@@ -104,21 +104,6 @@ public class LevenshteinEditDistance {
     }
 
     return levMatrix[sourceLength][targetLength];
-  }
-
-  /**
-   * Returns a normalized edit distance between 0 and 1. This is useful if you are comparing or
-   * aggregating distances of different pairs of strings
-   */
-  public static double getNormalizedEditDistance(
-      String source, String target, boolean caseSensitive) {
-
-    if (isEmptyOrWhitespace(source) && isEmptyOrWhitespace(target)) {
-      return 0.0;
-    }
-
-    return (double) getEditDistance(source, target, caseSensitive)
-        / (double) getWorstCaseEditDistance(source.length(), target.length());
   }
 
   /** Calculate the worst case distance between two strings with the given lengths */

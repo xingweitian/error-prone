@@ -29,12 +29,94 @@ public class InjectedConstructorAnnotationsTest {
       CompilationTestHelper.newInstance(InjectedConstructorAnnotations.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("InjectedConstructorAnnotationsPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "InjectedConstructorAnnotationsPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.inject.BindingAnnotation;
+            import com.google.inject.Inject;
+
+            /** A positive test case for InjectedConstructorAnnotation. */
+            public class InjectedConstructorAnnotationsPositiveCases {
+
+              /** A binding annotation. */
+              @BindingAnnotation
+              public @interface TestBindingAnnotation {}
+
+              /** A class with an optionally injected constructor. */
+              public class TestClass1 {
+                @Inject(optional = true)
+                // BUG: Diagnostic contains:
+                public TestClass1() {}
+              }
+
+              /** A class with an injected constructor that has a binding annotation. */
+              public class TestClass2 {
+                @TestBindingAnnotation
+                @Inject
+                // BUG: Diagnostic contains:
+                public TestClass2() {}
+              }
+
+              /** A class whose constructor is optionally injected and has a binding annotation. */
+              public class TestClass3 {
+                @TestBindingAnnotation
+                @Inject(optional = true)
+                // BUG: Diagnostic contains:
+                public TestClass3() {}
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("InjectedConstructorAnnotationsNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "InjectedConstructorAnnotationsNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.inject.BindingAnnotation;
+            import com.google.inject.Inject;
+
+            /** A negative test case for InjectedConstructorAnnotation. */
+            public class InjectedConstructorAnnotationsNegativeCases {
+
+              private @interface TestAnnotation {}
+
+              @BindingAnnotation
+              private @interface TestBindingAnnotation {}
+
+              /** A class with a constructor that has no annotations. */
+              public class TestClass1 {
+                public TestClass1() {}
+              }
+
+              /** A class with a constructor that has a binding Annotation. */
+              public class TestClass2 {
+                @TestBindingAnnotation
+                public TestClass2() {}
+              }
+
+              /** A class with an injected constructor. */
+              public class TestClass3 {
+                @Inject
+                public TestClass3() {}
+              }
+
+              /** A class with an injected constructor that has a non-binding annotation. */
+              public class TestClass4 {
+                @Inject
+                @TestAnnotation
+                public TestClass4() {}
+              }
+            }
+            """)
+        .doTest();
   }
 }

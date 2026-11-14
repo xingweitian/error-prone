@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author kayco@google.com (Kayla Walker) */
+/**
+ * @author kayco@google.com (Kayla Walker)
+ */
 @RunWith(JUnit4.class)
 public class ExtendingJUnitAssertTest {
 
@@ -33,21 +35,28 @@ public class ExtendingJUnitAssertTest {
     refactoringTestHelper
         .addInputLines(
             "in/Foo.java",
-            "import org.junit.Assert;",
-            "class Foo extends Assert {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "}",
-            "}")
+            """
+            import org.junit.Assert;
+
+            class Foo extends Assert {
+              public void test() {
+                assertEquals(5, 5);
+              }
+            }
+            """)
         .addOutputLines(
             "in/Foo.java",
-            "import static org.junit.Assert.assertEquals;",
-            "import org.junit.Assert;",
-            "class Foo {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "}",
-            "}")
+            """
+            import static org.junit.Assert.assertEquals;
+
+            import org.junit.Assert;
+
+            class Foo {
+              public void test() {
+                assertEquals(5, 5);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -56,27 +65,34 @@ public class ExtendingJUnitAssertTest {
     refactoringTestHelper
         .addInputLines(
             "in/Foo.java",
-            "import org.junit.Assert;",
-            "class Foo<T extends String> extends Assert {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "assertNull(2);",
-            "assertNotNull(3);",
-            "}",
-            "}")
+            """
+            import org.junit.Assert;
+
+            class Foo<T extends String> extends Assert {
+              public void test() {
+                assertEquals(5, 5);
+                assertNull(2);
+                assertNotNull(3);
+              }
+            }
+            """)
         .addOutputLines(
             "in/Foo.java",
-            "import static org.junit.Assert.assertEquals;",
-            "import static org.junit.Assert.assertNotNull;",
-            "import static org.junit.Assert.assertNull;",
-            "import org.junit.Assert;",
-            "class Foo<T extends String> {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "assertNull(2);",
-            "assertNotNull(3);",
-            "}",
-            "}")
+            """
+            import static org.junit.Assert.assertEquals;
+            import static org.junit.Assert.assertNotNull;
+            import static org.junit.Assert.assertNull;
+
+            import org.junit.Assert;
+
+            class Foo<T extends String> {
+              public void test() {
+                assertEquals(5, 5);
+                assertNull(2);
+                assertNotNull(3);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -85,23 +101,30 @@ public class ExtendingJUnitAssertTest {
     refactoringTestHelper
         .addInputLines(
             "in/Foo.java",
-            "import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;",
-            "import org.junit.Assert;",
-            "abstract class Foo extends Assert implements ClassTreeMatcher {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "}",
-            "}")
+            """
+            import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+            import org.junit.Assert;
+
+            abstract class Foo extends Assert implements ClassTreeMatcher {
+              public void test() {
+                assertEquals(5, 5);
+              }
+            }
+            """)
         .addOutputLines(
             "in/Foo.java",
-            "import static org.junit.Assert.assertEquals;",
-            "import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;",
-            "import org.junit.Assert;",
-            "abstract class Foo implements ClassTreeMatcher {",
-            "public void test() {",
-            "assertEquals(5, 5);",
-            "}",
-            "}")
+            """
+            import static org.junit.Assert.assertEquals;
+
+            import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
+            import org.junit.Assert;
+
+            abstract class Foo implements ClassTreeMatcher {
+              public void test() {
+                assertEquals(5, 5);
+              }
+            }
+            """)
         .doTest();
   }
 }

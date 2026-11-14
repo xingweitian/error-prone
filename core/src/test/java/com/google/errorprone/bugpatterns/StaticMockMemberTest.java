@@ -35,44 +35,53 @@ public class StaticMockMemberTest {
       CompilationTestHelper.newInstance(StaticMockMember.class, getClass());
 
   @Test
-  public void testPositiveCases() {
+  public void positiveCases() {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.mockito.Mock;",
-            "@RunWith(JUnit4.class)",
-            "public class Test {",
-            "  @Mock private static String mockedPrivateString;",
-            "  @Mock static String mockedString;",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              @Mock private static String mockedPrivateString;
+              @Mock static String mockedString;
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.mockito.Mock;",
-            "@RunWith(JUnit4.class)",
-            "public class Test {",
-            "  @Mock private String mockedPrivateString;",
-            "  @Mock String mockedString;",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              @Mock private String mockedPrivateString;
+              @Mock String mockedString;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases() {
+  public void negativeCases() {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.mockito.Mock;",
-            "@RunWith(JUnit4.class)",
-            "public class Test {",
-            "  @Mock private String mockedPrivateString;",
-            "  @Mock String mockedString;",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              @Mock private String mockedPrivateString;
+              @Mock String mockedString;
+            }
+            """)
         .doTest();
   }
 
@@ -81,14 +90,18 @@ public class StaticMockMemberTest {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.mockito.Mock;",
-            "@RunWith(JUnit4.class)",
-            "public class Test {",
-            "  @SuppressWarnings(\"StaticMockMember\")",
-            "  @Mock private static String mockedPrivateString;",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              @SuppressWarnings("StaticMockMember")
+              @Mock
+              private static String mockedPrivateString;
+            }
+            """)
         .doTest();
   }
 
@@ -97,17 +110,21 @@ public class StaticMockMemberTest {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "import org.junit.runner.RunWith;",
-            "import org.junit.runners.JUnit4;",
-            "import org.mockito.Mock;",
-            "@RunWith(JUnit4.class)",
-            "public class Test {",
-            "  // BUG: Diagnostic contains: StaticMockMember",
-            "  @Mock private static String mockedPrivateString;",
-            "  static String someStaticMethod() {",
-            "    return mockedPrivateString;",
-            "  }",
-            "}")
+            """
+            import org.junit.runner.RunWith;
+            import org.junit.runners.JUnit4;
+            import org.mockito.Mock;
+
+            @RunWith(JUnit4.class)
+            public class Test {
+              // BUG: Diagnostic contains: StaticMockMember
+              @Mock private static String mockedPrivateString;
+
+              static String someStaticMethod() {
+                return mockedPrivateString;
+              }
+            }
+            """)
         .doTest();
   }
 }

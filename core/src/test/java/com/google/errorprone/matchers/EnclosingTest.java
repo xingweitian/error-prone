@@ -53,7 +53,8 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
         return false;
       }
       Tree parent = state.getPath().getParentPath().getLeaf();
-      return (parent instanceof ForLoopTree && (interestingPartOfLoop((ForLoopTree) parent) == t));
+      return (parent instanceof ForLoopTree forLoopTree
+          && (interestingPartOfLoop(forLoopTree) == t));
     }
 
     abstract Object interestingPartOfLoop(ForLoopTree loop);
@@ -93,12 +94,14 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
   public void usedDirectlyInLoopCondition() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    boolean foo = true;",
-        "    for (int i = 0; foo; i++) {}",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            boolean foo = true;
+            for (int i = 0; foo; i++) {}
+          }
+        }
+        """);
     assertCompiles(fooIsUsedUnderLoopCondition(false));
     assertCompiles(fooIsChildOfLoopCondition(false));
     assertCompiles(fooIsUsedUnderLoopStatement(false));
@@ -110,12 +113,14 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
   public void usedAsChildTreeOfLoopCondition() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    boolean foo = true;",
-        "    for (int i = 0; !foo; i++) {}",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            boolean foo = true;
+            for (int i = 0; !foo; i++) {}
+          }
+        }
+        """);
     assertCompiles(fooIsUsedUnderLoopCondition(true));
     assertCompiles(fooIsChildOfLoopCondition(true));
     assertCompiles(fooIsUsedUnderLoopStatement(false));
@@ -127,12 +132,14 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
   public void usedInSubTreeOfLoopCondition() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    boolean foo = true;",
-        "    for (int i = 0; !!!!!!!!!foo; i++) {}",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            boolean foo = true;
+            for (int i = 0; !!!!!!!!!foo; i++) {}
+          }
+        }
+        """);
     assertCompiles(fooIsUsedUnderLoopCondition(true));
     assertCompiles(fooIsChildOfLoopCondition(false));
     assertCompiles(fooIsUsedUnderLoopStatement(false));
@@ -144,14 +151,16 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
   public void usedInStatement() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    boolean foo = true;",
-        "    for (int i = 0; i < 100; i++) {",
-        "      foo = !foo;",
-        "    }",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            boolean foo = true;
+            for (int i = 0; i < 100; i++) {
+              foo = !foo;
+            }
+          }
+        }
+        """);
     assertCompiles(fooIsUsedUnderLoopCondition(false));
     assertCompiles(fooIsChildOfLoopCondition(false));
     assertCompiles(fooIsUsedUnderLoopStatement(true));
@@ -163,12 +172,14 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
   public void usedElsewhereInLoop() {
     writeFile(
         "A.java",
-        "public class A {",
-        "  A() {",
-        "    boolean foo = true;",
-        "    for (int i = foo ? 0 : 1; i < 100; foo = !foo) {}",
-        "  }",
-        "}");
+        """
+        public class A {
+          A() {
+            boolean foo = true;
+            for (int i = foo ? 0 : 1; i < 100; foo = !foo) {}
+          }
+        }
+        """);
     assertCompiles(fooIsUsedUnderLoopCondition(false));
     assertCompiles(fooIsChildOfLoopCondition(false));
     assertCompiles(fooIsUsedUnderLoopStatement(false));
@@ -195,7 +206,7 @@ public class EnclosingTest extends CompilerBasedAbstractTest {
     return fooMatches(shouldMatch, USED_UNDER_LOOP_STATEMENT_ACCORDING_TO_BLOCK_OR_CASE);
   }
 
-  private Scanner fooMatches(final boolean shouldMatch, final Matcher<Tree> matcher) {
+  private Scanner fooMatches(boolean shouldMatch, Matcher<Tree> matcher) {
     ScannerTest test =
         new ScannerTest() {
           boolean matched = false;

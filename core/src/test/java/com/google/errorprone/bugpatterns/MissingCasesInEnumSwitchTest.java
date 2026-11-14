@@ -16,10 +16,9 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static org.junit.Assume.assumeTrue;
+import static com.google.common.truth.TruthJUnit.assume;
 
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -31,117 +30,239 @@ public class MissingCasesInEnumSwitchTest {
       CompilationTestHelper.newInstance(MissingCasesInEnumSwitch.class, getClass());
 
   @Test
-  public void testExhaustive() {
+  public void exhaustive() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "      case THREE:",
-            "        System.err.println(\"found it!\");",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                  case THREE:
+                    System.err.println("found it!");
+                    break;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testExhaustive_multipleCaseExpressions() {
-    assumeTrue(RuntimeVersion.isAtLeast14());
+  public void exhaustive_allowsQualifying() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE, TWO -> {}",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case Case.ONE:
+                  case Case.TWO:
+                  case Case.THREE:
+                    System.err.println("found it!");
+                    break;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNonExhaustive_withDefault() {
+  public void exhaustive_multipleCaseExpressions() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  void m(Case c) {",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        System.err.println(\"found it!\");",
-            "        break;",
-            "      default:",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE, TWO -> {}
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNonExhaustive() {
+  public void nonExhaustive_withDefault() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE }",
-            "  void m(Case c) {",
-            "    // BUG: Diagnostic contains: THREE",
-            "    switch (c) {",
-            "      case ONE:",
-            "      case TWO:",
-            "        System.err.println(\"found it!\");",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    System.err.println("found it!");
+                    break;
+                  default:
+                    break;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNonExhaustive_manyCases() {
+  public void nonExhaustive_withCombinedDefault() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT }",
-            "  void m(Case c) {",
-            "    // BUG: Diagnostic contains: TWO, THREE, FOUR, and 4 others",
-            "    switch (c) {",
-            "      case ONE:",
-            "        System.err.println(\"found it!\");",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE, TWO -> System.err.println("found it!");
+                  case null, default -> {}
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNonExhaustive_nonEnum() {
+  public void nonExhaustive_withDefaultForSkew() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void m(int i) {",
-            "    switch (i) {",
-            "      case 1:",
-            "      case 2:",
-            "        System.err.println(\"found it!\");",
-            "        break;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains:
+                // Non-exhaustive switch; either add a default or handle the remaining cases
+                // THREE
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    System.err.println("found it!");
+                    break;
+                  default: // fallback for library skew
+                    break;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains: THREE
+                switch (c) {
+                  case ONE:
+                  case TWO:
+                    System.err.println("found it!");
+                    break;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive_manyCases() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE,
+                FOUR,
+                FIVE,
+                SIX,
+                SEVEN,
+                EIGHT
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains: TWO, THREE, FOUR, and 4 others
+                switch (c) {
+                  case ONE:
+                    System.err.println("found it!");
+                    break;
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive_nonEnum() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void m(int i) {
+                switch (i) {
+                  case 1:
+                  case 2:
+                    System.err.println("found it!");
+                    break;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -150,14 +271,377 @@ public class MissingCasesInEnumSwitchTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  enum Case { ONE, TWO }",
-            "  void m(Case e) {",
-            "    // BUG: Diagnostic contains: ONE, TWO",
-            "    switch (e) {",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case e) {
+                // BUG: Diagnostic contains: ONE, TWO
+                switch (e) {
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive_arrowStatement() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains: TWO
+                switch (c) {
+                  case ONE -> {
+                    System.err.println("found it!");
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive_multi() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains: THREE
+                switch (c) {
+                  case ONE, TWO:
+                    System.err.println("found it!");
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void nonExhaustive_multiArrow() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains: THREE
+                switch (c) {
+                  case ONE, TWO -> {
+                    System.err.println("found it!");
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void i4684() {
+    compilationHelper
+        .addSourceLines(
+            "ErrorProneBug.java",
+            """
+            public class ErrorProneBug {
+              enum A {
+                A1,
+                A2,
+                A3
+              }
+
+              public static void main(String[] args) {
+                A a = null;
+
+                switch (a) {
+                  case null -> {
+                    System.out.println("null");
+                  }
+                  case A1 -> {
+                    System.out.println("A1");
+                  }
+                  case A2 -> {
+                    System.out.println("A2");
+                  }
+                  case A3 -> {
+                    System.out.println("A3");
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression_exhaustive() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                int x =
+                    switch (c) {
+                      case ONE -> 1;
+                      case TWO -> 2;
+                      case THREE -> 3;
+                    };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression_hasDefault() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                int x =
+                    switch (c) {
+                      case ONE -> 1;
+                      default -> -1;
+                    };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression_onlyDefault() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                int x =
+                    switch (c) {
+                      default -> -1;
+                    };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression_nonExhaustive_withDefaultForSkew() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                int x =
+                    // BUG: Diagnostic contains:
+                    // Non-exhaustive switch; ensure all cases are handled in addition to the default case
+                    // THREE
+                    switch (c) {
+                      case ONE -> 1;
+                      case TWO -> 2;
+                      // fallback for library skew
+                      default -> -1;
+                    };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switch_exhaustive_noError() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> System.out.println("ONE");
+                  case TWO -> System.out.println("TWO");
+                  case Case ccc -> System.out.println("OTHER");
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switch_exhaustiveTrueGuard_noError() {
+    assume().that(Runtime.version().feature()).isAtLeast(22);
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                switch (c) {
+                  case ONE -> {
+                    System.out.println("ONE");
+                  }
+                  case TWO -> {
+                    System.out.println("TWO");
+                  }
+                  case Case _ when (true) -> {
+                    System.out.println("OTHER");
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switch_nonExhaustiveNonLiteralGuard_error() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                // BUG: Diagnostic contains:
+                switch (c) {
+                  case ONE -> {
+                    System.out.println("ONE");
+                  }
+                  case TWO -> {
+                    System.out.println("TWO");
+                  }
+                  case Case ccc when false || true -> {
+                    System.out.println("OTHER");
+                  }
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression_exhaustive_noError() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              enum Case {
+                ONE,
+                TWO,
+                THREE
+              }
+
+              void m(Case c) {
+                int x =
+                    switch (c) {
+                      case ONE -> 1;
+                      case TWO -> 2;
+                      case Case ccc -> 3;
+                    };
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void defaultInRuleCase() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            public class Test {
+              public enum E {
+                A,
+                B
+              }
+
+              public static Object test(E e) {
+                return switch (e) {
+                  case A:
+                    yield new Object();
+                  default:
+                    yield null;
+                };
+              }
+            }
+            """)
         .doTest();
   }
 }

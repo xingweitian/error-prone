@@ -37,9 +37,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** @author mariasam@google.com (Maria Sam) */
+/**
+ * @author mariasam@google.com (Maria Sam)
+ */
 @BugPattern(
-    name = "IncrementInForLoopAndHeader",
     summary = "This for loop increments the same variable in the header and in the body",
     severity = WARNING)
 public class IncrementInForLoopAndHeader extends BugChecker implements ForLoopTreeMatcher {
@@ -56,17 +57,15 @@ public class IncrementInForLoopAndHeader extends BugChecker implements ForLoopTr
     ImmutableSet<Symbol> incrementedSymbols =
         updates.stream()
             .filter(expStateTree -> expStateTree.getExpression() instanceof UnaryTree)
-            .map(
-                expStateTree ->
-                    ASTHelpers.getSymbol(
-                        ((UnaryTree) expStateTree.getExpression()).getExpression()))
+            .map(expStateTree ->
+                ASTHelpers.getSymbol(((UnaryTree) expStateTree.getExpression()).getExpression()))
             .filter(Objects::nonNull)
             .collect(toImmutableSet());
 
     // track if they are updated in the body without a conditional surrounding them
     StatementTree body = forLoopTree.getStatement();
     List<? extends StatementTree> statementTrees =
-        body instanceof BlockTree ? ((BlockTree) body).getStatements() : ImmutableList.of(body);
+        body instanceof BlockTree blockTree ? blockTree.getStatements() : ImmutableList.of(body);
     for (StatementTree s : statementTrees) {
       if (!CONDITIONALS.contains(s.getKind())) {
         Optional<Symbol> opSymbol = returnUnarySym(s);
@@ -80,9 +79,8 @@ public class IncrementInForLoopAndHeader extends BugChecker implements ForLoopTr
   }
 
   private static Optional<Symbol> returnUnarySym(StatementTree s) {
-    if (s instanceof ExpressionStatementTree) {
-      if (((ExpressionStatementTree) s).getExpression() instanceof UnaryTree) {
-        UnaryTree unaryTree = (UnaryTree) ((ExpressionStatementTree) s).getExpression();
+    if (s instanceof ExpressionStatementTree expressionStatementTree) {
+      if (expressionStatementTree.getExpression() instanceof UnaryTree unaryTree) {
         return Optional.ofNullable(ASTHelpers.getSymbol(unaryTree.getExpression()));
       }
     }

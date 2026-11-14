@@ -56,7 +56,15 @@ public class ConstructorOfClassTest extends CompilerBasedAbstractTest {
 
   @Test
   public void shouldMatchSingleConstructor() {
-    writeFile("A.java", "package com.google;", "public class A {", "  private A() {}", "}");
+    writeFile(
+        "A.java",
+        """
+        package com.google;
+
+        public class A {
+          private A() {}
+        }
+        """);
     assertCompiles(
         classMatches(
             /* shouldMatch= */ true,
@@ -69,7 +77,13 @@ public class ConstructorOfClassTest extends CompilerBasedAbstractTest {
 
   @Test
   public void shouldNotMatchNoConstructors() {
-    writeFile("A.java", "package com.google;", "public class A {", "}");
+    writeFile(
+        "A.java",
+        """
+        package com.google;
+
+        public class A {}
+        """);
     assertCompiles(
         classMatches(
             /* shouldMatch= */ false,
@@ -82,7 +96,15 @@ public class ConstructorOfClassTest extends CompilerBasedAbstractTest {
 
   @Test
   public void shouldNotMatchNonmatchingConstructor() {
-    writeFile("A.java", "package com.google;", "public class A {", "  public A() {}", "}");
+    writeFile(
+        "A.java",
+        """
+        package com.google;
+
+        public class A {
+          public A() {}
+        }
+        """);
     assertCompiles(
         classMatches(
             /* shouldMatch= */ false,
@@ -94,14 +116,18 @@ public class ConstructorOfClassTest extends CompilerBasedAbstractTest {
   }
 
   @Test
-  public void testMultipleConstructors() {
+  public void multipleConstructors() {
     writeFile(
         "A.java",
-        "package com.google;",
-        "public class A {",
-        "  private A() {}",
-        "  public A(int i) {}",
-        "}");
+        """
+        package com.google;
+
+        public class A {
+          private A() {}
+
+          public A(int i) {}
+        }
+        """);
     assertCompiles(
         classMatches(
             /* shouldMatch= */ true,
@@ -113,10 +139,10 @@ public class ConstructorOfClassTest extends CompilerBasedAbstractTest {
   }
 
   private abstract class ScannerTest extends Scanner {
-    public abstract void assertDone();
+    abstract void assertDone();
   }
 
-  private Scanner classMatches(final boolean shouldMatch, final ConstructorOfClass toMatch) {
+  private Scanner classMatches(boolean shouldMatch, ConstructorOfClass toMatch) {
     ScannerTest test =
         new ScannerTest() {
           private boolean matched = false;

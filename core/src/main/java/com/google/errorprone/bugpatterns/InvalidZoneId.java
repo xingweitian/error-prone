@@ -37,7 +37,6 @@ import java.time.ZoneId;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "InvalidZoneId",
     summary = "Invalid zone identifier. ZoneId.of(String) will throw exception at runtime.",
     severity = ERROR)
 public class InvalidZoneId extends BugChecker implements MethodInvocationTreeMatcher {
@@ -49,7 +48,7 @@ public class InvalidZoneId extends BugChecker implements MethodInvocationTreeMat
           .withParameters("java.lang.String");
 
   @Override
-  public Description matchMethodInvocation(MethodInvocationTree tree, final VisitorState state) {
+  public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     if (!METHOD_MATCHER.matches(tree, state)) {
       return Description.NO_MATCH;
     }
@@ -58,7 +57,7 @@ public class InvalidZoneId extends BugChecker implements MethodInvocationTreeMat
       // Value isn't a compile-time constant, so we can't know if it's unsafe.
       return Description.NO_MATCH;
     }
-    if (isValidID(value)) {
+    if (isValidId(value)) {
       return Description.NO_MATCH;
     }
 
@@ -66,7 +65,7 @@ public class InvalidZoneId extends BugChecker implements MethodInvocationTreeMat
   }
 
   // https://docs.oracle.com/javase/8/docs/api/java/time/ZoneId.html#of-java.lang.String-
-  private static boolean isValidID(String value) {
+  private static boolean isValidId(String value) {
     try {
       ZoneId.of(value);
     } catch (DateTimeException e) { // ZoneRulesException is subclass of DateTimeException

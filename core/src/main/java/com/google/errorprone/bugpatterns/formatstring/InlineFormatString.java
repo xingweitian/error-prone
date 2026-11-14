@@ -17,26 +17,21 @@
 package com.google.errorprone.bugpatterns.formatstring;
 
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.bugpatterns.formatstring.LenientFormatStringUtils.getLenientFormatStringPosition;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
-import static com.google.errorprone.matchers.Matchers.allOf;
-import static com.google.errorprone.matchers.Matchers.anyOf;
-import static com.google.errorprone.matchers.Matchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.constValue;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
-import static com.google.errorprone.util.ASTHelpers.isSubtype;
+import static com.google.errorprone.util.ASTHelpers.isConsideredFinal;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Multimap;
 import com.google.common.collect.MultimapBuilder;
+import com.google.common.collect.SetMultimap;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.FormatMethod;
-import com.google.errorprone.annotations.FormatString;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.CompilationUnitTreeMatcher;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
@@ -47,81 +42,33 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
-import com.sun.tools.javac.util.List;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.lang.model.element.ElementKind;
-import org.checkerframework.checker.nullness.qual.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "InlineFormatString",
     summary =
         "Prefer to create format strings inline, instead of extracting them to a single-use"
             + " constant",
     severity = WARNING)
 public class InlineFormatString extends BugChecker implements CompilationUnitTreeMatcher {
 
-  private static final Matcher<ExpressionTree> PRECONDITIONS_CHECK =
-      allOf(
-          anyOf(
-              staticMethod().onClass("com.google.common.base.Preconditions"),
-              staticMethod().onClass("com.google.common.base.Verify")),
-          InlineFormatString::secondParameterIsString);
-
-  private static boolean secondParameterIsString(ExpressionTree tree, VisitorState state) {
-    Symbol symbol = getSymbol(tree);
-    if (!(symbol instanceof MethodSymbol)) {
-      return false;
-    }
-    MethodSymbol methodSymbol = (MethodSymbol) symbol;
-    return methodSymbol.getParameters().size() >= 2
-        && isSubtype(methodSymbol.getParameters().get(1).type, state.getSymtab().stringType, state);
-  }
-
-  @Nullable
-  private static ExpressionTree formatString(MethodInvocationTree tree, VisitorState state) {
+  private static @Nullable ExpressionTree formatString(
+      MethodInvocationTree tree, VisitorState state) {
     ImmutableList<ExpressionTree> args = FormatStringUtils.formatMethodArguments(tree, state);
     if (!args.isEmpty()) {
       return args.get(0);
     }
-    if (PRECONDITIONS_CHECK.matches(tree, state)) {
-      return tree.getArguments().get(1);
-    }
-    return formatMethodAnnotationArguments(tree, state);
-  }
-
-  @Nullable
-  private static ExpressionTree formatMethodAnnotationArguments(
-      MethodInvocationTree tree, VisitorState state) {
-    MethodSymbol sym = getSymbol(tree);
-    if (sym == null) {
-      return null;
-    }
-    if (!ASTHelpers.hasAnnotation(sym, FormatMethod.class, state)) {
-      return null;
-    }
-    return tree.getArguments().get(formatStringIndex(state, sym));
-  }
-
-  private static int formatStringIndex(VisitorState state, MethodSymbol sym) {
-    int idx = 0;
-    List<VarSymbol> parameters = sym.getParameters();
-    for (VarSymbol p : parameters) {
-      if (ASTHelpers.hasAnnotation(p, FormatString.class, state)) {
-        return idx;
-      }
-      idx++;
-    }
-    return 0;
+    int index = getLenientFormatStringPosition(tree, state);
+    return index != -1 ? tree.getArguments().get(index) : null;
   }
 
   @Override
   public Description matchCompilationUnit(CompilationUnitTree tree, VisitorState state) {
-    Multimap<Symbol, Tree> uses = MultimapBuilder.linkedHashKeys().linkedHashSetValues().build();
+    SetMultimap<Symbol, Tree> uses = MultimapBuilder.linkedHashKeys().linkedHashSetValues().build();
     Map<Symbol, VariableTree> declarations = new LinkedHashMap<>();
     // find calls to String.format and similar where the format string is a private compile-time
     // constant field
@@ -139,13 +86,20 @@ public class InlineFormatString extends BugChecker implements CompilationUnitTre
               return;
             }
             Symbol variable = getSymbol(arg);
-            if (variable == null
-                || variable.getKind() != ElementKind.FIELD
-                || !variable.isPrivate()
-                || ASTHelpers.constValue(arg, String.class) == null) {
+            if (variable == null || !isConstant(variable, arg)) {
               return;
             }
             uses.put(variable, arg);
+          }
+
+          private boolean isConstant(Symbol variable, ExpressionTree arg) {
+            return switch (variable.getKind()) {
+              case FIELD -> variable.isPrivate() && constValue(arg, String.class) != null;
+              // locals don't have a computed constant value, this will be handled below when we
+              // scan for constant initializers
+              case LOCAL_VARIABLE -> isConsideredFinal(variable);
+              default -> false;
+            };
           }
         },
         null);
@@ -177,11 +131,11 @@ public class InlineFormatString extends BugChecker implements CompilationUnitTre
         },
         null);
     // find the field declarations
-    new SuppressibleTreePathScanner<Void, Void>() {
+    new SuppressibleTreePathScanner<Void, Void>(state) {
       @Override
       public Void visitVariable(VariableTree tree, Void unused) {
         VarSymbol sym = getSymbol(tree);
-        if (sym != null && uses.containsKey(sym)) {
+        if (uses.containsKey(sym)) {
           declarations.put(sym, tree);
         }
         return super.visitVariable(tree, null);

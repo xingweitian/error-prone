@@ -35,157 +35,219 @@ public class AutoValueFinalMethodsTest {
       CompilationTestHelper.newInstance(AutoValueFinalMethods.class, getClass());
 
   @Test
-  public void testFinalAdditionToEqHcTs() {
+  public void finalAdditionToEqHcTs() {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  abstract String valueOne();",
-            "  abstract String valueTwo();",
-            "  static Test create(String valueOne, String valueTwo) {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  public int hashCode() {",
-            "    return 1;",
-            "  }",
-            "  @Override",
-            "  public String toString() {",
-            "    return \"Hakuna Matata\";",
-            "  }",
-            "  @Override",
-            "  public boolean equals(Object obj) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            abstract class Test {
+              abstract String valueOne();
+
+              abstract String valueTwo();
+
+              static Test create(String valueOne, String valueTwo) {
+                return null;
+              }
+
+              @Override
+              public int hashCode() {
+                return 1;
+              }
+
+              @Override
+              public String toString() {
+                return "Hakuna Matata";
+              }
+
+              @Override
+              public boolean equals(Object obj) {
+                return true;
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  abstract String valueOne();",
-            "  abstract String valueTwo();",
-            "  static Test create(String valueOne, String valueTwo) {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  public final int hashCode() {",
-            "    return 1;",
-            "  }",
-            "  @Override",
-            "  public final String toString() {",
-            "    return \"Hakuna Matata\";",
-            "  }",
-            "  @Override",
-            "  public final boolean equals(Object obj) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            abstract class Test {
+              abstract String valueOne();
+
+              abstract String valueTwo();
+
+              static Test create(String valueOne, String valueTwo) {
+                return null;
+              }
+
+              @Override
+              public final int hashCode() {
+                return 1;
+              }
+
+              @Override
+              public final String toString() {
+                return "Hakuna Matata";
+              }
+
+              @Override
+              public final boolean equals(Object obj) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases() {
+  public void suppression() {
     compilationHelper
         .addSourceLines(
-            "out/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "import com.google.auto.value.extension.memoized.Memoized;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  abstract String valueOne();",
-            "  abstract String valueTwo();",
-            "  static Test create(String valueOne, String valueTwo) {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  public abstract int hashCode(); ",
-            "  @Override",
-            "  @Memoized",
-            "  public String toString() {",
-            "    return \"Hakuna Matata\";",
-            "  }",
-            "  @Override",
-            "  public final boolean equals(Object obj) {",
-            "    return true;",
-            "  }",
-            "  private int privateNonEqTsHcMethod() {",
-            "    return 2;",
-            "  }",
-            "  public final String publicFinalNonEqTsHcMethod() {",
-            "    return \"Hakuna Matata\";",
-            "  }",
-            "  public boolean publicNonEqTsHcMethod(Object obj) {",
-            "    return true;",
-            "  }",
-            "}")
+            "in/Test.java",
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            abstract class Test {
+              abstract String valueOne();
+
+              abstract String valueTwo();
+
+              @SuppressWarnings("AutoValueFinalMethods")
+              @Override
+              public int hashCode() {
+                return 1;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testAbstractMemoizedNegativeCase() {
+  public void negativeCases() {
     compilationHelper
         .addSourceLines(
             "out/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "import com.google.auto.value.extension.memoized.Memoized;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  static Test create() {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  @Memoized",
-            "  public abstract int hashCode(); ",
-            "}")
+            """
+            import com.google.auto.value.AutoValue;
+            import com.google.auto.value.extension.memoized.Memoized;
+
+            @AutoValue
+            abstract class Test {
+              abstract String valueOne();
+
+              abstract String valueTwo();
+
+              static Test create(String valueOne, String valueTwo) {
+                return null;
+              }
+
+              @Override
+              public abstract int hashCode();
+
+              @Override
+              @Memoized
+              public String toString() {
+                return "Hakuna Matata";
+              }
+
+              @Override
+              public final boolean equals(Object obj) {
+                return true;
+              }
+
+              private int privateNonEqTsHcMethod() {
+                return 2;
+              }
+
+              public final String publicFinalNonEqTsHcMethod() {
+                return "Hakuna Matata";
+              }
+
+              public boolean publicNonEqTsHcMethod(Object obj) {
+                return true;
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testDiagnosticString() {
+  public void abstractMemoizedNegativeCase() {
     compilationHelper
         .addSourceLines(
             "out/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "import com.google.auto.value.extension.memoized.Memoized;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  static Test create() {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  // BUG: Diagnostic contains: Make equals final in AutoValue classes",
-            "  public boolean equals(Object obj) {",
-            "    return true;",
-            "  }",
-            "}")
+            """
+            import com.google.auto.value.AutoValue;
+            import com.google.auto.value.extension.memoized.Memoized;
+
+            @AutoValue
+            abstract class Test {
+              static Test create() {
+                return null;
+              }
+
+              @Override
+              @Memoized
+              public abstract int hashCode();
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testDiagnosticStringWithMultipleMethodMatches() {
+  public void diagnosticString() {
     compilationHelper
         .addSourceLines(
             "out/Test.java",
-            "import com.google.auto.value.AutoValue;",
-            "import com.google.auto.value.extension.memoized.Memoized;",
-            "@AutoValue",
-            "abstract class Test {",
-            "  static Test create() {",
-            "    return null;",
-            "  }",
-            "  @Override",
-            "  // BUG: Diagnostic contains: Make equals, hashCode final in AutoValue classes",
-            "  public boolean equals(Object obj) {",
-            "    return true;",
-            "  }",
-            "  @Override",
-            "  public int hashCode() {",
-            "    return 1;",
-            "  }",
-            "}")
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            abstract class Test {
+              static Test create() {
+                return null;
+              }
+
+              @Override
+              // BUG: Diagnostic contains: Make equals final in AutoValue classes
+              public boolean equals(Object obj) {
+                return true;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void diagnosticStringWithMultipleMethodMatches() {
+    compilationHelper
+        .addSourceLines(
+            "out/Test.java",
+            """
+            import com.google.auto.value.AutoValue;
+
+            @AutoValue
+            abstract class Test {
+              static Test create() {
+                return null;
+              }
+
+              @Override
+              // BUG: Diagnostic contains: Make equals, hashCode final in AutoValue classes
+              public boolean equals(Object obj) {
+                return true;
+              }
+
+              @Override
+              public int hashCode() {
+                return 1;
+              }
+            }
+            """)
         .doTest();
   }
 }

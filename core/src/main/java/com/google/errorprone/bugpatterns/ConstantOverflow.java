@@ -19,6 +19,7 @@ package com.google.errorprone.bugpatterns;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasImplicitType;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
 
 import com.google.common.math.IntMath;
@@ -46,14 +47,11 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.SimpleTreeVisitor;
 import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Type;
-import javax.annotation.Nullable;
 import javax.lang.model.type.TypeKind;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "ConstantOverflow",
-    summary = "Compile-time constant expression overflows",
-    severity = ERROR)
+@BugPattern(summary = "Compile-time constant expression overflows", severity = ERROR)
 public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
 
   @Override
@@ -82,8 +80,7 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
   /**
    * If the left operand of an int binary expression is an int literal, suggest making it a long.
    */
-  @Nullable
-  private static Fix longFix(ExpressionTree expr, VisitorState state) {
+  private static @Nullable Fix longFix(ExpressionTree expr, VisitorState state) {
     BinaryTree binExpr = null;
     while (expr instanceof BinaryTree) {
       binExpr = (BinaryTree) expr;
@@ -98,8 +95,11 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
     }
     SuggestedFix.Builder fix = SuggestedFix.builder().postfixWith(expr, "L");
     Tree parent = state.getPath().getParentPath().getLeaf();
-    if (parent instanceof VariableTree && isSameType(getType(parent), intType, state)) {
-      fix.replace(((VariableTree) parent).getType(), "long");
+    if (parent instanceof VariableTree variableTree
+        && isSameType(getType(parent), intType, state)) {
+      if (!hasImplicitType(variableTree, state)) {
+        fix.replace(variableTree.getType(), "long");
+      }
     }
     return fix.build();
   }
@@ -109,7 +109,7 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
       new SimpleTreeVisitor<Number, Void>() {
 
         @Override
-        public Number visitConditionalExpression(ConditionalExpressionTree node, Void p) {
+        public @Nullable Number visitConditionalExpression(ConditionalExpressionTree node, Void p) {
           Number ifTrue = node.getTrueExpression().accept(this, null);
           Number ifFalse = node.getFalseExpression().accept(this, null);
           Boolean condition = ASTHelpers.constValue(node.getCondition(), Boolean.class);
@@ -125,10 +125,10 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
         }
 
         @Override
-        public Number visitUnary(UnaryTree node, Void p) {
+        public @Nullable Number visitUnary(UnaryTree node, Void p) {
           Number value = node.getExpression().accept(this, null);
           if (value == null) {
-            return value;
+            return null;
           }
           if (value instanceof Long) {
             return unop(node.getKind(), value.longValue());
@@ -138,7 +138,7 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
         }
 
         @Override
-        public Number visitBinary(BinaryTree node, Void p) {
+        public @Nullable Number visitBinary(BinaryTree node, Void p) {
           Number lhs = node.getLeftOperand().accept(this, null);
           Number rhs = node.getRightOperand().accept(this, null);
           if (lhs == null || rhs == null) {
@@ -146,20 +146,19 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
           }
           // assume that e.g. `Integer.MIN_VALUE - 1` is intentional
           switch (node.getKind()) {
-            case MINUS:
+            case MINUS -> {
               if ((lhs instanceof Long && lhs.longValue() == Long.MIN_VALUE)
                   || (lhs instanceof Integer && lhs.intValue() == Integer.MIN_VALUE)) {
                 return null;
               }
-              break;
-            case PLUS:
+            }
+            case PLUS -> {
               if ((lhs instanceof Long && lhs.longValue() == Long.MAX_VALUE)
                   || (lhs instanceof Integer && lhs.intValue() == Integer.MAX_VALUE)) {
                 return null;
               }
-              break;
-            default:
-              break;
+            }
+            default -> {}
           }
           if (lhs instanceof Long || rhs instanceof Long) {
             return binop(node.getKind(), lhs.longValue(), rhs.longValue());
@@ -169,15 +168,15 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
         }
 
         @Override
-        public Number visitTypeCast(TypeCastTree node, Void p) {
+        public @Nullable Number visitTypeCast(TypeCastTree node, Void p) {
           Number value = node.getExpression().accept(this, null);
           if (value == null) {
             return null;
           }
-          if (!(node.getType() instanceof PrimitiveTypeTree)) {
+          if (!(node.getType() instanceof PrimitiveTypeTree primitiveTypeTree)) {
             return null;
           }
-          TypeKind kind = ((PrimitiveTypeTree) node.getType()).getPrimitiveTypeKind();
+          TypeKind kind = primitiveTypeTree.getPrimitiveTypeKind();
           return cast(kind, value);
         }
 
@@ -197,108 +196,70 @@ public class ConstantOverflow extends BugChecker implements BinaryTreeMatcher {
         }
       };
 
-  private static Long unop(Kind kind, long value) {
-    switch (kind) {
-      case UNARY_PLUS:
-        return +value;
-      case UNARY_MINUS:
-        return -value;
-      case BITWISE_COMPLEMENT:
-        return ~value;
-      default:
-        return null;
-    }
+  private static @Nullable Long unop(Kind kind, long value) {
+    return switch (kind) {
+      case UNARY_PLUS -> +value;
+      case UNARY_MINUS -> -value;
+      case BITWISE_COMPLEMENT -> ~value;
+      default -> null;
+    };
   }
 
-  private static Integer unop(Kind kind, int value) {
-    switch (kind) {
-      case UNARY_PLUS:
-        return +value;
-      case UNARY_MINUS:
-        return -value;
-      case BITWISE_COMPLEMENT:
-        return ~value;
-      default:
-        return null;
-    }
+  private static @Nullable Integer unop(Kind kind, int value) {
+    return switch (kind) {
+      case UNARY_PLUS -> +value;
+      case UNARY_MINUS -> -value;
+      case BITWISE_COMPLEMENT -> ~value;
+      default -> null;
+    };
   }
 
-  static Long binop(Kind kind, long lhs, long rhs) {
-    switch (kind) {
-      case MULTIPLY:
-        return LongMath.checkedMultiply(lhs, rhs);
-      case DIVIDE:
-        return lhs / rhs;
-      case REMAINDER:
-        return lhs % rhs;
-      case PLUS:
-        return LongMath.checkedAdd(lhs, rhs);
-      case MINUS:
-        return LongMath.checkedSubtract(lhs, rhs);
-      case LEFT_SHIFT:
-        return lhs << rhs;
-      case RIGHT_SHIFT:
-        return lhs >> rhs;
-      case UNSIGNED_RIGHT_SHIFT:
-        return lhs >>> rhs;
-      case AND:
-        return lhs & rhs;
-      case XOR:
-        return lhs ^ rhs;
-      case OR:
-        return lhs | rhs;
-      default:
-        return null;
-    }
+  static @Nullable Long binop(Kind kind, long lhs, long rhs) {
+    return switch (kind) {
+      case MULTIPLY -> LongMath.checkedMultiply(lhs, rhs);
+      case DIVIDE -> lhs / rhs;
+      case REMAINDER -> lhs % rhs;
+      case PLUS -> LongMath.checkedAdd(lhs, rhs);
+      case MINUS -> LongMath.checkedSubtract(lhs, rhs);
+      case LEFT_SHIFT -> lhs << rhs;
+      case RIGHT_SHIFT -> lhs >> rhs;
+      case UNSIGNED_RIGHT_SHIFT -> lhs >>> rhs;
+      case AND -> lhs & rhs;
+      case XOR -> lhs ^ rhs;
+      case OR -> lhs | rhs;
+      default -> null;
+    };
   }
 
-  static Integer binop(Kind kind, int lhs, int rhs) {
-    switch (kind) {
-      case MULTIPLY:
-        return IntMath.checkedMultiply(lhs, rhs);
-      case DIVIDE:
-        return lhs / rhs;
-      case REMAINDER:
-        return lhs % rhs;
-      case PLUS:
-        return IntMath.checkedAdd(lhs, rhs);
-      case MINUS:
-        return IntMath.checkedSubtract(lhs, rhs);
-      case LEFT_SHIFT:
-        return lhs << rhs;
-      case RIGHT_SHIFT:
-        return lhs >> rhs;
-      case UNSIGNED_RIGHT_SHIFT:
-        return lhs >>> rhs;
-      case AND:
-        return lhs & rhs;
-      case XOR:
-        return lhs ^ rhs;
-      case OR:
-        return lhs | rhs;
-      default:
-        return null;
-    }
+  static @Nullable Integer binop(Kind kind, int lhs, int rhs) {
+    return switch (kind) {
+      case MULTIPLY -> IntMath.checkedMultiply(lhs, rhs);
+      case DIVIDE -> lhs / rhs;
+      case REMAINDER -> lhs % rhs;
+      case PLUS -> IntMath.checkedAdd(lhs, rhs);
+      case MINUS -> IntMath.checkedSubtract(lhs, rhs);
+      case LEFT_SHIFT -> lhs << rhs;
+      case RIGHT_SHIFT -> lhs >> rhs;
+      case UNSIGNED_RIGHT_SHIFT -> lhs >>> rhs;
+      case AND -> lhs & rhs;
+      case XOR -> lhs ^ rhs;
+      case OR -> lhs | rhs;
+      default -> null;
+    };
   }
 
-  private static Number cast(TypeKind kind, Number value) {
-    switch (kind) {
-      case SHORT:
-        return value.shortValue();
-      case INT:
-        return value.intValue();
-      case LONG:
-        return value.longValue();
-      case BYTE:
-        return value.byteValue();
-      case CHAR:
-        return (int) (char) value.intValue();
-      default:
-        return null;
-    }
+  private static @Nullable Number cast(TypeKind kind, Number value) {
+    return switch (kind) {
+      case SHORT -> value.shortValue();
+      case INT -> value.intValue();
+      case LONG -> value.longValue();
+      case BYTE -> value.byteValue();
+      case CHAR -> (int) (char) value.intValue();
+      default -> null;
+    };
   }
 
-  private static Number getIntegralConstant(Tree node) {
+  private static @Nullable Number getIntegralConstant(Tree node) {
     Number number = ASTHelpers.constValue(node, Number.class);
     if (number instanceof Integer || number instanceof Long) {
       return number;

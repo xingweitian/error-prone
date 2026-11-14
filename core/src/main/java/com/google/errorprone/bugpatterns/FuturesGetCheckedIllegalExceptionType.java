@@ -20,6 +20,7 @@ import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.Matchers.argument;
 import static com.google.errorprone.matchers.Matchers.classLiteral;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.util.ASTHelpers.getEnclosedElements;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isSameType;
@@ -44,7 +45,6 @@ import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Types;
 import java.util.List;
 
@@ -53,7 +53,6 @@ import java.util.List;
  * pass an incompatible exception type.
  */
 @BugPattern(
-    name = "FuturesGetCheckedIllegalExceptionType",
     summary = "Futures.getChecked requires a checked exception type with a standard constructor.",
     severity = ERROR)
 public final class FuturesGetCheckedIllegalExceptionType extends BugChecker
@@ -73,7 +72,8 @@ public final class FuturesGetCheckedIllegalExceptionType extends BugChecker
           tree,
           SuggestedFix.builder()
               .replace(
-                  tree, "getUnchecked(" + state.getSourceForNode(tree.getArguments().get(0)) + ")")
+                  tree,
+                  "getUnchecked(" + state.getSourceForNode(tree.getArguments().getFirst()) + ")")
               .addStaticImport(Futures.class.getName() + ".getUnchecked")
               .build());
     }
@@ -86,59 +86,51 @@ public final class FuturesGetCheckedIllegalExceptionType extends BugChecker
   }
 
   private static final Matcher<ExpressionTree> FUTURES_GET_CHECKED_MATCHER =
-      anyOf(
-          staticMethod().onClass(Futures.class.getName()).named("getChecked"));
+      anyOf(staticMethod().onClass(Futures.class.getName()).named("getChecked"));
 
   private static final Matcher<ExpressionTree> CLASS_OBJECT_FOR_CLASS_EXTENDING_RUNTIME_EXCEPTION =
-      new Matcher<ExpressionTree>() {
-        @Override
-        public boolean matches(ExpressionTree tree, VisitorState state) {
-          Types types = state.getTypes();
-          Type classType = state.getSymtab().classType;
-          Type runtimeExceptionType = state.getSymtab().runtimeExceptionType;
-          Type argType = getType(tree);
+      (ExpressionTree tree, VisitorState state) -> {
+        Types types = state.getTypes();
+        Type classType = state.getSymtab().classType;
+        Type runtimeExceptionType = state.getSymtab().runtimeExceptionType;
+        Type argType = getType(tree);
 
-          // Make sure that the argument is a Class<Something> (and not null/bottom).
-          if (!isSubtype(argType, classType, state) || argType.getTag() == BOT) {
-            return false;
-          }
-
-          List<Type> typeArguments = ((ClassType) argType).getTypeArguments();
-          Type exceptionType = Iterables.getFirst(typeArguments, null);
-          return types.isSubtype(exceptionType, runtimeExceptionType);
+        // Make sure that the argument is a Class<Something> (and not null/bottom).
+        if (!isSubtype(argType, classType, state) || argType.getTag() == BOT) {
+          return false;
         }
+
+        List<Type> typeArguments = argType.getTypeArguments();
+        Type exceptionType = Iterables.getFirst(typeArguments, null);
+        return types.isSubtype(exceptionType, runtimeExceptionType);
       };
 
   private static final Matcher<MethodInvocationTree> PASSED_RUNTIME_EXCEPTION_TYPE =
       argument(1, CLASS_OBJECT_FOR_CLASS_EXTENDING_RUNTIME_EXCEPTION);
 
   private static final Matcher<ExpressionTree> CLASS_OBJECT_FOR_CLASS_WITHOUT_USABLE_CONSTRUCTOR =
-      classLiteral(
-          new Matcher<ExpressionTree>() {
-            @Override
-            public boolean matches(ExpressionTree tree, VisitorState state) {
-              ClassSymbol classSymbol = (ClassSymbol) getSymbol(tree);
-              if (classSymbol == null) {
-                return false;
-              }
+      classLiteral((ExpressionTree tree, VisitorState state) -> {
+        ClassSymbol classSymbol = (ClassSymbol) getSymbol(tree);
+        if (classSymbol == null) {
+          return false;
+        }
 
-              if (classSymbol.isInner()) {
-                return true;
-              }
+        if (classSymbol.isInner()) {
+          return true;
+        }
 
-              for (Symbol enclosedSymbol : classSymbol.getEnclosedElements()) {
-                if (!enclosedSymbol.isConstructor()) {
-                  continue;
-                }
-                MethodSymbol constructorSymbol = (MethodSymbol) enclosedSymbol;
-                if (canBeUsedByGetChecked(constructorSymbol, state)) {
-                  return false;
-                }
-              }
+        for (Symbol enclosedSymbol : getEnclosedElements(classSymbol)) {
+          if (!enclosedSymbol.isConstructor()) {
+            continue;
+          }
+          MethodSymbol constructorSymbol = (MethodSymbol) enclosedSymbol;
+          if (canBeUsedByGetChecked(constructorSymbol, state)) {
+            return false;
+          }
+        }
 
-              return true;
-            }
-          });
+        return true;
+      });
 
   private static final Matcher<MethodInvocationTree> PASSED_TYPE_WITHOUT_USABLE_CONSTRUCTOR =
       argument(1, CLASS_OBJECT_FOR_CLASS_WITHOUT_USABLE_CONSTRUCTOR);

@@ -21,19 +21,82 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author sgoldfeder@google.com (Steven Goldfeder) */
+/**
+ * @author sgoldfeder@google.com (Steven Goldfeder)
+ */
 @RunWith(JUnit4.class)
 public class InjectOnFinalFieldTest {
   private final CompilationTestHelper compilationHelper =
       CompilationTestHelper.newInstance(InjectOnFinalField.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("InjectOnFinalFieldPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "InjectOnFinalFieldPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.guice.testdata;
+
+            import com.google.inject.Inject;
+            import org.jspecify.annotations.Nullable;
+
+            /**
+             * @author sgoldfeder@google.com (Steven Goldfeder)
+             */
+            public class InjectOnFinalFieldPositiveCases {
+              /** Class has a final injectable(com.google.inject.Inject) field. */
+              public class TestClass1 {
+                // BUG: Diagnostic contains: @Inject int a
+                @Inject final int a = 0;
+
+                @Inject
+                // BUG: Diagnostic contains: public int b
+                public final int b = 0;
+
+                @Inject @Nullable
+                // BUG: Diagnostic contains: Object c
+                final Object c = null;
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("InjectOnFinalFieldNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "InjectOnFinalFieldNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.guice.testdata;
+
+            import com.google.inject.Inject;
+
+            /**
+             * @author sgoldfeder@google.com (Steven Goldfeder)
+             */
+            public class InjectOnFinalFieldNegativeCases {
+
+              /** Class has no final fields or @Inject annotations. */
+              public class TestClass1 {}
+
+              /** Class has a final field that is not injectable. */
+              public class TestClass2 {
+                public final int n = 0;
+              }
+
+              /** Class has an injectable(com.google.inject.Inject) field that is not final. */
+              public class TestClass3 {
+                @Inject public int n;
+              }
+
+              /** Class has an injectable(com.google.inject.Inject), final method. */
+              public class TestClass4 {
+                @Inject
+                final void method() {}
+              }
+            }
+            """)
+        .doTest();
   }
 }

@@ -26,8 +26,8 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.MemberReferenceTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
-import com.google.errorprone.bugpatterns.TypeCompatibilityUtils;
-import com.google.errorprone.bugpatterns.TypeCompatibilityUtils.TypeCompatibilityReport;
+import com.google.errorprone.bugpatterns.TypeCompatibility;
+import com.google.errorprone.bugpatterns.TypeCompatibility.TypeCompatibilityReport;
 import com.google.errorprone.bugpatterns.collectionincompatibletype.AbstractCollectionIncompatibleTypeMatcher.MatchResult;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
@@ -40,6 +40,7 @@ import com.sun.tools.javac.code.Types;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import javax.inject.Inject;
 
 /**
  * Checker for calling Object-accepting methods with types that don't match the type arguments of
@@ -58,7 +59,6 @@ import java.util.Map;
  * </ul>
  */
 @BugPattern(
-    name = "CollectionIncompatibleType",
     summary = "Incompatible type as argument to Object-accepting Java collections method",
     severity = ERROR)
 public class CollectionIncompatibleType extends BugChecker
@@ -72,19 +72,13 @@ public class CollectionIncompatibleType extends BugChecker
   }
 
   private final FixType fixType;
+  private final TypeCompatibility typeCompatibility;
 
-  /** Creates a new {@link CollectionIncompatibleType} checker that provides no fix. */
-  public CollectionIncompatibleType() {
-    this(FixType.NONE);
-  }
-
-  public CollectionIncompatibleType(ErrorProneFlags flags) {
-    this(flags.getEnum("CollectionIncompatibleType:FixType", FixType.class).orElse(FixType.NONE));
-  }
-
-  /** Creates a new {@link CollectionIncompatibleType} checker with the given {@code fixType}. */
-  private CollectionIncompatibleType(FixType fixType) {
-    this.fixType = fixType;
+  @Inject
+  CollectionIncompatibleType(TypeCompatibility typeCompatibility, ErrorProneFlags flags) {
+    this.fixType =
+        flags.getEnum("CollectionIncompatibleType:FixType", FixType.class).orElse(FixType.NONE);
+    this.typeCompatibility = typeCompatibility;
   }
 
   @Override
@@ -105,14 +99,10 @@ public class CollectionIncompatibleType extends BugChecker
 
     Types types = state.getTypes();
     TypeCompatibilityReport compatibilityReport =
-        TypeCompatibilityUtils.compatibilityOfTypes(
-            result.targetType(), result.sourceType(), state);
-    if (compatibilityReport.compatible()) {
+        typeCompatibility.compatibilityOfTypes(result.targetType(), result.sourceType(), state);
+    if (compatibilityReport.isCompatible()) {
       return NO_MATCH;
     }
-
-    // For error message, use simple names instead of fully qualified names unless they are
-    // identical.
     String sourceType = Signatures.prettyType(result.sourceType());
     String targetType = Signatures.prettyType(result.targetType());
     if (sourceType.equals(targetType)) {
@@ -121,33 +111,29 @@ public class CollectionIncompatibleType extends BugChecker
     }
 
     Description.Builder description =
-        buildDescription(tree).setMessage(result.message(sourceType, targetType));
+        buildDescription(tree)
+            .setMessage(result.message(sourceType, targetType) + compatibilityReport.extraReason());
 
     switch (fixType) {
-      case PRINT_TYPES_AS_COMMENT:
-        description.addFix(
-            SuggestedFix.prefixWith(
-                tree,
-                String.format(
-                    "/* expected: %s, actual: %s */",
-                    ASTHelpers.getUpperBound(result.targetType(), types), result.sourceType())));
-        break;
-      case CAST:
-        result.buildFix().ifPresent(description::addFix);
-        break;
-      case SUPPRESS_WARNINGS:
+      case PRINT_TYPES_AS_COMMENT ->
+          description.addFix(
+              SuggestedFix.prefixWith(
+                  tree,
+                  String.format(
+                      "/* expected: %s, actual: %s */",
+                      ASTHelpers.getUpperBound(result.targetType(), types), result.sourceType())));
+      case CAST -> result.buildFix().ifPresent(description::addFix);
+      case SUPPRESS_WARNINGS -> {
         SuggestedFix.Builder builder = SuggestedFix.builder();
         builder.prefixWith(
             result.sourceTree(),
             String.format("/* expected: %s, actual: %s */ ", targetType, sourceType));
         addSuppressWarnings(builder, state, "CollectionIncompatibleType");
         description.addFix(builder.build());
-        break;
-      case NONE:
-        break;
+      }
+      case NONE -> {}
     }
 
     return description.build();
   }
-
 }

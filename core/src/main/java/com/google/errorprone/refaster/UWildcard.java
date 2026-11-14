@@ -20,14 +20,14 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.errorprone.refaster.Unifier.unifications;
 
 import com.google.auto.value.AutoValue;
-import com.google.common.collect.BiMap;
 import com.google.common.collect.EnumBiMap;
+import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.Maps;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.source.tree.WildcardTree;
 import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.tree.JCTree.JCWildcard;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code UTree} representation of a {@code WildcardTree}.
@@ -36,14 +36,14 @@ import javax.annotation.Nullable;
  */
 @AutoValue
 abstract class UWildcard extends UExpression implements WildcardTree {
-  private static final BiMap<Kind, BoundKind> BOUND_KINDS;
+  private static final ImmutableBiMap<Kind, BoundKind> BOUND_KINDS;
 
   static {
     EnumBiMap<Kind, BoundKind> validKinds = EnumBiMap.create(Kind.class, BoundKind.class);
     validKinds.put(Kind.UNBOUNDED_WILDCARD, BoundKind.UNBOUND);
     validKinds.put(Kind.EXTENDS_WILDCARD, BoundKind.EXTENDS);
     validKinds.put(Kind.SUPER_WILDCARD, BoundKind.SUPER);
-    BOUND_KINDS = Maps.unmodifiableBiMap(validKinds);
+    BOUND_KINDS = ImmutableBiMap.copyOf(Maps.unmodifiableBiMap(validKinds));
   }
 
   static UWildcard create(Kind kind, @Nullable UTree<?> bound) {
@@ -57,8 +57,7 @@ abstract class UWildcard extends UExpression implements WildcardTree {
   public abstract Kind getKind();
 
   @Override
-  @Nullable
-  public abstract UTree<?> getBound();
+  public abstract @Nullable UTree<?> getBound();
 
   @Override
   public JCWildcard inline(Inliner inliner) throws CouldNotResolveImportException {
@@ -77,6 +76,6 @@ abstract class UWildcard extends UExpression implements WildcardTree {
   @Override
   public Choice<Unifier> visitWildcard(WildcardTree node, Unifier unifier) {
     return Choice.condition(getKind() == node.getKind(), unifier)
-        .thenChoose(unifications(getBound(), node.getBound()));
+        .flatMap(unifications(getBound(), node.getBound()));
   }
 }

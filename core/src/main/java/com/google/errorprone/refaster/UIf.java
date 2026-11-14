@@ -16,9 +16,8 @@
 
 package com.google.errorprone.refaster;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.base.Function;
-import com.google.common.base.Optional;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.errorprone.refaster.ControlFlowVisitor.Result;
 import com.sun.source.tree.IfTree;
@@ -26,29 +25,35 @@ import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.TreeVisitor;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.util.List;
-import javax.annotation.Nullable;
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@link UTree} representation of an {@link IfTree}.
  *
  * @author lowasser@google.com (Louis Wasserman)
  */
-@AutoValue
-abstract class UIf implements UStatement, IfTree {
-  public static UIf create(
-      UExpression condition, UStatement thenStatement, UStatement elseStatement) {
-    return new AutoValue_UIf(condition, thenStatement, elseStatement);
+record UIf(UExpression condition, UStatement thenStatement, @Nullable UStatement elseStatement)
+    implements UStatement, IfTree {
+  @Override
+  public UExpression getCondition() {
+    return condition();
   }
 
   @Override
-  public abstract UExpression getCondition();
+  public UStatement getThenStatement() {
+    return thenStatement();
+  }
 
   @Override
-  public abstract UStatement getThenStatement();
+  public @Nullable UStatement getElseStatement() {
+    return elseStatement();
+  }
 
-  @Override
-  @Nullable
-  public abstract UStatement getElseStatement();
+  public static UIf create(
+      UExpression condition, UStatement thenStatement, UStatement elseStatement) {
+    return new UIf(condition, thenStatement, elseStatement);
+  }
 
   @Override
   public <R, D> R accept(TreeVisitor<R, D> visitor, D data) {
@@ -61,7 +66,7 @@ abstract class UIf implements UStatement, IfTree {
   }
 
   private static Function<Unifier, Choice<Unifier>> unifyUStatementWithSingleStatement(
-      @Nullable final UStatement toUnify, @Nullable final StatementTree target) {
+      @Nullable UStatement toUnify, @Nullable StatementTree target) {
     return (Unifier unifier) -> {
       if (toUnify == null) {
         return (target == null) ? Choice.of(unifier) : Choice.<Unifier>none();
@@ -69,114 +74,107 @@ abstract class UIf implements UStatement, IfTree {
       List<StatementTree> list = (target == null) ? List.<StatementTree>nil() : List.of(target);
       return toUnify
           .apply(UnifierWithUnconsumedStatements.create(unifier, list))
-          .condition(s -> s.unconsumedStatements().isEmpty())
-          .transform(UnifierWithUnconsumedStatements::unifier);
+          .filter(s -> s.unconsumedStatements().isEmpty())
+          .map(UnifierWithUnconsumedStatements::unifier);
     };
   }
 
   @Override
-  @Nullable
-  public Choice<UnifierWithUnconsumedStatements> apply(UnifierWithUnconsumedStatements state) {
-    java.util.List<? extends StatementTree> unconsumedStatements = state.unconsumedStatements();
+  public @Nullable Choice<UnifierWithUnconsumedStatements> apply(
+      UnifierWithUnconsumedStatements state) {
+    ImmutableList<? extends StatementTree> unconsumedStatements = state.unconsumedStatements();
     if (unconsumedStatements.isEmpty()) {
       return Choice.none();
     }
-    final java.util.List<? extends StatementTree> unconsumedStatementsTail =
+    ImmutableList<? extends StatementTree> unconsumedStatementsTail =
         unconsumedStatements.subList(1, unconsumedStatements.size());
-    StatementTree firstStatement = unconsumedStatements.get(0);
-    if (firstStatement.getKind() != Kind.IF) {
+    StatementTree firstStatement = unconsumedStatements.getFirst();
+    if (!(firstStatement instanceof IfTree ifTree)) {
       return Choice.none();
     }
-    final IfTree ifTree = (IfTree) firstStatement;
     Unifier unifier = state.unifier();
     Choice<UnifierWithUnconsumedStatements> forwardMatch =
         getCondition()
             .unify(ifTree.getCondition(), unifier.fork())
-            .thenChoose(
+            .flatMap(
                 unifyUStatementWithSingleStatement(getThenStatement(), ifTree.getThenStatement()))
-            .thenChoose(
-                unifierAfterThen -> {
-                  if (getElseStatement() != null
-                      && ifTree.getElseStatement() == null
-                      && ControlFlowVisitor.INSTANCE.visitStatement(ifTree.getThenStatement())
-                          == Result.ALWAYS_RETURNS) {
-                    Choice<UnifierWithUnconsumedStatements> result =
-                        getElseStatement()
-                            .apply(
-                                UnifierWithUnconsumedStatements.create(
-                                    unifierAfterThen.fork(), unconsumedStatementsTail));
-                    if (getElseStatement() instanceof UBlock) {
-                      Choice<UnifierWithUnconsumedStatements> alternative =
-                          Choice.of(
-                              UnifierWithUnconsumedStatements.create(
-                                  unifierAfterThen.fork(), unconsumedStatementsTail));
-                      for (UStatement stmt : ((UBlock) getElseStatement()).getStatements()) {
-                        alternative = alternative.thenChoose(stmt);
-                      }
-                      result = result.or(alternative);
-                    }
-                    return result;
-                  } else {
-                    return unifyUStatementWithSingleStatement(
-                            getElseStatement(), ifTree.getElseStatement())
-                        .apply(unifierAfterThen)
-                        .transform(
-                            unifierAfterElse ->
-                                UnifierWithUnconsumedStatements.create(
-                                    unifierAfterElse, unconsumedStatementsTail));
+            .flatMap(unifierAfterThen -> {
+              if (getElseStatement() != null
+                  && ifTree.getElseStatement() == null
+                  && ControlFlowVisitor.INSTANCE.visitStatement(ifTree.getThenStatement())
+                      == Result.ALWAYS_RETURNS) {
+                Choice<UnifierWithUnconsumedStatements> result =
+                    getElseStatement()
+                        .apply(
+                            UnifierWithUnconsumedStatements.create(
+                                unifierAfterThen.fork(), unconsumedStatementsTail));
+                if (getElseStatement() instanceof UBlock uBlock) {
+                  Choice<UnifierWithUnconsumedStatements> alternative =
+                      Choice.of(
+                          UnifierWithUnconsumedStatements.create(
+                              unifierAfterThen.fork(), unconsumedStatementsTail));
+                  for (UStatement stmt : uBlock.getStatements()) {
+                    alternative = alternative.flatMap(stmt);
                   }
-                });
+                  result = result.concat(alternative);
+                }
+                return result;
+              } else {
+                return unifyUStatementWithSingleStatement(
+                        getElseStatement(), ifTree.getElseStatement())
+                    .apply(unifierAfterThen)
+                    .map(unifierAfterElse ->
+                        UnifierWithUnconsumedStatements.create(
+                            unifierAfterElse, unconsumedStatementsTail));
+              }
+            });
     Choice<UnifierWithUnconsumedStatements> backwardMatch =
         getCondition()
             .negate()
             .unify(ifTree.getCondition(), unifier.fork())
-            .thenChoose(
-                unifierAfterCond -> {
-                  if (getElseStatement() == null) {
-                    return Choice.none();
-                  }
-                  return getElseStatement()
-                      .apply(
+            .flatMap(unifierAfterCond -> {
+              if (getElseStatement() == null) {
+                return Choice.none();
+              }
+              return getElseStatement()
+                  .apply(
+                      UnifierWithUnconsumedStatements.create(
+                          unifierAfterCond, List.of(ifTree.getThenStatement())))
+                  .mapIfPresent((UnifierWithUnconsumedStatements stateAfterThen) ->
+                      stateAfterThen.unconsumedStatements().isEmpty()
+                          ? Optional.of(stateAfterThen.unifier())
+                          : Optional.<Unifier>empty());
+            })
+            .flatMap(unifierAfterThen -> {
+              if (ifTree.getElseStatement() == null
+                  && ControlFlowVisitor.INSTANCE.visitStatement(ifTree.getThenStatement())
+                      == Result.ALWAYS_RETURNS) {
+                Choice<UnifierWithUnconsumedStatements> result =
+                    getThenStatement()
+                        .apply(
+                            UnifierWithUnconsumedStatements.create(
+                                unifierAfterThen.fork(), unconsumedStatementsTail));
+                if (getThenStatement() instanceof UBlock uBlock) {
+                  Choice<UnifierWithUnconsumedStatements> alternative =
+                      Choice.of(
                           UnifierWithUnconsumedStatements.create(
-                              unifierAfterCond, List.of(ifTree.getThenStatement())))
-                      .thenOption(
-                          (UnifierWithUnconsumedStatements stateAfterThen) ->
-                              stateAfterThen.unconsumedStatements().isEmpty()
-                                  ? Optional.of(stateAfterThen.unifier())
-                                  : Optional.<Unifier>absent());
-                })
-            .thenChoose(
-                unifierAfterThen -> {
-                  if (ifTree.getElseStatement() == null
-                      && ControlFlowVisitor.INSTANCE.visitStatement(ifTree.getThenStatement())
-                          == Result.ALWAYS_RETURNS) {
-                    Choice<UnifierWithUnconsumedStatements> result =
-                        getThenStatement()
-                            .apply(
-                                UnifierWithUnconsumedStatements.create(
-                                    unifierAfterThen.fork(), unconsumedStatementsTail));
-                    if (getThenStatement() instanceof UBlock) {
-                      Choice<UnifierWithUnconsumedStatements> alternative =
-                          Choice.of(
-                              UnifierWithUnconsumedStatements.create(
-                                  unifierAfterThen.fork(), unconsumedStatementsTail));
-                      for (UStatement stmt : ((UBlock) getThenStatement()).getStatements()) {
-                        alternative = alternative.thenChoose(stmt);
-                      }
-                      result = result.or(alternative);
-                    }
-                    return result;
-                  } else {
-                    return unifyUStatementWithSingleStatement(
-                            getThenStatement(), ifTree.getElseStatement())
-                        .apply(unifierAfterThen)
-                        .transform(
-                            unifierAfterElse ->
-                                UnifierWithUnconsumedStatements.create(
-                                    unifierAfterElse, unconsumedStatementsTail));
+                              unifierAfterThen.fork(), unconsumedStatementsTail));
+                  for (UStatement stmt : uBlock.getStatements()) {
+                    alternative = alternative.flatMap(stmt);
                   }
-                });
-    return forwardMatch.or(backwardMatch);
+                  result = result.concat(alternative);
+                }
+                return result;
+              } else {
+                return unifyUStatementWithSingleStatement(
+                        getThenStatement(), ifTree.getElseStatement())
+                    .apply(unifierAfterThen)
+                    .map(unifierAfterElse ->
+                        UnifierWithUnconsumedStatements.create(
+                            unifierAfterElse, unconsumedStatementsTail));
+              }
+            });
+    return forwardMatch.concat(backwardMatch);
   }
 
   @Override

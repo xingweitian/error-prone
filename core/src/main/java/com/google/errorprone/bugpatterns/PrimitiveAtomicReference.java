@@ -21,6 +21,7 @@ import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.isBoxedPrimitiveType;
 
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
@@ -31,15 +32,13 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.tools.javac.code.Type;
-import javax.lang.model.type.TypeKind;
 
 /** Discourages inadvertently using reference equality on boxed primitives in AtomicReference. */
 @BugPattern(
-    name = "PrimitiveAtomicReference",
     summary =
         "Using compareAndSet with boxed primitives is dangerous, as reference rather than value"
-            + " equality is used. Consider using AtomicInteger, AtomicLong, or AtomicBoolean"
-            + " instead.",
+            + " equality is used. Consider using AtomicInteger, AtomicLong, AtomicBoolean from JDK"
+            + " or AtomicDouble from Guava instead.",
     severity = WARNING)
 public final class PrimitiveAtomicReference extends BugChecker
     implements MethodInvocationTreeMatcher {
@@ -53,8 +52,8 @@ public final class PrimitiveAtomicReference extends BugChecker
     if (!COMPARE_AND_SET.matches(tree, state)) {
       return NO_MATCH;
     }
-    ExpressionTree firstArgument = tree.getArguments().get(0);
-    if (firstArgument instanceof LiteralTree && ((LiteralTree) firstArgument).getValue() == null) {
+    ExpressionTree firstArgument = tree.getArguments().getFirst();
+    if (firstArgument instanceof LiteralTree literalTree && literalTree.getValue() == null) {
       return NO_MATCH;
     }
     Type receiverType = getType(getReceiver(tree));
@@ -65,10 +64,10 @@ public final class PrimitiveAtomicReference extends BugChecker
     if (receiverType.getTypeArguments().isEmpty()) {
       return NO_MATCH;
     }
-    Type typeArgument = receiverType.getTypeArguments().get(0);
-    if (state.getTypes().unboxedType(typeArgument).getKind() == TypeKind.NONE) {
-      return NO_MATCH;
+    Type typeArgument = receiverType.getTypeArguments().getFirst();
+    if (isBoxedPrimitiveType(typeArgument, state)) {
+      return describeMatch(tree);
     }
-    return describeMatch(tree);
+    return NO_MATCH;
   }
 }

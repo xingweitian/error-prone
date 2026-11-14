@@ -38,7 +38,6 @@ import java.util.List;
  * {@code workQueue}
  */
 @BugPattern(
-    name = "ErroneousThreadPoolConstructorChecker",
     summary = "Thread pool size will never go beyond corePoolSize if an unbounded queue is used",
     severity = WARNING)
 public final class ErroneousThreadPoolConstructorChecker extends BugChecker
@@ -48,11 +47,11 @@ public final class ErroneousThreadPoolConstructorChecker extends BugChecker
       constructor().forClass("java.util.concurrent.ThreadPoolExecutor");
   private static final Matcher<ExpressionTree> UNBOUNDED_WORK_QUEUE_CONSTRUCTOR_MATCHER =
       anyOf(
-          constructor().forClass("java.util.concurrent.LinkedBlockingDeque").withParameters(),
+          constructor().forClass("java.util.concurrent.LinkedBlockingDeque").withNoParameters(),
           constructor()
               .forClass("java.util.concurrent.LinkedBlockingDeque")
               .withParameters("java.util.Collection"),
-          constructor().forClass("java.util.concurrent.LinkedBlockingQueue").withParameters(),
+          constructor().forClass("java.util.concurrent.LinkedBlockingQueue").withNoParameters(),
           constructor()
               .forClass("java.util.concurrent.LinkedBlockingQueue")
               .withParameters("java.util.Collection"),
@@ -65,6 +64,9 @@ public final class ErroneousThreadPoolConstructorChecker extends BugChecker
       return Description.NO_MATCH;
     }
     List<? extends ExpressionTree> arguments = tree.getArguments();
+    if (arguments.size() < 2) {
+      return Description.NO_MATCH;
+    }
     Integer corePoolSize = ASTHelpers.constValue(arguments.get(0), Integer.class);
     Integer maximumPoolSize = ASTHelpers.constValue(arguments.get(1), Integer.class);
     if (corePoolSize == null || maximumPoolSize == null || corePoolSize.equals(maximumPoolSize)) {

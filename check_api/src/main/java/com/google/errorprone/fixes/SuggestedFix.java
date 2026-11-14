@@ -18,56 +18,58 @@ package com.google.errorprone.fixes;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.auto.value.AutoValue;
+import com.google.auto.value.extension.memoized.Memoized;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.errorprone.ClassName;
+import com.google.errorprone.VisitorState;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.errorprone.fixes.Replacements.CoalescePolicy;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
-import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
-import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import javax.annotation.Nullable;
+import java.util.stream.Collector;
+import org.jspecify.annotations.Nullable;
 
-/** @author alexeagle@google.com (Alex Eagle) */
-public class SuggestedFix implements Fix {
+/**
+ * @author alexeagle@google.com (Alex Eagle)
+ */
+@AutoValue
+public abstract class SuggestedFix implements Fix {
 
-  private final String shortDescription;
-  private final ImmutableList<FixOperation> fixes;
-  private final ImmutableSet<String> importsToAdd;
-  private final ImmutableSet<String> importsToRemove;
+  abstract ImmutableList<FixOperation> fixes();
 
-  private SuggestedFix(SuggestedFix.Builder builder) {
-    this.shortDescription = builder.shortDescription;
-    this.fixes = ImmutableList.copyOf(builder.fixes);
-    this.importsToAdd = ImmutableSet.copyOf(builder.importsToAdd);
-    this.importsToRemove = ImmutableSet.copyOf(builder.importsToRemove);
+  private static SuggestedFix create(SuggestedFix.Builder builder) {
+    return new AutoValue_SuggestedFix(
+        builder.coalescePolicy,
+        ImmutableList.copyOf(builder.fixes),
+        ImmutableSet.copyOf(builder.importsToAdd),
+        ImmutableSet.copyOf(builder.importsToRemove),
+        builder.shortDescription);
   }
 
   @Override
   public boolean isEmpty() {
-    return fixes.isEmpty() && importsToAdd.isEmpty() && importsToRemove.isEmpty();
+    return fixes().isEmpty() && getImportsToAdd().isEmpty() && getImportsToRemove().isEmpty();
   }
 
   @Override
-  public Collection<String> getImportsToAdd() {
-    return importsToAdd;
-  }
+  public abstract ImmutableSet<String> getImportsToAdd();
 
   @Override
-  public Collection<String> getImportsToRemove() {
-    return importsToRemove;
-  }
+  public abstract ImmutableSet<String> getImportsToRemove();
 
   @Override
   public String toString(JCCompilationUnit compilationUnit) {
     StringBuilder result = new StringBuilder("replace ");
-    for (Replacement replacement : getReplacements(compilationUnit.endPositions)) {
+    for (Replacement replacement : getReplacements(ErrorProneEndPosTable.create(compilationUnit))) {
       result.append(
           String.format(
               "position %d:%d with \"%s\" ",
@@ -77,22 +79,23 @@ public class SuggestedFix implements Fix {
   }
 
   @Override
-  public String getShortDescription() {
-    return shortDescription;
-  }
+  public abstract String getShortDescription();
+
+  @Memoized
+  @Override
+  public abstract int hashCode();
 
   @Override
-  public Set<Replacement> getReplacements(EndPosTable endPositions) {
+  public ImmutableSet<Replacement> getReplacements(ErrorProneEndPosTable endPositions) {
     if (endPositions == null) {
       throw new IllegalArgumentException(
           "Cannot produce correct replacements without endPositions.");
     }
     Replacements replacements = new Replacements();
-    for (FixOperation fix : fixes) {
-      replacements.add(
-          fix.getReplacement(endPositions), Replacements.CoalescePolicy.EXISTING_FIRST);
+    for (FixOperation fix : fixes()) {
+      replacements.add(fix.getReplacement(endPositions), getCoalescePolicy());
     }
-    return replacements.descending();
+    return replacements.ascending();
   }
 
   /** {@link Builder#replace(Tree, String)} */
@@ -143,12 +146,17 @@ public class SuggestedFix implements Fix {
 
   /** {@link Builder#delete(Tree)} */
   public static SuggestedFix delete(Tree node) {
-    return builder().delete(node).build();
+    return delete(ErrorPronePosition.from(node));
   }
 
-  /** {@link Builder#swap(Tree, Tree)} */
-  public static SuggestedFix swap(Tree node1, Tree node2) {
-    return builder().swap(node1, node2).build();
+  /** {@link Builder#delete(ErrorPronePosition)} */
+  public static SuggestedFix delete(ErrorPronePosition position) {
+    return builder().delete(position).build();
+  }
+
+  /** {@link Builder#swap(Tree, Tree, VisitorState)} */
+  public static SuggestedFix swap(Tree node1, Tree node2, VisitorState state) {
+    return builder().swap(node1, node2, state).build();
   }
 
   private static final SuggestedFix EMPTY = builder().build();
@@ -158,8 +166,25 @@ public class SuggestedFix implements Fix {
     return EMPTY;
   }
 
+  public static SuggestedFix merge(SuggestedFix first, SuggestedFix second, SuggestedFix... more) {
+    var builder = builder().merge(first).merge(second);
+    for (SuggestedFix fix : more) {
+      builder.merge(fix);
+    }
+    return builder.build();
+  }
+
+  public static Collector<SuggestedFix, ?, SuggestedFix> mergeFixes() {
+    return Collector.of(
+        SuggestedFix::builder, Builder::merge, Builder::merge, SuggestedFix.Builder::build);
+  }
+
   public static Builder builder() {
     return new Builder();
+  }
+
+  public Builder toBuilder() {
+    return SuggestedFix.builder().merge(this);
   }
 
   /** Builds {@link SuggestedFix}s. */
@@ -168,6 +193,7 @@ public class SuggestedFix implements Fix {
     private final List<FixOperation> fixes = new ArrayList<>();
     private final Set<String> importsToAdd = new LinkedHashSet<>();
     private final Set<String> importsToRemove = new LinkedHashSet<>();
+    private CoalescePolicy coalescePolicy = CoalescePolicy.EXISTING_FIRST;
     private String shortDescription = "";
 
     protected Builder() {}
@@ -177,9 +203,10 @@ public class SuggestedFix implements Fix {
     }
 
     public SuggestedFix build() {
-      return new SuggestedFix(this);
+      return create(this);
     }
 
+    @CanIgnoreReturnValue
     private Builder with(FixOperation fix) {
       fixes.add(fix);
       return this;
@@ -191,14 +218,27 @@ public class SuggestedFix implements Fix {
      *
      * <p>Should be limited to one sentence.
      */
+    @CanIgnoreReturnValue
     public Builder setShortDescription(String shortDescription) {
       this.shortDescription = shortDescription;
       return this;
     }
 
+    @CanIgnoreReturnValue
+    public Builder setCoalescePolicy(CoalescePolicy coalescePolicy) {
+      this.coalescePolicy = coalescePolicy;
+      return this;
+    }
+
+    @CanIgnoreReturnValue
     public Builder replace(Tree node, String replaceWith) {
-      checkNotSyntheticConstructor(node);
-      return with(new ReplacementFix((DiagnosticPosition) node, replaceWith));
+      return replace(ErrorPronePosition.from(node), replaceWith);
+    }
+
+    @CanIgnoreReturnValue
+    public Builder replace(ErrorPronePosition position, String replaceWith) {
+      checkExplicitSource(position.getTree());
+      return with(ReplacementFix.create(position, replaceWith));
     }
 
     /**
@@ -209,9 +249,10 @@ public class SuggestedFix implements Fix {
      * @param endPos The position at which to end replacing, exclusive
      * @param replaceWith The string to replace with
      */
+    @CanIgnoreReturnValue
     public Builder replace(int startPos, int endPos, String replaceWith) {
-      DiagnosticPosition pos = new IndexedPosition(startPos, endPos);
-      return with(new ReplacementFix(pos, replaceWith));
+      IndexedPosition pos = new IndexedPosition(startPos, endPos);
+      return with(ReplacementFix.create(pos, replaceWith));
     }
 
     /**
@@ -228,53 +269,81 @@ public class SuggestedFix implements Fix {
      * @param startPosAdjustment The adjustment to add to the start position (negative is OK)
      * @param endPosAdjustment The adjustment to add to the end position (negative is OK)
      */
+    @CanIgnoreReturnValue
     public Builder replace(
         Tree node, String replaceWith, int startPosAdjustment, int endPosAdjustment) {
-      checkNotSyntheticConstructor(node);
+      checkExplicitSource(node);
       return with(
-          new ReplacementFix(
+          ReplacementFix.create(
               new AdjustedPosition((JCTree) node, startPosAdjustment, endPosAdjustment),
               replaceWith));
     }
 
+    @CanIgnoreReturnValue
     public Builder prefixWith(Tree node, String prefix) {
-      checkNotSyntheticConstructor(node);
-      return with(new PrefixInsertion((DiagnosticPosition) node, prefix));
+      return prefixWith(ErrorPronePosition.from(node), prefix);
     }
 
+    @CanIgnoreReturnValue
+    public Builder prefixWith(ErrorPronePosition position, String prefix) {
+      checkNotSyntheticConstructor(position.getTree());
+      return with(PrefixInsertion.create(position, prefix));
+    }
+
+    @CanIgnoreReturnValue
     public Builder postfixWith(Tree node, String postfix) {
-      checkNotSyntheticConstructor(node);
-      return with(new PostfixInsertion((DiagnosticPosition) node, postfix));
+      return postfixWith(ErrorPronePosition.from(node), postfix);
     }
 
+    @CanIgnoreReturnValue
+    public Builder postfixWith(ErrorPronePosition position, String postfix) {
+      checkExplicitSource(position.getTree());
+      return with(PostfixInsertion.create(position, postfix));
+    }
+
+    @CanIgnoreReturnValue
     public Builder delete(Tree node) {
-      checkNotSyntheticConstructor(node);
+      return delete(ErrorPronePosition.from(node));
+    }
+
+    @CanIgnoreReturnValue
+    public Builder delete(ErrorPronePosition node) {
+      checkExplicitSource(node.getTree());
       return replace(node, "");
     }
 
-    public Builder swap(Tree node1, Tree node2) {
-      checkNotSyntheticConstructor(node1);
-      checkNotSyntheticConstructor(node2);
-      // calling Tree.toString() is kind of cheesy, but we don't currently have a better option
-      // TODO(cushon): consider an approach that doesn't rewrite the original tokens
-      fixes.add(new ReplacementFix((DiagnosticPosition) node1, node2.toString()));
-      fixes.add(new ReplacementFix((DiagnosticPosition) node2, node1.toString()));
+    @CanIgnoreReturnValue
+    public Builder swap(Tree node1, Tree node2, VisitorState state) {
+      checkExplicitSource(node1);
+      checkExplicitSource(node2);
+      fixes.add(
+          ReplacementFix.create(ErrorPronePosition.from(node1), state.getSourceForNode(node2)));
+      fixes.add(
+          ReplacementFix.create(ErrorPronePosition.from(node2), state.getSourceForNode(node1)));
       return this;
     }
 
     /**
      * Add an import statement as part of this SuggestedFix. Import string should be of the form
-     * "foo.bar.baz".
+     * "foo.bar.SomeClass".
      */
+    @CanIgnoreReturnValue
     public Builder addImport(String importString) {
       importsToAdd.add("import " + importString);
       return this;
     }
 
+    /** Add an import statement for {@code className} as part of this SuggestedFix. */
+    @CanIgnoreReturnValue
+    public Builder addImport(ClassName className) {
+      return addImport(className.toString().replace('$', '.'));
+    }
+
     /**
      * Add a static import statement as part of this SuggestedFix. Import string should be of the
-     * form "foo.bar.baz".
+     * form "foo.bar.SomeClass.someMethod" or "foo.bar.SomeClass.SOME_FIELD".
      */
+    @CanIgnoreReturnValue
     public Builder addStaticImport(String importString) {
       importsToAdd.add("import static " + importString);
       return this;
@@ -282,17 +351,25 @@ public class SuggestedFix implements Fix {
 
     /**
      * Remove an import statement as part of this SuggestedFix. Import string should be of the form
-     * "foo.bar.baz".
+     * "foo.bar.SomeClass".
      */
+    @CanIgnoreReturnValue
     public Builder removeImport(String importString) {
       importsToRemove.add("import " + importString);
       return this;
     }
 
+    /** Remove an import statement for {@code className} as part of this SuggestedFix. */
+    @CanIgnoreReturnValue
+    public Builder removeImport(ClassName className) {
+      return removeImport(className.toString().replace('$', '.'));
+    }
+
     /**
      * Remove a static import statement as part of this SuggestedFix. Import string should be of the
-     * form "foo.bar.baz".
+     * form "foo.bar.SomeClass.someMethod" or "foo.bar.SomeClass.SOME_FIELD".
      */
+    @CanIgnoreReturnValue
     public Builder removeStaticImport(String importString) {
       importsToRemove.add("import static " + importString);
       return this;
@@ -301,6 +378,7 @@ public class SuggestedFix implements Fix {
     /**
      * Merges all edits from {@code other} into {@code this}. If {@code other} is null, do nothing.
      */
+    @CanIgnoreReturnValue
     public Builder merge(@Nullable Builder other) {
       if (other == null) {
         return this;
@@ -317,6 +395,7 @@ public class SuggestedFix implements Fix {
     /**
      * Merges all edits from {@code other} into {@code this}. If {@code other} is null, do nothing.
      */
+    @CanIgnoreReturnValue
     public Builder merge(@Nullable SuggestedFix other) {
       if (other == null) {
         return this;
@@ -324,86 +403,92 @@ public class SuggestedFix implements Fix {
       if (shortDescription.isEmpty()) {
         shortDescription = other.getShortDescription();
       }
-      fixes.addAll(other.fixes);
-      importsToAdd.addAll(other.importsToAdd);
-      importsToRemove.addAll(other.importsToRemove);
+      fixes.addAll(other.fixes());
+      importsToAdd.addAll(other.getImportsToAdd());
+      importsToRemove.addAll(other.getImportsToRemove());
       return this;
     }
 
     /**
-     * Prevent attempts to modify implicit default constructurs, since they are one of the few
+     * Prevent attempts to modify implicit default constructors, since they are one of the few
      * synthetic constructs added to the AST early enough to be visible from Error Prone.
      */
     private static void checkNotSyntheticConstructor(Tree tree) {
-      if (tree instanceof MethodTree && ASTHelpers.isGeneratedConstructor((MethodTree) tree)) {
-        throw new AssertionError("Cannot edit synthetic AST nodes");
+      if (tree instanceof MethodTree methodTree && ASTHelpers.isGeneratedConstructor(methodTree)) {
+        throw new IllegalArgumentException("Cannot edit synthetic AST nodes");
       }
+    }
+
+    private static void checkExplicitSource(Tree tree) {
+      ErrorProneEndPosTable.checkExplicitSource(tree);
+      checkNotSyntheticConstructor(tree);
     }
   }
 
   /** Models a single fix operation. */
-  private interface FixOperation {
+  interface FixOperation {
     /** Calculate the replacement operation once end positions are available. */
-    Replacement getReplacement(EndPosTable endPositions);
+    Replacement getReplacement(ErrorProneEndPosTable endPositions);
   }
 
   /** Inserts new text at a specific insertion point (e.g. prefix or postfix). */
-  private abstract static class InsertionFix implements FixOperation {
-    protected abstract int getInsertionIndex(EndPosTable endPositions);
+  abstract static class InsertionFix implements FixOperation {
+    protected abstract int getInsertionIndex(ErrorProneEndPosTable endPositions);
 
-    protected final DiagnosticPosition position;
-    protected final String insertion;
+    protected abstract ErrorPronePosition position();
 
-    protected InsertionFix(DiagnosticPosition position, String insertion) {
-      checkArgument(position.getStartPosition() >= 0, "invalid start position");
-      this.position = position;
-      this.insertion = insertion;
-    }
+    protected abstract String insertion();
 
     @Override
-    public Replacement getReplacement(EndPosTable endPositions) {
+    public Replacement getReplacement(ErrorProneEndPosTable endPositions) {
       int insertionIndex = getInsertionIndex(endPositions);
-      return Replacement.create(insertionIndex, insertionIndex, insertion);
+      return Replacement.create(insertionIndex, insertionIndex, insertion());
     }
   }
 
-  private static class PostfixInsertion extends InsertionFix {
-    public PostfixInsertion(DiagnosticPosition tree, String insertion) {
-      super(tree, insertion);
+  @AutoValue
+  abstract static class PostfixInsertion extends InsertionFix {
+
+    public static PostfixInsertion create(ErrorPronePosition position, String insertion) {
+      checkArgument(position.getStartPosition() >= 0, "invalid start position");
+      return new AutoValue_SuggestedFix_PostfixInsertion(position, insertion);
     }
 
     @Override
-    protected int getInsertionIndex(EndPosTable endPositions) {
-      return position.getEndPosition(endPositions);
+    protected int getInsertionIndex(ErrorProneEndPosTable endPositions) {
+      return position().getEndPosition(endPositions);
     }
   }
 
-  private static class PrefixInsertion extends InsertionFix {
-    public PrefixInsertion(DiagnosticPosition tree, String insertion) {
-      super(tree, insertion);
+  @AutoValue
+  abstract static class PrefixInsertion extends InsertionFix {
+
+    public static PrefixInsertion create(ErrorPronePosition position, String insertion) {
+      checkArgument(position.getStartPosition() >= 0, "invalid start position");
+      return new AutoValue_SuggestedFix_PrefixInsertion(position, insertion);
     }
 
     @Override
-    protected int getInsertionIndex(EndPosTable endPositions) {
-      return position.getStartPosition();
+    protected int getInsertionIndex(ErrorProneEndPosTable endPositions) {
+      return position().getStartPosition();
     }
   }
 
   /** Replaces an entire diagnostic position (from start to end) with the given string. */
-  private static class ReplacementFix implements FixOperation {
-    private final DiagnosticPosition original;
-    private final String replacement;
-
-    public ReplacementFix(DiagnosticPosition original, String replacement) {
+  private record ReplacementFix(ErrorPronePosition original, String replacement)
+      implements FixOperation {
+    ReplacementFix {
       checkArgument(original.getStartPosition() >= 0, "invalid start position");
-      this.original = original;
-      this.replacement = replacement;
+    }
+
+    static ReplacementFix create(ErrorPronePosition original, String replacement) {
+      return new ReplacementFix(original, replacement);
     }
 
     @Override
-    public Replacement getReplacement(EndPosTable endPositions) {
+    public Replacement getReplacement(ErrorProneEndPosTable endPositions) {
       return Replacement.create(
-          original.getStartPosition(), original.getEndPosition(endPositions), replacement);
+          original().getStartPosition(), original().getEndPosition(endPositions), replacement());
     }
   }
 }

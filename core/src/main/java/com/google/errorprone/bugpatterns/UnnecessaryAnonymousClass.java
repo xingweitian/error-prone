@@ -22,21 +22,27 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.util.ASTHelpers.canBeRemoved;
+import static com.google.errorprone.util.ASTHelpers.enclosingClass;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
 import static com.google.errorprone.util.ASTHelpers.isGeneratedConstructor;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Range;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.VariableTreeMatcher;
+import com.google.errorprone.fixes.ErrorProneEndPosTable;
 import com.google.errorprone.fixes.Replacement;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.fixes.SuggestedFixes;
 import com.google.errorprone.matchers.Description;
+import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
@@ -47,18 +53,16 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
+import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import java.util.Objects;
 import java.util.Optional;
-import javax.annotation.Nullable;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
+import org.jspecify.annotations.Nullable;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "UnnecessaryAnonymousClass",
     summary =
         "Implementing a functional interface is unnecessary; prefer to implement the functional"
             + " interface method directly and use a method reference instead.",
@@ -70,46 +74,41 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
     if (tree.getInitializer() == null) {
       return NO_MATCH;
     }
-    if (!(tree.getInitializer() instanceof NewClassTree)) {
+    if (!(tree.getInitializer() instanceof NewClassTree classTree)) {
       return NO_MATCH;
     }
-    NewClassTree classTree = (NewClassTree) tree.getInitializer();
     if (classTree.getClassBody() == null) {
       return NO_MATCH;
     }
     ImmutableList<? extends Tree> members =
         classTree.getClassBody().getMembers().stream()
-            .filter(x -> !(x instanceof MethodTree && isGeneratedConstructor((MethodTree) x)))
+            .filter(
+                x -> !(x instanceof MethodTree methodTree && isGeneratedConstructor(methodTree)))
             .collect(toImmutableList());
     if (members.size() != 1) {
       return NO_MATCH;
     }
     Tree member = getOnlyElement(members);
-    if (!(member instanceof MethodTree)) {
+    if (!(member instanceof MethodTree implementation)) {
       return NO_MATCH;
     }
-    Symbol varSym = getSymbol(tree);
-    if (varSym == null
-        || varSym.getKind() != ElementKind.FIELD
-        || !varSym.isPrivate()
+    VarSymbol varSym = getSymbol(tree);
+    if (varSym.getKind() != ElementKind.FIELD
+        || !canBeRemoved(varSym)
         || !varSym.getModifiers().contains(Modifier.FINAL)) {
       return NO_MATCH;
     }
-    MethodTree implementation = (MethodTree) member;
     Type type = getType(tree.getType());
     if (type == null || !state.getTypes().isFunctionalInterface(type)) {
       return NO_MATCH;
     }
     MethodSymbol methodSymbol = getSymbol(implementation);
-    if (methodSymbol == null) {
-      return NO_MATCH;
-    }
     Symbol descriptorSymbol = state.getTypes().findDescriptorSymbol(type.tsym);
     if (!methodSymbol.getSimpleName().contentEquals(descriptorSymbol.getSimpleName())) {
       return NO_MATCH;
     }
     if (!methodSymbol.overrides(
-        descriptorSymbol, methodSymbol.owner.enclClass(), state.getTypes(), false)) {
+        descriptorSymbol, enclosingClass(methodSymbol), state.getTypes(), false)) {
       return NO_MATCH;
     }
     if (tree.getModifiers().getAnnotations().stream()
@@ -132,14 +131,9 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
     fixBuilder.merge(trimToMethodDef(tree, state, implementation));
 
     // Replace all uses of the identifier with a method reference.
-    Optional<SuggestedFix> methodReferenceReplacement =
-        replaceUsesWithMethodReference(newName, varSym, implementation, state);
-    if (!methodReferenceReplacement.isPresent()) {
-      return NO_MATCH;
-    }
-    fixBuilder.merge(methodReferenceReplacement.get());
-
-    return describeMatch(tree, fixBuilder.build());
+    return replaceUsesWithMethodReference(newName, varSym, implementation, state)
+        .map(mrr -> describeMatch(tree, fixBuilder.merge(mrr).build()))
+        .orElse(NO_MATCH);
   }
 
   /** Remove anonymous class definition beginning and end, leaving only the method definition. */
@@ -165,10 +159,10 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
   private static Optional<SuggestedFix> replaceUsesWithMethodReference(
       String newName, Symbol varSym, MethodTree implementation, VisitorState state) {
     // Extract method body.
-    JCTree methodBody = (JCTree) implementation.getBody();
+    BlockTree methodBody = implementation.getBody();
 
     // Scan entire compilation unit to replace all uses of the variable with method references.
-    JCCompilationUnit compilationUnit = (JCCompilationUnit) state.getPath().getCompilationUnit();
+    CompilationUnitTree compilationUnit = state.getPath().getCompilationUnit();
     ReplaceUsesScanner replaceUsesScanner = new ReplaceUsesScanner(varSym, newName, state);
     replaceUsesScanner.scan(compilationUnit, null);
 
@@ -178,14 +172,15 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
   }
 
   private static SuggestedFix ensureFixesDoNotOverlap(
-      JCTree methodBody, JCCompilationUnit compilationUnit, SuggestedFix fix, VisitorState state) {
+      Tree methodBody, CompilationUnitTree compilationUnit, SuggestedFix fix, VisitorState state) {
     StringBuilder methodBodySource =
         new StringBuilder(Objects.requireNonNull(state.getSourceForNode(methodBody)));
     Range<Integer> methodBodyPositionRange =
-        Range.closedOpen(methodBody.getStartPosition(), state.getEndPosition(methodBody));
+        Range.closedOpen(getStartPosition(methodBody), state.getEndPosition(methodBody));
     SuggestedFix.Builder fixBuilder = SuggestedFix.builder();
     // Apply each fix generated by ReplaceUsesScanner to fixBuilder.
-    for (Replacement replacement : fix.getReplacements(compilationUnit.endPositions)) {
+    for (Replacement replacement :
+        fix.getReplacements(ErrorProneEndPosTable.create(compilationUnit))) {
       if (replacement.range().isConnected(methodBodyPositionRange)) {
         // If the usage replacement overlaps with the method body, apply it to the method body
         // source directly, to avoid fix collisions when we replace the whole thing.
@@ -235,11 +230,11 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
     /**
      * Replace the given {@code node} with the method reference specified by {@code this.newName}.
      */
-    @Nullable
-    private SuggestedFix replaceUseWithMethodReference(ExpressionTree node, VisitorState state) {
+    private @Nullable SuggestedFix replaceUseWithMethodReference(
+        ExpressionTree node, VisitorState state) {
       Tree parent = state.getPath().getParentPath().getLeaf();
-      if (parent instanceof MemberSelectTree
-          && ((MemberSelectTree) parent).getExpression().equals(node)) {
+      if (parent instanceof MemberSelectTree memberSelectTree
+          && memberSelectTree.getExpression().equals(node)) {
         Symbol symbol = getSymbol(parent);
         // If anything other than the abstract method is used on this anonymous class, we can't hope
         // to generate a fix.
@@ -248,7 +243,7 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
           failed = true;
           return null;
         }
-        Tree receiver = node.getKind() == Tree.Kind.IDENTIFIER ? null : getReceiver(node);
+        Tree receiver = node instanceof IdentifierTree ? null : getReceiver(node);
         return SuggestedFix.replace(
             receiver != null ? state.getEndPosition(receiver) : getStartPosition(node),
             state.getEndPosition(parent),
@@ -258,12 +253,11 @@ public class UnnecessaryAnonymousClass extends BugChecker implements VariableTre
         return SuggestedFix.replace(
             node,
             String.format(
-                "%s::%s",
-                sym.isStatic() ? sym.owner.enclClass().getSimpleName() : "this", newName));
+                "%s::%s", isStatic(sym) ? enclosingClass(sym).getSimpleName() : "this", newName));
       }
     }
 
-    public Optional<SuggestedFix> getFixes() {
+    Optional<SuggestedFix> getFixes() {
       return failed ? Optional.empty() : Optional.of(fix.build());
     }
   }

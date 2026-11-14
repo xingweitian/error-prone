@@ -33,14 +33,16 @@ public class ComparingThisWithNullTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: ComparingThisWithNull",
-            "    if (this == null) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: ComparingThisWithNull
+                if (this == null) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -49,14 +51,16 @@ public class ComparingThisWithNullTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: ComparingThisWithNull",
-            "    if (null == this) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: ComparingThisWithNull
+                if (null == this) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -65,14 +69,16 @@ public class ComparingThisWithNullTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: ComparingThisWithNull",
-            "    if (this != null) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: ComparingThisWithNull
+                if (this != null) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -81,78 +87,88 @@ public class ComparingThisWithNullTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: ComparingThisWithNull",
-            "    if (null != this) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: ComparingThisWithNull
+                if (null != this) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void null_Negative() {
+  public void null_negative() {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    Object o = new Object();",
-            "    if (null != o) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                Object o = new Object();
+                if (null != o) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void this_Negative() {
+  public void this_negative() {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    Object o = new Object();",
-            "    if (this != o) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                Object o = new Object();
+                if (this != o) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void nullNot_Negative() {
+  public void nullNot_negative() {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    Object o = new Object();",
-            "    if (null == o) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                Object o = new Object();
+                if (null == o) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void thisNot_Negative() {
+  public void thisNot_negative() {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void f() {",
-            "    Object o = new Object();",
-            "    if (this == o) {",
-            "     String x = \"Test\";",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f() {
+                Object o = new Object();
+                if (this == o) {
+                  String x = "Test";
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

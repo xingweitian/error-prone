@@ -16,10 +16,9 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static org.junit.Assume.assumeFalse;
+import static com.google.common.truth.TruthJUnit.assume;
 
 import com.google.errorprone.CompilationTestHelper;
-import com.google.errorprone.util.RuntimeVersion;
 import java.util.Arrays;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -32,77 +31,95 @@ public class ArrayFillIncompatibleTypeTest {
       CompilationTestHelper.newInstance(ArrayFillIncompatibleType.class, getClass());
 
   @Test
-  public void testPrimitiveBoxingIntoObject() {
-    assumeFalse(RuntimeVersion.isAtLeast12()); // https://bugs.openjdk.java.net/browse/JDK-8028563
+  public void primitiveBoxingIntoObject() {
+    assume()
+        .that(Runtime.version().feature())
+        .isLessThan(12); // https://bugs.openjdk.java.net/browse/JDK-8028563
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "class Test {",
-            "  void something(boolean b, Object[] o) {",
-            "     Arrays.fill(o, b);",
-            "  }",
-            "}")
+            """
+            import java.util.Arrays;
+
+            class Test {
+              void something(boolean b, Object[] o) {
+                Arrays.fill(o, b);
+              }
+            }
+            """)
         .setArgs(Arrays.asList("-source", "1.6", "-target", "1.6"))
         .doTest();
   }
 
   @Test
-  public void testPositive() {
+  public void positive() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "class Test {",
-            "  void something(String b, Integer[] o, Number n) {",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, b);",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, 2.0d);",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, n);",
-            "  }",
-            "}")
+            """
+            import java.util.Arrays;
+
+            class Test {
+              void something(String b, Integer[] o, Number n) {
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, b);
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, 2.0d);
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, n);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testTernary() {
+  public void ternary() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "class Test {",
-            "  enum Foo {BAR, BAZ};",
-            "  void something(Foo[] o, String[] s) {",
-            "     Arrays.fill(o, true ? Foo.BAR : Foo.BAZ);",
-            "     Arrays.fill(s, true ? \"a\" : \"b\");",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(s, true ? \"a\" : 123);",
-            "  }",
-            "}")
+            """
+            import java.util.Arrays;
+
+            class Test {
+              enum Foo {
+                BAR,
+                BAZ
+              };
+
+              void something(Foo[] o, String[] s) {
+                Arrays.fill(o, true ? Foo.BAR : Foo.BAZ);
+                Arrays.fill(s, true ? "a" : "b");
+                // BUG: Diagnostic contains:
+                Arrays.fill(s, true ? "a" : 123);
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testBoxing() {
+  public void boxing() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.Arrays;",
-            "class Test {",
-            "  void something(int i, long l, Integer[] o) {",
-            "     Arrays.fill(o, 1);",
-            "     Arrays.fill(o, i);",
-            "     Arrays.fill(o, 0, 4, i);",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, l);",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, 4L);",
-            "     // BUG: Diagnostic contains: ",
-            "     Arrays.fill(o, 0, 4, l);",
-            "  }",
-            "}")
+            """
+            import java.util.Arrays;
+
+            class Test {
+              void something(int i, long l, Integer[] o) {
+                Arrays.fill(o, 1);
+                Arrays.fill(o, i);
+                Arrays.fill(o, 0, 4, i);
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, l);
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, 4L);
+                // BUG: Diagnostic contains:
+                Arrays.fill(o, 0, 4, l);
+              }
+            }
+            """)
         .doTest();
   }
 }

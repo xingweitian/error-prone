@@ -20,7 +20,7 @@ import com.google.common.base.Predicate;
 import com.google.errorprone.dataflow.AccessPath;
 import com.google.errorprone.dataflow.AccessPathValues;
 import java.util.List;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Transfer function for {@link TrustingNullnessAnalysis}. It "trusts" annotations, meaning:
@@ -73,8 +73,7 @@ class TrustingNullnessPropagation extends NullnessPropagationTransfer {
 
     @Override
     public boolean apply(MethodInfo input) {
-      return NullnessAnnotations.fromAnnotations(input.annotations()).orElse(Nullness.NONNULL)
-          == Nullness.NONNULL;
+      return input.nullnessFromDirectAnnotations().orElse(Nullness.NONNULL) == Nullness.NONNULL;
     }
   }
 }

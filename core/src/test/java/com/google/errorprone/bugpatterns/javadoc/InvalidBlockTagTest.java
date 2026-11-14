@@ -17,7 +17,6 @@
 package com.google.errorprone.bugpatterns.javadoc;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import com.google.errorprone.BugCheckerRefactoringTestHelper.TestMode;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,83 +33,104 @@ public final class InvalidBlockTagTest {
 
   @Test
   public void typo() {
+    // common_typos_disable
     refactoring
         .addInputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** @returns anything */",
-            "  void foo();",
-            "}")
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @returns anything
+               */
+              void foo();
+            }
+            """)
         .addOutputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** @return anything */",
-            "  void foo();",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @return anything
+               */
+              void foo();
+            }
+            """)
+        .doTest();
+    // common_typos_enable
   }
 
   @Test
   public void veryBadTypo_noSuggestion() {
     refactoring
         .addInputLines(
-            "Test.java", //
-            "interface Test {",
-            "  /** @returnFnargleBlargle anything */",
-            "  void foo();",
-            "}")
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * @returnFnargleBlargle anything
+               */
+              void foo();
+            }
+            """)
         .expectUnchanged()
-        .doTest(TestMode.TEXT_MATCH);
+        .doTest();
   }
 
   @Test
   public void otherAcceptedTags() {
     helper
         .addSourceLines(
-            "Test.java", //
-            "class Test {",
-            "  /** @hide */",
-            "  void test() {}",
-            "}")
+            "Test.java",
+            """
+            class Test {
+              /** @hide */
+              void test() {}
+            }
+            """)
         .doTest();
   }
 
   @Test
+  @SuppressWarnings("MisformattedTestData")
   public void inHtml() {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * <code>",
-            "   *    @Override",
-            "   *    boolean equals(Object o);",
-            "   *  </code>",
-            "   * @See Test",
-            "   * <pre>",
-            "   *    @Override",
-            "   *    boolean equals(Object o);",
-            "   *  </pre>",
-            "   */",
-            "  void bar();",
-            "}")
+            """
+            interface Test {
+              /**
+               * <code>
+               *    @Override
+               *    boolean equals(Object o);
+               *  </code>
+               * @See Test
+               * <pre>
+               *    @Override
+               *    boolean equals(Object o);
+               *  </pre>
+               */
+              void bar();
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * <code>",
-            "   *    {@literal @}Override",
-            "   *    boolean equals(Object o);",
-            "   *  </code>",
-            "   * @see Test",
-            "   * <pre>",
-            "   *    {@literal @}Override",
-            "   *    boolean equals(Object o);",
-            "   *  </pre>",
-            "   */",
-            "  void bar();",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /**
+               * <code>
+               *    {@literal @}Override
+               *    boolean equals(Object o);
+               *  </code>
+               * @see Test
+               * <pre>
+               *    {@literal @}Override
+               *    boolean equals(Object o);
+               *  </pre>
+               */
+              void bar();
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -118,21 +138,43 @@ public final class InvalidBlockTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @a blah",
-            "   */",
-            "  void foo(int a);",
-            "}")
+            """
+            interface Test {
+              /**
+               * @a blah
+               */
+              void foo(int a);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /**",
-            "   * @param a blah",
-            "   */",
-            "  void foo(int a);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /**
+               * @param a blah
+               */
+              void foo(int a);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData")
+  public void parameterBlockTag_finding() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            interface Test {
+              /**
+               * // BUG: Diagnostic contains: {@code a}
+               * @a blah
+               */
+              void foo(int a);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -140,17 +182,23 @@ public final class InvalidBlockTagTest {
     refactoring
         .addInputLines(
             "Test.java",
-            "interface Test {",
-            "  /** @inheritDoc */",
-            "  void frobnicate(String foo);",
-            "}")
+            """
+            interface Test {
+              /**
+               * @inheritDoc
+               */
+              void frobnicate(String foo);
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "interface Test {",
-            "  /** {@inheritDoc} */",
-            "  void frobnicate(String foo);",
-            "}")
-        .doTest(TestMode.TEXT_MATCH);
+            """
+            interface Test {
+              /** {@inheritDoc} */
+              void frobnicate(String foo);
+            }
+            """)
+        .doTest();
   }
 
   @Test
@@ -158,11 +206,45 @@ public final class InvalidBlockTagTest {
     helper
         .addSourceLines(
             "Test.java",
-            "/**",
-            "  * @apiNote does nothing",
-            "  * @implNote not implemented",
-            "  */",
-            "class Test {}")
+            """
+            /**
+             * @apiNote does nothing
+             * @implNote not implemented
+             */
+            class Test {}
+            """)
+        .doTest();
+  }
+
+  @Test
+  @SuppressWarnings("MisformattedTestData") // asserting the line the bug is on becomes inconvenient
+  public void returnOnClass() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            // BUG: Diagnostic contains:
+            /** @return anything */
+            interface Test {
+              void foo();
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void customTag() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            /**
+             * @customTag1 {@arbitraryInlineTag}
+             * @customTag2 this is a custom tag
+             */
+            class Test {}
+            """)
+        .setArgs("-XepOpt:Javadoc:customBlockTags=customTag1,customTag2")
         .doTest();
   }
 }

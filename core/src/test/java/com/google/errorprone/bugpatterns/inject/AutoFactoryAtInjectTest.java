@@ -21,7 +21,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author ronshapiro@google.com (Ron Shapiro) */
+/**
+ * @author ronshapiro@google.com (Ron Shapiro)
+ */
 @RunWith(JUnit4.class)
 public class AutoFactoryAtInjectTest {
 
@@ -29,12 +31,81 @@ public class AutoFactoryAtInjectTest {
       CompilationTestHelper.newInstance(AutoFactoryAtInject.class, getClass());
 
   @Test
-  public void testPositiveCase() {
-    compilationHelper.addSourceFile("AutoFactoryAtInjectPositiveCases.java").doTest();
+  public void positiveCase() {
+    compilationHelper
+        .addSourceLines(
+            "AutoFactoryAtInjectPositiveCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.auto.factory.AutoFactory;
+            import javax.inject.Inject;
+
+            class AssistedInjectAndInjectOnSameConstructorPositiveCases {
+
+              @AutoFactory
+              static class HasAutoFactoryOnClass {
+                // BUG: Diagnostic contains: remove
+                @Inject
+                HasAutoFactoryOnClass() {}
+              }
+
+              @AutoFactory
+              static class UsesGuiceInject {
+                // BUG: Diagnostic contains: remove
+                @com.google.inject.Inject
+                UsesGuiceInject() {}
+              }
+
+              static class HasAutoFactoryOnConstructor {
+                // BUG: Diagnostic contains: remove
+                @Inject
+                @AutoFactory
+                HasAutoFactoryOnConstructor() {}
+              }
+            }
+            """)
+        .doTest();
   }
 
   @Test
-  public void testNegativeCase() {
-    compilationHelper.addSourceFile("AutoFactoryAtInjectNegativeCases.java").doTest();
+  public void negativeCase() {
+    compilationHelper
+        .addSourceLines(
+            "AutoFactoryAtInjectNegativeCases.java",
+            """
+            package com.google.errorprone.bugpatterns.inject.testdata;
+
+            import com.google.auto.factory.AutoFactory;
+            import javax.inject.Inject;
+
+            class AutoFactoryAtInjectNegativeCases {
+
+              @AutoFactory
+              static class AtInjectOnInnerType {
+                static class InnerType {
+                  @Inject
+                  InnerType() {}
+                }
+              }
+
+              static class AutoFactoryOnInnerType {
+                @Inject
+                AutoFactoryOnInnerType() {}
+
+                @AutoFactory
+                static class InnerType {}
+              }
+
+              static class OnDifferentConstructors {
+                @Inject
+                OnDifferentConstructors(String string) {}
+
+                @AutoFactory
+                OnDifferentConstructors(Object object) {}
+              }
+            }
+            """)
+        .doTest();
   }
 }

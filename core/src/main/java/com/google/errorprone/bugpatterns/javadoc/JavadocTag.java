@@ -16,26 +16,15 @@
 
 package com.google.errorprone.bugpatterns.javadoc;
 
-import com.google.auto.value.AutoValue;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
+
 import com.google.common.collect.ImmutableSet;
+import com.google.errorprone.annotations.Immutable;
+import java.util.stream.Stream;
 
 /** Describes Javadoc tags, and contains lists of valid tags. */
-@AutoValue
-abstract class JavadocTag {
-
-  /** Non-standard commonly-used tags which we should allow. */
-  static final ImmutableSet<JavadocTag> KNOWN_OTHER_TAGS =
-      ImmutableSet.of(
-          blockTag("apiNote"),
-          blockTag("attr"), // commonly used by Android
-          blockTag("contact"),
-          blockTag("fails"), // commonly used tag for denoting async failure modes
-          blockTag("hide"),
-          blockTag("implNote"),
-          blockTag("implSpec"),
-          blockTag("required"),
-          blockTag("team"));
-
+@Immutable
+record JavadocTag(String name, TagType type) {
   private static final ImmutableSet<JavadocTag> COMMON_TAGS =
       ImmutableSet.of(
           inlineTag("code"),
@@ -45,7 +34,8 @@ abstract class JavadocTag {
           inlineTag("linkplain"),
           inlineTag("literal"),
           blockTag("see"),
-          blockTag("since"));
+          blockTag("since"),
+          inlineTag("snippet"));
 
   static final ImmutableSet<JavadocTag> VALID_CLASS_TAGS =
       ImmutableSet.<JavadocTag>builder()
@@ -85,9 +75,11 @@ abstract class JavadocTag {
               blockTag("version"))
           .build();
 
-  abstract String name();
-
-  abstract TagType type();
+  static final ImmutableSet<JavadocTag> ALL_INLINE_TAGS =
+      Stream.of(VALID_CLASS_TAGS, VALID_VARIABLE_TAGS, VALID_METHOD_TAGS)
+          .flatMap(ImmutableSet::stream)
+          .filter(tag -> tag.type() == TagType.INLINE)
+          .collect(toImmutableSet());
 
   enum TagType {
     BLOCK,
@@ -103,6 +95,6 @@ abstract class JavadocTag {
   }
 
   private static JavadocTag of(String name, TagType type) {
-    return new AutoValue_JavadocTag(name, type);
+    return new JavadocTag(name, type);
   }
 }

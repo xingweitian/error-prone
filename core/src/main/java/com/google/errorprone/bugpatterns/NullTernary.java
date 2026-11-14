@@ -23,13 +23,12 @@ import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.ConditionalExpressionTreeMatcher;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ConditionalExpressionTree;
 import com.sun.source.tree.Tree.Kind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "NullTernary",
     summary =
         "This conditional expression may evaluate to null, which will result in an NPE when the"
             + " result is unboxed.",
@@ -43,7 +42,7 @@ public class NullTernary extends BugChecker implements ConditionalExpressionTree
         && conditionalExpression.getTrueExpression().getKind() != Kind.NULL_LITERAL) {
       return NO_MATCH;
     }
-    ASTHelpers.TargetType targetType = ASTHelpers.targetType(state);
+    TargetType targetType = TargetType.targetType(state);
     if (targetType == null || !targetType.type().isPrimitive()) {
       return NO_MATCH;
     }

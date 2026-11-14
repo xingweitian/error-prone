@@ -20,6 +20,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 
 import com.google.common.collect.Iterables;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFixes;
@@ -31,6 +32,7 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.util.Names;
 import java.util.Optional;
+import javax.inject.Inject;
 
 /**
  * Warns against calling toString() on Objects which don't have toString() method overridden and
@@ -39,7 +41,6 @@ import java.util.Optional;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "ObjectToString",
     summary =
         "Calling toString on Objects that don't override toString() doesn't"
             + " provide useful information",
@@ -73,6 +74,11 @@ public class ObjectToString extends AbstractToString {
                         && m.overrides(toString, type.tsym, types, /* checkResult= */ false)));
   }
 
+  @Inject
+  ObjectToString(ErrorProneFlags flags) {
+    super(flags);
+  }
+
   @Override
   protected TypePredicate typePredicate() {
     return ObjectToString::finalNoOverrides;
@@ -88,12 +94,13 @@ public class ObjectToString extends AbstractToString {
   }
 
   @Override
-  protected Optional<Fix> implicitToStringFix(ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> implicitToStringFix(ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 
   @Override
-  protected Optional<Fix> toStringFix(Tree parent, ExpressionTree tree, VisitorState state) {
+  protected Optional<Fix> toStringFix(
+      Tree toStringCall, ExpressionTree stringifiedExpr, VisitorState state) {
     return Optional.empty();
   }
 }

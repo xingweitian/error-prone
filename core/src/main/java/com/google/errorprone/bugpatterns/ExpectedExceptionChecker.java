@@ -28,6 +28,7 @@ import static com.google.errorprone.matchers.Matchers.throwStatement;
 import static com.google.errorprone.matchers.Matchers.toType;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
 import static com.google.errorprone.matchers.method.MethodMatchers.staticMethod;
+import static com.google.errorprone.suppliers.Suppliers.CLASS_TYPE;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
 import static com.google.errorprone.util.ASTHelpers.getUpperBound;
 import static com.google.errorprone.util.ASTHelpers.isSubtype;
@@ -38,6 +39,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.fixes.Fix;
@@ -53,7 +55,6 @@ import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symtab;
@@ -62,14 +63,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.regex.Pattern;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
+import org.safere.Pattern;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "ExpectedExceptionChecker",
-    summary = "Prefer assertThrows to ExpectedException",
-    severity = WARNING)
+@BugPattern(summary = "Prefer assertThrows to ExpectedException", severity = WARNING)
 public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMatcher {
 
   static final Matcher<StatementTree> MATCHER =
@@ -81,7 +79,8 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
   static final Matcher<ExpressionTree> IS_A =
       staticMethod()
           .onClassAny("org.hamcrest.Matchers", "org.hamcrest.CoreMatchers", "org.hamcrest.core.Is")
-          .withSignature("<T>isA(java.lang.Class<T>)");
+          .named("isA")
+          .withParametersOfType(CLASS_TYPE);
 
   static final Matcher<StatementTree> FAIL_MATCHER =
       anyOf(
@@ -114,7 +113,7 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
                 if (description != NO_MATCH) {
                   state.reportMatch(description);
                 }
-                return super.visitBlock(block, unused);
+                return super.visitBlock(block, null);
               }
             },
             null);
@@ -180,7 +179,7 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
       Symtab symtab = state.getSymtab();
       List<? extends ExpressionTree> args = invocation.getArguments();
       switch (symbol.getSimpleName().toString()) {
-        case "expect":
+        case "expect" -> {
           Type type = ASTHelpers.getType(getOnlyElement(invocation.getArguments()));
           if (isSubtype(type, symtab.classType, state)) {
             // expect(Class<?>)
@@ -190,9 +189,8 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
                         state.getTypes().asSuper(type, symtab.classType.tsym).getTypeArguments(),
                         symtab.throwableType),
                     state.getTypes());
-          } else if (isSubtype(type, state.getTypeFromString("org.hamcrest.Matcher"), state)) {
-            Type matcherType =
-                state.getTypes().asSuper(type, state.getSymbolFromString("org.hamcrest.Matcher"));
+          } else if (isSubtype(type, ORG_HAMCREST_MATCHER, state)) {
+            Type matcherType = state.getTypes().asSuper(type, ORG_HAMCREST_MATCHER.symbol(state));
             if (!matcherType.getTypeArguments().isEmpty()) {
               Type matchType = getOnlyElement(matcherType.getTypeArguments());
               if (isSubtype(matchType, symtab.throwableType, state)) {
@@ -205,8 +203,8 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
                 String.format(
                     "assertThat(thrown, %s);", state.getSourceForNode(getOnlyElement(args))));
           }
-          break;
-        case "expectCause":
+        }
+        case "expectCause" -> {
           ExpressionTree matcher = getOnlyElement(invocation.getArguments());
           if (IS_A.matches(matcher, state)) {
             fix.addStaticImport("com.google.common.truth.Truth.assertThat");
@@ -222,8 +220,8 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
                     "assertThat(thrown.getCause(), %s);",
                     state.getSourceForNode(getOnlyElement(args))));
           }
-          break;
-        case "expectMessage":
+        }
+        case "expectMessage" -> {
           if (isSubtype(
               getOnlyElement(symbol.getParameters()).asType(), symtab.stringType, state)) {
             // expectedMessage(String)
@@ -240,21 +238,20 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
                     "assertThat(thrown.getMessage(), %s);",
                     state.getSourceForNode(getOnlyElement(args))));
           }
-          break;
-        default:
-          throw new AssertionError("unknown expect method: " + symbol.getSimpleName());
+        }
+        default -> throw new AssertionError("unknown expect method: " + symbol.getSimpleName());
       }
     }
     // remove all interactions with the ExpectedException rule
     fix.replace(
-        getStartPosition(expectations.get(0)), state.getEndPosition(getLast(expectations)), "");
+        getStartPosition(expectations.getFirst()), state.getEndPosition(getLast(expectations)), "");
     if (failure != null) {
       fix.delete(failure);
     }
     return finishFix(fix.build(), exceptionType, newAsserts, suffix, state);
   }
 
-  private static Fix finishFix(
+  private static SuggestedFix finishFix(
       SuggestedFix baseFix,
       Type exceptionType,
       List<String> newAsserts,
@@ -263,7 +260,7 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
     if (throwingStatements.isEmpty()) {
       return baseFix;
     }
-    SuggestedFix.Builder fix = SuggestedFix.builder().merge(baseFix);
+    SuggestedFix.Builder fix = baseFix.toBuilder();
     fix.addStaticImport("org.junit.Assert.assertThrows");
     StringBuilder fixPrefix = new StringBuilder();
     String exceptionTypeName = SuggestedFixes.qualifyType(state, fix, exceptionType);
@@ -274,17 +271,20 @@ public class ExpectedExceptionChecker extends BugChecker implements MethodTreeMa
     fixPrefix.append(String.format("(%s.class, () -> ", exceptionTypeName));
     boolean useExpressionLambda =
         throwingStatements.size() == 1
-            && getOnlyElement(throwingStatements).getKind() == Kind.EXPRESSION_STATEMENT;
+            && getOnlyElement(throwingStatements) instanceof ExpressionStatementTree;
     if (!useExpressionLambda) {
       fixPrefix.append("{");
     }
-    fix.prefixWith(throwingStatements.get(0), fixPrefix.toString());
+    fix.prefixWith(throwingStatements.getFirst(), fixPrefix.toString());
     if (useExpressionLambda) {
-      fix.postfixWith(((ExpressionStatementTree) throwingStatements.get(0)).getExpression(), ")");
+      fix.postfixWith(
+          ((ExpressionStatementTree) throwingStatements.getFirst()).getExpression(), ")");
       fix.postfixWith(getLast(throwingStatements), '\n' + Joiner.on('\n').join(newAsserts));
     } else {
       fix.postfixWith(getLast(throwingStatements), "});\n" + Joiner.on('\n').join(newAsserts));
     }
     return fix.build();
   }
+
+  private static final ClassName ORG_HAMCREST_MATCHER = ClassName.of("org.hamcrest.Matcher");
 }

@@ -16,7 +16,6 @@
 
 package com.google.errorprone.matchers.method;
 
-import static com.google.common.truth.Truth.assertThat;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Matchers.anyMethod;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
@@ -30,10 +29,9 @@ import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.matchers.Matchers;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
-import java.util.List;
-import java.util.stream.Collectors;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -48,23 +46,24 @@ public class MethodInvocationMatcherTest {
     CompilationTestHelper.newInstance(MethodInvocationChecker.class, getClass())
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  public String toString() {",
-            "    System.out.println(\"Stringifying\");",
-            "    // BUG: Diagnostic contains: ",
-            "    String s = \"5\".toString();",
-            "    // BUG: Diagnostic contains: ",
-            "    int result = Integer.valueOf(5).compareTo(6);",
-            "    // BUG: Diagnostic contains: ",
-            "    return String.valueOf(5);",
-            "  }",
-            "}")
+            """
+            class Test {
+              public String toString() {
+                System.out.println("Stringifying");
+                // BUG: Diagnostic contains:
+                String s = "5".toString();
+                // BUG: Diagnostic contains:
+                int result = Integer.valueOf(5).compareTo(6);
+                // BUG: Diagnostic contains:
+                return String.valueOf(5);
+              }
+            }
+            """)
         .doTest();
   }
 
   /** A {@link BugChecker} for test. */
   @BugPattern(
-      name = "MethodInvocationChecker",
       summary = "Checker that flags the given method invocation if the matcher matches",
       severity = ERROR)
   public static class MethodInvocationChecker extends BugChecker
@@ -72,18 +71,13 @@ public class MethodInvocationMatcherTest {
     private final Matcher<ExpressionTree> matcher;
 
     public MethodInvocationChecker() {
-      List<MethodMatchers.MethodMatcher> matchers =
+      ImmutableList<MethodMatchers.MethodMatcher> matchers =
           ImmutableList.of(
-              instanceMethod().anyClass().named("toString").withParameters(),
+              instanceMethod().anyClass().named("toString").withNoParameters(),
               anyMethod().anyClass().named("valueOf").withParameters("int"),
               staticMethod().anyClass().named("valueOf").withParameters("long"),
               instanceMethod().onDescendantOf("java.lang.Number"));
-      assertThat(matchers.stream().allMatch(m -> m.asRule().isPresent())).isTrue();
-      this.matcher =
-          MethodInvocationMatcher.compile(
-              matchers.stream()
-                  .map(m -> m.asRule().orElseThrow(RuntimeException::new))
-                  .collect(Collectors.toList()));
+      this.matcher = Matchers.anyOf(matchers);
     }
 
     @Override

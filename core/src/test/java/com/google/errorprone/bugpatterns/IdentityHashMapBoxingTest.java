@@ -28,88 +28,122 @@ public class IdentityHashMapBoxingTest {
       CompilationTestHelper.newInstance(IdentityHashMapBoxing.class, getClass());
 
   @Test
-  public void testConstructorPositiveCases() {
+  public void constructorPositiveCases() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.IdentityHashMap;",
-            "import java.util.Map;",
-            "class Test {",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Integer, String> map1 = new IdentityHashMap<>();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Float, String> map2 = new IdentityHashMap<>();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Double, String> map3 = new IdentityHashMap<>();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Long, String> map4 = new IdentityHashMap<>();",
-            "  }",
-            "}")
+            """
+            import java.util.IdentityHashMap;
+            import java.util.Map;
+
+            class Test {
+              void test() {
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Boolean, String> map1 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Byte, String> map2 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Character, String> map3 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Short, String> map4 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Integer, String> map5 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Long, String> map6 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Float, String> map7 = new IdentityHashMap<>();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Double, String> map8 = new IdentityHashMap<>();
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testConstructorNegativeCases() {
+  public void constructorNegativeCases() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.util.IdentityHashMap;",
-            "import java.util.Map;",
-            "class Test {",
-            "  void test() {",
-            "    Map<String, Integer> map1 = new IdentityHashMap<>();",
-            "    Map<String, Float> map2 = new IdentityHashMap<>();",
-            "    Map<String, Double> map3 = new IdentityHashMap<>();",
-            "    Map<String, Long> map4 = new IdentityHashMap<>();",
-            "    Map<String, Object> map5 = new IdentityHashMap<>();",
-            "    Map<Object, String> map6 = new IdentityHashMap<>();",
-            "  }",
-            "}")
+            """
+            import java.util.IdentityHashMap;
+            import java.util.Map;
+
+            class Test {
+              void test() {
+                Map<String, Boolean> map1 = new IdentityHashMap<>();
+                Map<String, Byte> map2 = new IdentityHashMap<>();
+                Map<String, Character> map3 = new IdentityHashMap<>();
+                Map<String, Short> map4 = new IdentityHashMap<>();
+                Map<String, Integer> map5 = new IdentityHashMap<>();
+                Map<String, Long> map6 = new IdentityHashMap<>();
+                Map<String, Float> map7 = new IdentityHashMap<>();
+                Map<String, Double> map8 = new IdentityHashMap<>();
+                Map<String, Object> map9 = new IdentityHashMap<>();
+                Map<Object, String> map10 = new IdentityHashMap<>();
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMapsPositiveCases() {
+  public void mapsPositiveCases() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.collect.Maps;",
-            "import java.util.IdentityHashMap;",
-            "import java.util.Map;",
-            "class Test {",
-            "  void test() {",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Integer, String> map1 = Maps.newIdentityHashMap();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Float, String> map2 = Maps.newIdentityHashMap();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Double, String> map3 = Maps.newIdentityHashMap();",
-            "    // BUG: Diagnostic contains: IdentityHashMapBoxing",
-            "    Map<Long, String> map4 = Maps.newIdentityHashMap();",
-            "  }",
-            "}")
+            """
+            import com.google.common.collect.Maps;
+            import java.util.Map;
+
+            class Test {
+              void test() {
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Boolean, String> map1 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Byte, String> map2 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Character, String> map3 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Short, String> map4 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Integer, String> map5 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Long, String> map6 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Float, String> map7 = Maps.newIdentityHashMap();
+                // BUG: Diagnostic contains: IdentityHashMapBoxing
+                Map<Double, String> map8 = Maps.newIdentityHashMap();
+              }
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testMapsNegativeCases() {
+  public void mapsNegativeCases() {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.common.collect.Maps;",
-            "import java.util.IdentityHashMap;",
-            "import java.util.Map;",
-            "class Test {",
-            "  void test() {",
-            "    Map<String, Integer> map1 = Maps.newIdentityHashMap();",
-            "    Map<String, Float> map2 = Maps.newIdentityHashMap();",
-            "    Map<String, Double> map3 = Maps.newIdentityHashMap();",
-            "    Map<String, Long> map4 = Maps.newIdentityHashMap();",
-            "    Map<String, Object> map5 = Maps.newIdentityHashMap();",
-            "    Map<Object, String> map6 = Maps.newIdentityHashMap();",
-            "  }",
-            "}")
+            """
+            import com.google.common.collect.Maps;
+            import java.util.Map;
+
+            class Test {
+              void test() {
+                Map<String, Boolean> map1 = Maps.newIdentityHashMap();
+                Map<String, Byte> map2 = Maps.newIdentityHashMap();
+                Map<String, Character> map3 = Maps.newIdentityHashMap();
+                Map<String, Short> map4 = Maps.newIdentityHashMap();
+                Map<String, Integer> map5 = Maps.newIdentityHashMap();
+                Map<String, Long> map6 = Maps.newIdentityHashMap();
+                Map<String, Float> map7 = Maps.newIdentityHashMap();
+                Map<String, Double> map8 = Maps.newIdentityHashMap();
+                Map<String, Object> map9 = Maps.newIdentityHashMap();
+                Map<Object, String> map10 = Maps.newIdentityHashMap();
+              }
+            }
+            """)
         .doTest();
   }
 }

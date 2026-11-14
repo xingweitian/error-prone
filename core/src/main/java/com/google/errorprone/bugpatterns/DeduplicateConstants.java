@@ -40,7 +40,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A checker that suggests deduplicating literals with existing constant variables.
@@ -48,7 +48,6 @@ import javax.annotation.Nullable;
  * @author cushon@google.com (Liam Miller-Cushon)
  */
 @BugPattern(
-    name = "DeduplicateConstants",
     summary =
         "This expression was previously declared as a constant;"
             + " consider replacing this occurrence.",
@@ -60,6 +59,7 @@ public class DeduplicateConstants extends BugChecker implements CompilationUnitT
 
     /** A map from string literals to constant declarations. */
     private final HashMap<String, VarSymbol> values = new HashMap<>();
+
     /** Declarations that are hidden in the current scope. */
     private final Set<Name> hidden = new HashSet<>();
 
@@ -76,8 +76,7 @@ public class DeduplicateConstants extends BugChecker implements CompilationUnitT
     }
 
     /** Returns an in-scope constant variable with the given value. */
-    @Nullable
-    public VarSymbol get(String value) {
+    public @Nullable VarSymbol get(String value) {
       VarSymbol sym = getInternal(value);
       if (sym == null) {
         return null;
@@ -88,8 +87,7 @@ public class DeduplicateConstants extends BugChecker implements CompilationUnitT
       return sym;
     }
 
-    @Nullable
-    private VarSymbol getInternal(String value) {
+    private @Nullable VarSymbol getInternal(String value) {
       VarSymbol sym = values.get(value);
       if (sym != null) {
         return sym;
@@ -159,9 +157,6 @@ public class DeduplicateConstants extends BugChecker implements CompilationUnitT
 
       private void saveConstValue(VariableTree tree, Scope scope) {
         VarSymbol sym = ASTHelpers.getSymbol(tree);
-        if (sym == null) {
-          return;
-        }
         if (!isConsideredFinal(sym)) {
           return;
         }

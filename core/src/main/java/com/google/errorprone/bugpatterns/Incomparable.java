@@ -30,14 +30,14 @@ import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
+import com.google.errorprone.util.TargetType;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.util.List;
+import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "Incomparable",
     summary = "Types contained in sorted collections must implement Comparable.",
     severity = ERROR)
 public class Incomparable extends BugChecker implements NewClassTreeMatcher {
@@ -64,7 +64,7 @@ public class Incomparable extends BugChecker implements NewClassTreeMatcher {
                           "java.util.TreeSet",
                           "java.util.concurrent.ConcurrentSkipListMap",
                           "java.util.concurrent.ConcurrentSkipListSet")))
-              .withParameters());
+              .withNoParameters());
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
@@ -72,7 +72,7 @@ public class Incomparable extends BugChecker implements NewClassTreeMatcher {
       return NO_MATCH;
     }
     Type type;
-    ASTHelpers.TargetType targetType = ASTHelpers.targetType(state);
+    TargetType targetType = TargetType.targetType(state);
     if (targetType != null) {
       type = targetType.type();
     } else {
@@ -82,12 +82,10 @@ public class Incomparable extends BugChecker implements NewClassTreeMatcher {
     if (typeArguments.isEmpty()) {
       return NO_MATCH;
     }
-    Type keyType = typeArguments.get(0);
+    Type keyType = typeArguments.getFirst();
     if (ASTHelpers.isCastable(keyType, state.getSymtab().comparableType, state)) {
       return NO_MATCH;
     }
-    return buildDescription(tree)
-        .setMessage(String.format("%s does not implement Comparable", keyType))
-        .build();
+    return buildDescription(tree).setMessage("%s does not implement Comparable", keyType).build();
   }
 }

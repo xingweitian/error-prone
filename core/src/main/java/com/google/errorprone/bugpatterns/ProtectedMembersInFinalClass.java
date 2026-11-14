@@ -20,6 +20,8 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.hasModifier;
+import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.isCanonicalRecordConstructor;
 import static java.util.stream.Collectors.joining;
 import static javax.lang.model.element.Modifier.FINAL;
 import static javax.lang.model.element.Modifier.PROTECTED;
@@ -38,7 +40,7 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.code.Symbol;
-import javax.lang.model.element.Modifier;
+import com.sun.tools.javac.code.Symbol.MethodSymbol;
 
 /**
  * Flags protected members in final classes.
@@ -46,7 +48,6 @@ import javax.lang.model.element.Modifier;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "ProtectedMembersInFinalClass",
     summary = "Protected members in final classes can be package-private",
     severity = WARNING)
 public class ProtectedMembersInFinalClass extends BugChecker implements ClassTreeMatcher {
@@ -59,8 +60,17 @@ public class ProtectedMembersInFinalClass extends BugChecker implements ClassTre
         .isEmpty();
   }
 
+  private static boolean isConstructorOfProtectedRecord(Tree tree, VisitorState state) {
+    if (!(tree instanceof MethodTree methodTree)) {
+      return false;
+    }
+    MethodSymbol symbol = getSymbol(methodTree);
+    return symbol.enclClass().getModifiers().contains(PROTECTED)
+        && isCanonicalRecordConstructor(symbol, state);
+  }
+
   @Override
-  public Description matchClass(final ClassTree tree, final VisitorState state) {
+  public Description matchClass(ClassTree tree, VisitorState state) {
     if (!HAS_FINAL.matches(tree, state)) {
       return NO_MATCH;
     }
@@ -69,16 +79,16 @@ public class ProtectedMembersInFinalClass extends BugChecker implements ClassTre
         tree.getMembers().stream()
             .filter(m -> (m instanceof MethodTree || m instanceof VariableTree))
             .filter(m -> HAS_PROTECTED.matches(m, state))
-            .filter(
-                m -> !(m instanceof MethodTree) || methodHasNoParentMethod((MethodTree) m, state))
-            .filter(m -> !isSuppressed(m))
+            .filter(m ->
+                !(m instanceof MethodTree methodTree) || methodHasNoParentMethod(methodTree, state))
+            .filter(m -> !isConstructorOfProtectedRecord(m, state))
+            .filter(m -> !isSuppressed(m, state))
             .collect(toImmutableList());
     if (relevantMembers.isEmpty()) {
       return NO_MATCH;
     }
     SuggestedFix.Builder fix = SuggestedFix.builder();
-    relevantMembers.forEach(
-        m -> SuggestedFixes.removeModifiers(m, state, Modifier.PROTECTED).ifPresent(fix::merge));
+    relevantMembers.forEach(m -> fix.merge(SuggestedFixes.Visibility.PACKAGE.refactor(m, state)));
 
     if (fix.isEmpty()) {
       return NO_MATCH;
@@ -87,14 +97,16 @@ public class ProtectedMembersInFinalClass extends BugChecker implements ClassTre
         String.format(
             "Make members of final classes package-private: %s",
             relevantMembers.stream()
-                .map(
-                    m -> {
-                      Symbol symbol = ASTHelpers.getSymbol(m);
-                      return symbol.isConstructor()
-                          ? symbol.owner.name.toString()
-                          : symbol.name.toString();
-                    })
+                .map(m -> {
+                  Symbol symbol = ASTHelpers.getSymbol(m);
+                  return symbol.isConstructor()
+                      ? symbol.owner.name.toString()
+                      : symbol.name.toString();
+                })
                 .collect(joining(", ")));
-    return buildDescription(relevantMembers.get(0)).setMessage(message).addFix(fix.build()).build();
+    return buildDescription(relevantMembers.getFirst())
+        .setMessage(message)
+        .addFix(fix.build())
+        .build();
   }
 }

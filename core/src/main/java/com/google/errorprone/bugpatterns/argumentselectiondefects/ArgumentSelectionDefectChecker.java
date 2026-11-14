@@ -22,16 +22,17 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
+import com.google.errorprone.bugpatterns.BugChecker.DeconstructionPatternTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodInvocationTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.names.NamingConventions;
 import com.google.errorprone.names.NeedlemanWunschEditDistance;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.DeconstructionPatternTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
-import java.util.function.Function;
 
 /**
  * Checks the lexical distance between method parameter names and the argument names at call sites.
@@ -52,18 +53,17 @@ import java.util.function.Function;
  * @author andrewrice@google.com (Andrew Rice)
  */
 @BugPattern(
-    name = "ArgumentSelectionDefectChecker",
     summary = "Arguments are in the wrong order or could be commented for clarity.",
     severity = WARNING)
 public class ArgumentSelectionDefectChecker extends BugChecker
-    implements MethodInvocationTreeMatcher, NewClassTreeMatcher {
+    implements DeconstructionPatternTreeMatcher, MethodInvocationTreeMatcher, NewClassTreeMatcher {
 
   private final ArgumentChangeFinder argumentChangeFinder;
 
   public ArgumentSelectionDefectChecker() {
     this(
         ArgumentChangeFinder.builder()
-            .setDistanceFunction(buildDefaultDistanceFunction())
+            .setDistanceFunction(ArgumentSelectionDefectChecker::defaultDistanceFunction)
             .addHeuristic(new LowInformationNameHeuristic())
             .addHeuristic(new PenaltyThresholdHeuristic())
             .addHeuristic(new EnclosedByReverseHeuristic())
@@ -80,53 +80,49 @@ public class ArgumentSelectionDefectChecker extends BugChecker
   @Override
   public Description matchMethodInvocation(MethodInvocationTree tree, VisitorState state) {
     MethodSymbol symbol = ASTHelpers.getSymbol(tree);
-    if (symbol == null) {
-      return Description.NO_MATCH;
-    }
 
     // Don't return a match if the AssertEqualsArgumentOrderChecker would match it too
     if (Matchers.ASSERT_METHOD.matches(tree, state)) {
       return Description.NO_MATCH;
     }
 
-    return visitNewClassOrMethodInvocation(
-        InvocationInfo.createFromMethodInvocation(tree, symbol, state));
+    return visit(InvocationInfo.createFromMethodInvocation(tree, symbol, state));
   }
 
   @Override
   public Description matchNewClass(NewClassTree tree, VisitorState state) {
     MethodSymbol symbol = ASTHelpers.getSymbol(tree);
-    if (symbol == null) {
-      return Description.NO_MATCH;
-    }
 
     // Don't return a match if the AutoValueConstructorOrderChecker would match it too
-    if (Matchers.AUTOVALUE_CONSTRUCTOR.matches(tree, state)) {
+    if (Matchers.isAutoValueConstructor(tree)) {
       return Description.NO_MATCH;
     }
 
-    return visitNewClassOrMethodInvocation(InvocationInfo.createFromNewClass(tree, symbol, state));
+    return visit(InvocationInfo.createFromNewClass(tree, symbol, state));
   }
 
-  private Description visitNewClassOrMethodInvocation(InvocationInfo invocationInfo) {
+  @Override
+  public Description matchDeconstructionPattern(
+      DeconstructionPatternTree tree, VisitorState state) {
+    var deconstructor = InvocationInfo.createFromDeconstructionPattern(tree, state);
+    return deconstructor == null ? Description.NO_MATCH : visit(deconstructor);
+  }
 
+  private Description visit(InvocationInfo invocationInfo) {
     Changes changes = argumentChangeFinder.findChanges(invocationInfo);
 
     if (changes.isEmpty()) {
       return Description.NO_MATCH;
     }
 
-    Description.Builder description =
-        buildDescription(invocationInfo.tree()).setMessage(changes.describe(invocationInfo));
-
-    // Fix 1 (semantics-preserving): apply comments with parameter names to potentially-swapped
-    // arguments of the method
-    description.addFix(changes.buildCommentArgumentsFix(invocationInfo));
-
-    // Fix 2: permute the arguments as required
-    description.addFix(changes.buildPermuteArgumentsFix(invocationInfo));
-
-    return description.build();
+    return buildDescription(invocationInfo.tree())
+        .setMessage(changes.describe(invocationInfo))
+        // Fix 1 (semantics-preserving): apply comments with parameter names to potentially-swapped
+        // arguments of the method
+        .addFix(changes.buildCommentArgumentsFix(invocationInfo))
+        // Fix 2: permute the arguments as required
+        .addFix(changes.buildPermuteArgumentsFix(invocationInfo))
+        .build();
   }
 
   /**
@@ -135,30 +131,23 @@ public class ArgumentSelectionDefectChecker extends BugChecker
    * normalised NeedlemanWunschEditDistance. Otherwise, one of the names is unknown and so we return
    * 0 distance between it and its original parameter and infinite distance between all others.
    */
-  private static Function<ParameterPair, Double> buildDefaultDistanceFunction() {
-    return new Function<ParameterPair, Double>() {
-      @Override
-      public Double apply(ParameterPair pair) {
-        if (pair.formal().isNullLiteral() || pair.actual().isNullLiteral()) {
-          return 0.0;
-        }
+  private static double defaultDistanceFunction(ParameterPair pair) {
+    if (pair.formal().isNullLiteral() || pair.actual().isNullLiteral()) {
+      return 0.0;
+    }
 
-        if (!pair.formal().isUnknownName() && !pair.actual().isUnknownName()) {
-          String normalizedSource =
-              NamingConventions.convertToLowerUnderscore(pair.formal().name());
-          String normalizedTarget =
-              NamingConventions.convertToLowerUnderscore(pair.actual().name());
-          return NeedlemanWunschEditDistance.getNormalizedEditDistance(
-              /*source=*/ normalizedSource,
-              /*target=*/ normalizedTarget,
-              /*caseSensitive=*/ false,
-              /*changeCost=*/ 8,
-              /*openGapCost=*/ 8,
-              /*continueGapCost=*/ 1);
-        }
+    if (!pair.formal().isUnknownName() && !pair.actual().isUnknownName()) {
+      String normalizedSource = NamingConventions.convertToLowerUnderscore(pair.formal().name());
+      String normalizedTarget = NamingConventions.convertToLowerUnderscore(pair.actual().name());
+      return NeedlemanWunschEditDistance.getNormalizedEditDistance(
+          /* source= */ normalizedSource,
+          /* target= */ normalizedTarget,
+          /* caseSensitive= */ false,
+          /* changeCost= */ 8,
+          /* openGapCost= */ 8,
+          /* continueGapCost= */ 1);
+    }
 
-        return pair.formal().index() == pair.actual().index() ? 0.0 : Double.POSITIVE_INFINITY;
-      }
-    };
+    return pair.formal().index() == pair.actual().index() ? 0.0 : Double.POSITIVE_INFINITY;
   }
 }

@@ -45,7 +45,6 @@ import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ClassType;
@@ -60,10 +59,7 @@ import java.util.TreeSet;
  * <p>This checks for the required method in the current class and all the base classes. In case the
  * required method is present in a superclass, this check would generate a false positive.
  */
-@BugPattern(
-    name = "JUnitParameterMethodNotFound",
-    summary = "The method for providing parameters was not found.",
-    severity = ERROR)
+@BugPattern(summary = "The method for providing parameters was not found.", severity = ERROR)
 public class JUnitParameterMethodNotFound extends BugChecker implements MethodTreeMatcher {
 
   private static final Matcher<AnnotationTree> PARAMETERS_ANNOTATION_MATCHER =
@@ -95,16 +91,16 @@ public class JUnitParameterMethodNotFound extends BugChecker implements MethodTr
             .filter(annotationTree -> PARAMETERS_ANNOTATION_MATCHER.matches(annotationTree, state))
             .findFirst();
 
-    if (!parametersAnnotation.isPresent()) {
+    if (parametersAnnotation.isEmpty()) {
       return Description.NO_MATCH;
     }
 
-    Set<String> methodsInSourceClass = ImmutableSet.of();
+    ImmutableSet<String> methodsInSourceClass = ImmutableSet.of();
     Set<String> requiredMethods = new TreeSet<>();
 
     ImmutableList<? extends AssignmentTree> annotationsArguments =
         parametersAnnotation.get().getArguments().stream()
-            .filter(expressionTree -> expressionTree.getKind() == Kind.ASSIGNMENT)
+            .filter(expressionTree -> expressionTree instanceof AssignmentTree)
             .map(expressionTree -> (AssignmentTree) expressionTree)
             .collect(toImmutableList());
 
@@ -136,7 +132,7 @@ public class JUnitParameterMethodNotFound extends BugChecker implements MethodTr
     }
 
     return buildDescription(tree)
-        .setMessage(String.format("%s method(s) not found", String.join(",", missingMethods)))
+        .setMessage("%s method(s) not found", String.join(",", missingMethods))
         .build();
   }
 
@@ -149,23 +145,20 @@ public class JUnitParameterMethodNotFound extends BugChecker implements MethodTr
     Optional<? extends AssignmentTree> paramSourceAssignmentTree =
         getParamAssignmentTree(annotationsArguments, /* parameterName= */ "source");
 
-    if (!paramSourceAssignmentTree.isPresent()) {
+    if (paramSourceAssignmentTree.isEmpty()) {
       return ImmutableSet.of();
     }
 
     ClassType classType = (ClassType) getType(paramSourceAssignmentTree.get().getExpression());
-    Type typeArgument = classType.getTypeArguments().get(0);
+    Type typeArgument = classType.getTypeArguments().getFirst();
     return getAllMethodIdentifiersForType(typeArgument, state);
   }
 
   private static Optional<? extends AssignmentTree> getParamAssignmentTree(
       ImmutableList<? extends AssignmentTree> annotationsArguments, String parameterName) {
     return annotationsArguments.stream()
-        .filter(
-            assignmentTree ->
-                ((IdentifierTree) assignmentTree.getVariable())
-                    .getName()
-                    .contentEquals(parameterName))
+        .filter(assignmentTree ->
+            ((IdentifierTree) assignmentTree.getVariable()).getName().contentEquals(parameterName))
         .findFirst();
   }
 

@@ -16,6 +16,9 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.truth.TruthJUnit.assume;
+
+import com.google.auto.value.processor.AutoValueProcessor;
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
@@ -35,18 +38,22 @@ public class UnnecessaryParenthesesTest {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "class Test {",
-            "  void f(int x) {",
-            "    if (true) System.err.println((x));",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f(int x) {
+                if (true) System.err.println((x));
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "class Test {",
-            "  void f(int x) {",
-            "    if (true) System.err.println(x);",
-            "  }",
-            "}")
+            """
+            class Test {
+              void f(int x) {
+                if (true) System.err.println(x);
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -55,36 +62,42 @@ public class UnnecessaryParenthesesTest {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "import com.google.common.base.Function;",
-            "import com.google.common.collect.Iterables;",
-            "import java.util.List;",
-            "class Test {",
-            "  Iterable<Integer> f(List<Integer> l) {",
-            "    return Iterables.transform(",
-            "        l,",
-            "        (new Function<Integer, Integer>() {",
-            "          public Integer apply(Integer a) {",
-            "              return a * 2;",
-            "         }",
-            "        }));",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Function;
+            import com.google.common.collect.Iterables;
+            import java.util.List;
+
+            class Test {
+              Iterable<Integer> f(List<Integer> l) {
+                return Iterables.transform(
+                    l,
+                    (new Function<Integer, Integer>() {
+                      public Integer apply(Integer a) {
+                        return a * 2;
+                      }
+                    }));
+              }
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "import com.google.common.base.Function;",
-            "import com.google.common.collect.Iterables;",
-            "import java.util.List;",
-            "class Test {",
-            "  Iterable<Integer> f(List<Integer> l) {",
-            "    return Iterables.transform(",
-            "        l,",
-            "        new Function<Integer, Integer>() {",
-            "          public Integer apply(Integer a) {",
-            "              return a * 2;",
-            "         }",
-            "        });",
-            "  }",
-            "}")
+            """
+            import com.google.common.base.Function;
+            import com.google.common.collect.Iterables;
+            import java.util.List;
+
+            class Test {
+              Iterable<Integer> f(List<Integer> l) {
+                return Iterables.transform(
+                    l,
+                    new Function<Integer, Integer>() {
+                      public Integer apply(Integer a) {
+                        return a * 2;
+                      }
+                    });
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -93,18 +106,22 @@ public class UnnecessaryParenthesesTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  int e() {",
-            "    // BUG: Diagnostic contains:",
-            "    return (\"b\").hashCode();",
-            "  }",
-            "  int f() {",
-            "    return (\"a\" + \"b\").hashCode();",
-            "  }",
-            "  int g() {",
-            "    return (1 + 2) & 3;",
-            "  }",
-            "}")
+            """
+            class Test {
+              int e() {
+                // BUG: Diagnostic contains:
+                return ("b").hashCode();
+              }
+
+              int f() {
+                return ("a" + "b").hashCode();
+              }
+
+              int g() {
+                return (1 + 2) & 3;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -113,13 +130,16 @@ public class UnnecessaryParenthesesTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.util.function.Predicate;",
-            "class Test {",
-            "  Predicate<Test> foo(Predicate<Test> a) {",
-            "    // BUG: Diagnostic contains:",
-            "    return foo((this::equals));",
-            "  }",
-            "}")
+            """
+            import java.util.function.Predicate;
+
+            class Test {
+              Predicate<Test> foo(Predicate<Test> a) {
+                // BUG: Diagnostic contains:
+                return foo((this::equals));
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -128,10 +148,64 @@ public class UnnecessaryParenthesesTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.util.function.Function;",
-            "class Test {",
-            "  Function<Void, Function<Void, Void>> r = x -> (y -> y);",
-            "}")
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Void, Function<Void, Void>> r = x -> (y -> y);
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void lambda() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            import java.util.function.Function;
+
+            class Test {
+              Function<Void, Void> f() {
+                // BUG: Diagnostic contains:
+                Function<Void, Void> r = (y -> y);
+                // BUG: Diagnostic contains:
+                return (y -> y);
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void lambdaExpressionTrees() {
+    assume().that(Runtime.version().feature()).isAtLeast(22);
+    testHelper
+        .addInputLines(
+            "Test.java",
+            """
+            import java.util.List;
+
+            class Test {
+              void withParens(List<String> list) {
+                list.forEach((_) -> System.out.println());
+                list.forEach((unused) -> System.out.println());
+                list.forEach((String unused) -> System.out.println());
+              }
+
+              void withoutParens(List<String> list) {
+                list.forEach(_ -> System.out.println());
+                list.forEach(unused -> System.out.println());
+              }
+            }
+            """)
+        // TODO(kak): we probably should remove unnecessary parentheses from LambdaExpressionTrees.
+        // Note that the parentheses are not a ParenthesizedTree node: In the AST, when you have
+        // (_) -> ..., the (_) is not represented as a ParenthesizedTree node wrapping an
+        // expression. Instead, the parentheses are just syntactical tokens that are part of the
+        // LambdaExpressionTree node itself.
+        .expectUnchanged()
         .doTest();
   }
 
@@ -140,18 +214,22 @@ public class UnnecessaryParenthesesTest {
     testHelper
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  void print(Integer i) {",
-            "    int j = (i++) + 2;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void print(Integer i) {
+                int j = (i++) + 2;
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "class Test {",
-            "  void print(Integer i) {",
-            "    int j = i++ + 2;",
-            "  }",
-            "}")
+            """
+            class Test {
+              void print(Integer i) {
+                int j = i++ + 2;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -160,11 +238,13 @@ public class UnnecessaryParenthesesTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void print(Integer i) {",
-            "    (i++).toString();",
-            "  }",
-            "}")
+            """
+            class Test {
+              void print(Integer i) {
+                (i++).toString();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -173,11 +253,180 @@ public class UnnecessaryParenthesesTest {
     helper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  void print(Integer i) {",
-            "    (++i).toString();",
-            "  }",
-            "}")
+            """
+            class Test {
+              void print(Integer i) {
+                (++i).toString();
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void negativeStatements() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void print(boolean b, int i) {
+                if (b) {}
+                while (b) {}
+                do {} while (b);
+                switch (i) {
+                }
+                synchronized (this) {
+                }
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveStatements() {
+    testHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              int f(boolean b, Integer x) {
+                assert (b);
+                return (x);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              int f(boolean b, Integer x) {
+                assert b;
+                return x;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void switchExpression() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              public boolean match(String value) {
+                return switch (value) {
+                  case "true" -> true;
+                  case "false" -> false;
+                  default -> throw new RuntimeException("Unable to match");
+                };
+              }
+            }
+            """)
+        .expectNoDiagnostics()
+        .doTest();
+  }
+
+  @Test
+  public void unaryMinus() {
+    testHelper
+        .addInputLines(
+            "Test.java",
+            """
+            class Test {
+              public void f() {
+                Double d = (Double) (-1.0);
+                d = (double) (-1.0);
+              }
+            }
+            """)
+        .addOutputLines(
+            "Test.java",
+            """
+            class Test {
+              public void f() {
+                Double d = (Double) (-1.0);
+                d = (double) -1.0;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void annotationsWithoutTrailingParentheses() {
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            @Deprecated(forRemoval = true)
+            class Test {
+              @Override
+              public String toString() {
+                return "Test";
+              }
+            }
+            """)
+        .expectNoDiagnostics()
+        .doTest();
+  }
+
+  @Test
+  public void annotationWithTrailingParentheses() {
+    testHelper
+        .addInputLines(
+            "in/Test.java",
+            """
+            @Deprecated(forRemoval = true)
+            class Test {
+              @Override()
+              public String toString() {
+                return "Test";
+              }
+            }
+            """)
+        .addOutputLines(
+            "out/Test.java",
+            """
+            @Deprecated(forRemoval = true)
+            class Test {
+              @Override
+              public String toString() {
+                return "Test";
+              }
+            }
+            """)
+        // Using TEXT_MATCH because the ASTs are the same with or without the parentheses!
+        .doTest();
+  }
+
+  @Test
+  public void recordParameters() {
+    testHelper
+        .addInputLines(
+            "R.java",
+            """
+            import com.google.auto.value.AutoBuilder;
+            import org.checkerframework.checker.nullness.qual.Nullable;
+            import org.checkerframework.dataflow.qual.Pure;
+
+            /**
+             * A record with parameters.
+             *
+             * @param x parameter x
+             * @param y parameter y
+             * @param z parameter z
+             */
+            public record R(@Pure boolean x, @Pure @Nullable String y, @Pure @Nullable String z) {
+              @AutoBuilder
+              public abstract static class Builder {}
+            }
+            """)
+        .expectUnchanged()
+        .setArgs("-processor", AutoValueProcessor.class.getName())
         .doTest();
   }
 }

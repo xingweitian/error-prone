@@ -16,58 +16,115 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
+import static com.google.errorprone.bugpatterns.SwitchUtils.getHandledEnumValues;
+import static com.google.errorprone.bugpatterns.Switches.isDefaultCaseForSkew;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.bugpatterns.BugChecker.SwitchExpressionTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.SwitchTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
-import com.google.errorprone.util.RuntimeVersion;
 import com.sun.source.tree.CaseTree;
 import com.sun.source.tree.ExpressionTree;
-import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.LiteralTree;
+import com.sun.source.tree.PatternCaseLabelTree;
+import com.sun.source.tree.SwitchExpressionTree;
 import com.sun.source.tree.SwitchTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.tree.Tree.Kind;
 import com.sun.tools.javac.code.Type;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.lang.model.element.ElementKind;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "MissingCasesInEnumSwitch",
     summary = "Switches on enum types should either handle all values, or have a default case.",
     severity = WARNING)
-public class MissingCasesInEnumSwitch extends BugChecker implements SwitchTreeMatcher {
-
+public class MissingCasesInEnumSwitch extends BugChecker
+    implements SwitchTreeMatcher, SwitchExpressionTreeMatcher {
   public static final int MAX_CASES_TO_PRINT = 5;
 
   @Override
   public Description matchSwitch(SwitchTree tree, VisitorState state) {
-    Type switchType = ASTHelpers.getType(tree.getExpression());
+    ExpressionTree expression = tree.getExpression();
+    List<? extends CaseTree> cases = tree.getCases();
+    Type switchType = ASTHelpers.getType(expression);
     if (switchType.asElement().getKind() != ElementKind.ENUM) {
       return Description.NO_MATCH;
     }
-    // default case is present
-    if (tree.getCases().stream().anyMatch(c -> c.getExpression() == null)) {
+    Optional<? extends CaseTree> defaultCase =
+        cases.stream().filter(ASTHelpers::isSwitchDefault).findFirst();
+
+    long unconditionalCases =
+        cases.stream()
+            .filter(c -> SwitchUtils.hasCasePattern(c) && !isGuarded(c))
+            .flatMap(c -> c.getLabels().stream())
+            .filter(label -> label instanceof PatternCaseLabelTree)
+            .map(label -> (PatternCaseLabelTree) label)
+            .filter(patternLabel ->
+                ASTHelpers.isSubtype(
+                    switchType, ASTHelpers.getType(patternLabel.getPattern()), state))
+            .count();
+
+    // Continue to perform the check only if:
+    //  - there is no default nor unconditional case present, or
+    //  - the default case only exists for potential version skew.
+    if ((defaultCase.isPresent() && !isDefaultCaseForSkew(tree, defaultCase.get(), state))
+        || unconditionalCases > 0) {
       return Description.NO_MATCH;
     }
-    ImmutableSet<String> handled =
-        tree.getCases().stream()
-            .flatMap(MissingCasesInEnumSwitch::getExpressions)
-            .filter(IdentifierTree.class::isInstance)
-            .map(e -> ((IdentifierTree) e).getName().toString())
-            .collect(toImmutableSet());
-    Set<String> unhandled = Sets.difference(ASTHelpers.enumValues(switchType.asElement()), handled);
+
+    return generateDescriptionForUnhandledCases(
+        "Non-exhaustive switch; either add a default or handle the remaining cases",
+        expression,
+        switchType,
+        cases);
+  }
+
+  @Override
+  public Description matchSwitchExpression(SwitchExpressionTree tree, VisitorState state) {
+    ExpressionTree expression = tree.getExpression();
+    List<? extends CaseTree> cases = tree.getCases();
+    Type switchType = ASTHelpers.getType(expression);
+    if (switchType.asElement().getKind() != ElementKind.ENUM) {
+      return Description.NO_MATCH;
+    }
+    Optional<? extends CaseTree> defaultCase =
+        cases.stream().filter(ASTHelpers::isSwitchDefault).findFirst();
+
+    // Javac will enforce that switch expressions are exhaustive so only continue if both:
+    //  - there is a default case present
+    //  - the default case only exists for potential version skew.
+    if (defaultCase.isEmpty() || !isDefaultCaseForSkew(tree, defaultCase.get(), state)) {
+      return Description.NO_MATCH;
+    }
+
+    return generateDescriptionForUnhandledCases(
+        "Non-exhaustive switch; ensure all cases are handled in addition to the default case",
+        expression,
+        switchType,
+        cases);
+  }
+
+  private Description generateDescriptionForUnhandledCases(
+      String errorMessage, Tree switchNode, Type switchType, List<? extends CaseTree> cases) {
+    Set<String> unhandled = getUnhandledEnumValues(switchType, cases);
     if (unhandled.isEmpty()) {
       return Description.NO_MATCH;
     }
-    return buildDescription(tree).setMessage(buildMessage(unhandled)).build();
+    return buildDescription(switchNode).setMessage(buildMessage(errorMessage, unhandled)).build();
+  }
+
+  private static Set<String> getUnhandledEnumValues(
+      Type switchType, List<? extends CaseTree> cases) {
+    return Sets.difference(
+        ASTHelpers.enumValues(switchType.asElement()), getHandledEnumValues(cases));
   }
 
   /**
@@ -80,10 +137,9 @@ public class MissingCasesInEnumSwitch extends BugChecker implements SwitchTreeMa
    *   <li>Non-exhaustive switch, expected cases for: FOO, BAR, BAZ, and 42 others.
    * </ul>
    */
-  private static String buildMessage(Set<String> unhandled) {
-    StringBuilder message =
-        new StringBuilder(
-            "Non-exhaustive switch; either add a default or handle the remaining cases: ");
+  private static String buildMessage(String errorMessage, Set<String> unhandled) {
+    StringBuilder message = new StringBuilder(errorMessage);
+    message.append(": ");
     int numberToShow =
         unhandled.size() > MAX_CASES_TO_PRINT
             ? 3 // if there are too many to print, only show three examples.
@@ -95,18 +151,26 @@ public class MissingCasesInEnumSwitch extends BugChecker implements SwitchTreeMa
     return message.toString();
   }
 
-  @SuppressWarnings("unchecked")
-  private static Stream<? extends ExpressionTree> getExpressions(CaseTree caseTree) {
-    try {
-      if (RuntimeVersion.isAtLeast12()) {
-        return ((List<? extends ExpressionTree>)
-                CaseTree.class.getMethod("getExpressions").invoke(caseTree))
-            .stream();
-      } else {
-        return Stream.of(caseTree.getExpression());
-      }
-    } catch (ReflectiveOperationException e) {
-      throw new LinkageError(e.getMessage(), e);
+  /**
+   * Determines whether the given case tree has a "guarded" pattern. As defined in the JLS,
+   * "unguarded" means that either there is no guard or the guard is the boolean literal `true`, and
+   * "guarded" is the logical negation of "unguarded".
+   */
+  private static boolean isGuarded(CaseTree caseTree) {
+    // Not a pattern
+    if (!SwitchUtils.hasCasePattern(caseTree)) {
+      return false;
     }
+
+    if (caseTree.getGuard() == null) {
+      return false;
+    }
+
+    // Guard is present and is `true`
+    ExpressionTree guard = ASTHelpers.stripParentheses(caseTree.getGuard());
+    return !(guard.getKind() == Kind.BOOLEAN_LITERAL
+        && guard instanceof LiteralTree literalTree
+        && literalTree.getValue() instanceof Boolean b
+        && b);
   }
 }

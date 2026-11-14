@@ -34,14 +34,17 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import dagger.Provides;",
-            "public class Test {",
-            "  @Provides public Object providesObject() {",
-            "    // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new"
-                + " RuntimeException();'",
-            "    return null;",
-            "  }",
-            "}")
+"""
+import dagger.Provides;
+
+public class Test {
+  @Provides
+  public Object providesObject() {
+    // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new RuntimeException();'
+    return null;
+  }
+}
+""")
         .doTest();
   }
 
@@ -50,15 +53,18 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import dagger.Provides;",
-            "import javax.annotation.Nullable;",
-            "public class Test {",
-            "  @Provides",
-            "  @Nullable",
-            "  public Object providesObject() {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import dagger.Provides;
+            import javax.annotation.Nullable;
+
+            public class Test {
+              @Provides
+              @Nullable
+              public Object providesObject() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -68,14 +74,56 @@ public class ProvidesNullTest {
         .addSourceLines("Nullable.java", "public @interface Nullable {}")
         .addSourceLines(
             "Test.java",
-            "import dagger.Provides;",
-            "public class Test {",
-            "  @Provides",
-            "  @Nullable",
-            "  public Object providesObject() {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import dagger.Provides;
+
+            public class Test {
+              @Provides
+              @Nullable
+              public Object providesObject() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void hasTypeUseNullableOnMethod() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+            import org.checkerframework.checker.nullness.qual.Nullable;
+
+            public class Test {
+              @Provides
+              @Nullable
+              public Object providesObject() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void hasTypeUseNullableOnReturnType() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+            import org.checkerframework.checker.nullness.qual.Nullable;
+
+            public class Test {
+              @Provides
+              public @Nullable Object providesObject() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -88,13 +136,16 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import com.google.inject.Provides;",
-            "public class Test {",
-            "  @Provides",
-            "  public Object providesObject() {",
-            "    return null;",
-            "  }",
-            "}")
+            """
+            import com.google.inject.Provides;
+
+            public class Test {
+              @Provides
+              public Object providesObject() {
+                return null;
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -103,19 +154,21 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import java.io.IOException;",
-            "import dagger.Provides;",
-            "public class Test {",
-            "  @Provides public Object providesObject() {",
-            "    try {",
-            "      return new Object();",
-            "    } catch (Exception e) {",
-            "      // BUG: Diagnostic contains: Did you mean 'throw new RuntimeException(e);' or"
-                + " '@Nullable'",
-            "      return null;",
-            "    }",
-            "  }",
-            "}")
+"""
+import dagger.Provides;
+
+public class Test {
+  @Provides
+  public Object providesObject() {
+    try {
+      return new Object();
+    } catch (Exception e) {
+      // BUG: Diagnostic contains: Did you mean 'throw new RuntimeException(e);' or '@Nullable'
+      return null;
+    }
+  }
+}
+""")
         .doTest();
   }
 
@@ -124,18 +177,21 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import dagger.Provides;",
-            "public class Test {",
-            "  @Provides public Object providesObject() {",
-            "    try {",
-            "      // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new"
-                + " RuntimeException();'",
-            "      return null;",
-            "    } catch (Exception e) {",
-            "      return new Object();",
-            "    }",
-            "  }",
-            "}")
+"""
+import dagger.Provides;
+
+public class Test {
+  @Provides
+  public Object providesObject() {
+    try {
+      // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new RuntimeException();'
+      return null;
+    } catch (Exception e) {
+      return new Object();
+    }
+  }
+}
+""")
         .doTest();
   }
 
@@ -144,12 +200,113 @@ public class ProvidesNullTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "import dagger.Provides;",
-            "public class Test {",
-            "  public void doNothing() {",
-            "    return;",
-            "  }",
-            "}")
+            """
+            public class Test {
+              public void doNothing() {
+                return;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void hasOtherTypeUseNullable() {
+    compilationHelper
+        .addSourceLines(
+            "Nullable.java",
+            """
+            import static java.lang.annotation.ElementType.TYPE_USE;
+
+            import java.lang.annotation.Target;
+
+            @Target(TYPE_USE)
+            public @interface Nullable {}
+            """)
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+
+            public class Test {
+              @Provides
+              @Nullable
+              public Object providesObject() {
+                return null;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ternary_b536946282_shouldBeFlagged() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+
+            public class Test {
+              @Provides
+              public Object providesObject(boolean foo, Object bar) {
+                // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new RuntimeException();'
+                return foo ? bar : null;
+              }
+
+              @Provides
+              public Object providesObjectReversed(boolean foo, Object bar) {
+                // BUG: Diagnostic contains: Did you mean '@Nullable' or 'throw new RuntimeException();'
+                return foo ? null : bar;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void ternary_b536946282_flagDisabled() {
+    compilationHelper
+        .setArgs("-XepOpt:ProvidesNull:CheckDefinitelyNullBranch=false")
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+
+            public class Test {
+              @Provides
+              public Object providesObject(boolean foo, Object bar) {
+                return foo ? bar : null;
+              }
+
+              @Provides
+              public Object providesObjectReversed(boolean foo, Object bar) {
+                return foo ? null : bar;
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void enclosingIfNull_b536946282_shouldBeFlagged() {
+    compilationHelper
+        .addSourceLines(
+            "Test.java",
+            """
+            import dagger.Provides;
+
+            public class Test {
+              @Provides
+              public Object providesObject(Object bar) {
+                if (bar == null) {
+                  // TODO(b/536946282): should be flagged by ProvidesNull
+                  return bar;
+                }
+                return bar;
+              }
+            }
+            """)
         .doTest();
   }
 }

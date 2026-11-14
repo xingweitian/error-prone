@@ -24,7 +24,9 @@ import static com.google.errorprone.matchers.InjectMatchers.hasInjectAnnotation;
 import static com.google.errorprone.matchers.Matchers.allOf;
 import static com.google.errorprone.matchers.Matchers.constructor;
 import static com.google.errorprone.matchers.Matchers.isField;
+import static com.google.errorprone.util.ASTHelpers.isStatic;
 
+import com.google.common.collect.ImmutableList;
 import com.google.errorprone.BugPattern;
 import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker;
@@ -42,7 +44,6 @@ import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.tree.JCTree;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -55,7 +56,6 @@ import javax.lang.model.element.ElementKind;
  * @author bhagwani@google.com (Sumit Bhagwani)
  */
 @BugPattern(
-    name = "InjectOnMemberAndConstructor",
     summary =
         "Members shouldn't be annotated with @Inject if constructor is already annotated @Inject",
     severity = ERROR)
@@ -74,7 +74,7 @@ public class InjectOnMemberAndConstructor extends BugChecker implements ClassTre
     }
 
     List<MethodTree> ctors = ASTHelpers.getConstructors(classTree);
-    List<MethodTree> ctorsWithInject =
+    ImmutableList<MethodTree> ctorsWithInject =
         ctors.stream()
             .filter(c -> hasInjectAnnotation().matches(c, state))
             .collect(toImmutableList());
@@ -82,7 +82,7 @@ public class InjectOnMemberAndConstructor extends BugChecker implements ClassTre
     if (ctorsWithInject.size() != 1) {
       // Injection frameworks don't support multiple @Inject ctors.
       // There is already an ERROR check for it.
-      // http://errorprone.info/bugpattern/MoreThanOneInjectableConstructor
+      // https://errorprone.info/bugpattern/MoreThanOneInjectableConstructor
       return Description.NO_MATCH;
     }
 
@@ -93,20 +93,19 @@ public class InjectOnMemberAndConstructor extends BugChecker implements ClassTre
       public Void visitAssignment(AssignmentTree tree, Void unused) {
         Symbol symbol = ASTHelpers.getSymbol(tree.getVariable());
         // check if it is instance field.
-        if (symbol != null && symbol.getKind() == ElementKind.FIELD && !symbol.isStatic()) {
+        if (symbol != null && symbol.getKind() == ElementKind.FIELD && !isStatic(symbol)) {
           variablesAssigned.add(symbol);
         }
         return super.visitAssignment(tree, null);
       }
-    }.scan((JCTree) getOnlyElement(ctorsWithInject), null);
+    }.scan(getOnlyElement(ctorsWithInject), null);
 
     SuggestedFix.Builder fix = SuggestedFix.builder();
     VariableTree variableTreeFirstMatch = null;
     for (Tree member : classTree.getMembers()) {
-      if (!(member instanceof VariableTree)) {
+      if (!(member instanceof VariableTree variableTree)) {
         continue;
       }
-      VariableTree variableTree = (VariableTree) member;
       if (!INSTANCE_FIELD_WITH_INJECT.matches(variableTree, state)) {
         continue;
       }

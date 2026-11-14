@@ -17,6 +17,7 @@
 package com.google.errorprone;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.stream.Collectors.toCollection;
 
 import com.github.mustachejava.DefaultMustacheFactory;
 import com.github.mustachejava.Mustache;
@@ -25,6 +26,7 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.LineProcessor;
 import com.google.errorprone.BugPattern.SeverityLevel;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.gson.Gson;
 import java.io.IOException;
 import java.io.StringWriter;
@@ -34,12 +36,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.representer.Representer;
@@ -54,7 +60,7 @@ class BugPatternFileGenerator implements LineProcessor<List<BugPatternInstance>>
 
   private final Path outputDir;
   private final Path explanationDir;
-  private final List<BugPatternInstance> result;
+  private final Map<String, BugPatternInstance> result;
 
   private final Function<BugPatternInstance, SeverityLevel> severityRemapper;
 
@@ -62,27 +68,46 @@ class BugPatternFileGenerator implements LineProcessor<List<BugPatternInstance>>
   private final boolean generateFrontMatter;
 
   /** The base url for links to bugpatterns. */
-  @Nullable private final String baseUrl;
+  private final @Nullable String baseUrl;
+
+  private final Set<String> ignore;
+
+  private final Set<String> seen = new HashSet<>();
 
   public BugPatternFileGenerator(
       Path bugpatternDir,
       Path explanationDir,
       boolean generateFrontMatter,
       String baseUrl,
+      Set<String> ignore,
       Function<BugPatternInstance, SeverityLevel> severityRemapper) {
     this.outputDir = bugpatternDir;
     this.explanationDir = explanationDir;
     this.severityRemapper = severityRemapper;
     this.generateFrontMatter = generateFrontMatter;
     this.baseUrl = baseUrl;
-    result = new ArrayList<>();
+    this.ignore = ignore;
+    result = new HashMap<>();
   }
 
+  @CanIgnoreReturnValue
   @Override
   public boolean processLine(String line) throws IOException {
+    if (!seen.add(line)) {
+      return true;
+    }
     BugPatternInstance pattern = new Gson().fromJson(line, BugPatternInstance.class);
+    if (ignore.contains(pattern.className)) {
+      return true;
+    }
     pattern.severity = severityRemapper.apply(pattern);
-    result.add(pattern);
+    var existing = result.put(pattern.name, pattern);
+    if (existing != null) {
+      throw new AssertionError(
+          String.format(
+              "Duplicate entry for %s: %s and %s",
+              pattern.name, existing.className, pattern.className));
+    }
 
     // replace spaces in filename with underscores
     Path checkPath = Paths.get(pattern.name.replace(' ', '_') + ".md");
@@ -118,17 +143,21 @@ class BugPatternFileGenerator implements LineProcessor<List<BugPatternInstance>>
       }
 
       if (generateFrontMatter) {
-        Map<String, String> frontmatterData =
+        ImmutableMap<String, String> frontmatterData =
             ImmutableMap.<String, String>builder()
                 .put("title", pattern.name)
                 .put("summary", pattern.summary)
                 .put("layout", "bugpattern")
                 .put("tags", Joiner.on(", ").join(pattern.tags))
                 .put("severity", pattern.severity.toString())
-                .build();
+                .buildOrThrow();
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-        Yaml yaml = new Yaml(new SafeConstructor(), new Representer(), options);
+        Yaml yaml =
+            new Yaml(
+                new SafeConstructor(new LoaderOptions()),
+                new Representer(new DumperOptions()),
+                options);
         Writer yamlWriter = new StringWriter();
         yamlWriter.write("---\n");
         yaml.dump(frontmatterData, yamlWriter);
@@ -159,7 +188,7 @@ class BugPatternFileGenerator implements LineProcessor<List<BugPatternInstance>>
 
       MustacheFactory mf = new DefaultMustacheFactory();
       Mustache mustache = mf.compile("com/google/errorprone/resources/bugpattern.mustache");
-      mustache.execute(writer, templateData.build());
+      mustache.execute(writer, templateData.buildOrThrow());
     }
     return true;
   }
@@ -177,6 +206,6 @@ class BugPatternFileGenerator implements LineProcessor<List<BugPatternInstance>>
 
   @Override
   public List<BugPatternInstance> getResult() {
-    return result;
+    return result.values().stream().collect(toCollection(ArrayList::new));
   }
 }

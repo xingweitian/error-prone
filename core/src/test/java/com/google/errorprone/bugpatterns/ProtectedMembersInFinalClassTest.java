@@ -35,68 +35,92 @@ public class ProtectedMembersInFinalClassTest {
       CompilationTestHelper.newInstance(ProtectedMembersInFinalClass.class, getClass());
 
   @Test
-  public void testPositiveCases() {
+  public void positiveCases() {
     testHelper
         .addInputLines(
             "in/Test.java",
-            "final class Test {",
-            "  protected void methodOne() {}",
-            "  protected void methodTwo() {}",
-            "  protected String var1;",
-            "  protected int var2;",
-            "}")
+            """
+            final class Test {
+              protected void methodOne() {}
+
+              protected void methodTwo() {}
+
+              protected String var1;
+              protected int var2;
+            }
+            """)
         .addOutputLines(
             "out/Test.java",
-            "final class Test {",
-            "  void methodOne() {}",
-            "  void methodTwo() {}",
-            "  String var1;",
-            "  int var2;",
-            "}")
+            """
+            final class Test {
+              void methodOne() {}
+
+              void methodTwo() {}
+
+              String var1;
+              int var2;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testNegativeCases() {
+  public void negativeCases() {
     compilationHelper
         .addSourceLines(
-            "in/Base.java", //
-            "class Base {",
-            "  protected void protectedMethod() {}",
-            "}")
+            "in/Base.java",
+            """
+            class Base {
+              protected void protectedMethod() {}
+            }
+            """)
         .addSourceLines(
             "in/Test.java",
-            "final class Test extends Base {",
-            "  public void publicMethod() {}",
-            "  void packageMethod() {}",
-            "  private void privateMethod() {}",
-            "  @Override protected void protectedMethod() {}",
-            "  public int publicField;",
-            "  int packageField;",
-            "  private int privateField;",
-            "}")
+            """
+            final class Test extends Base {
+              public void publicMethod() {}
+
+              void packageMethod() {}
+
+              private void privateMethod() {}
+
+              @Override
+              protected void protectedMethod() {}
+
+              public int publicField;
+              int packageField;
+              private int privateField;
+            }
+            """)
         .doTest();
   }
 
   @Test
-  public void testDiagnosticStringWithMultipleMemberMatches() {
+  public void diagnosticStringWithMultipleMemberMatches() {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "final class Test {",
-            "  // BUG: Diagnostic contains: Make members of final classes package-private:"
-                + " methodOne, methodTwo, fieldOne, fieldTwo",
-            "  protected void methodOne() {}",
-            "  protected void methodTwo() {}",
-            "  public void publicMethod() {}",
-            "  private void privateMethod() {}",
-            "  void packageMethod() {}",
-            "  protected int fieldOne;",
-            "  protected long fieldTwo;",
-            "  public int publicField;",
-            "  int packageField;",
-            "  private int privateField;",
-            "}")
+"""
+final class Test {
+  // BUG: Diagnostic contains: Make members of final classes package-private: methodOne, methodTwo,
+  // fieldOne, fieldTwo
+  protected void methodOne() {}
+
+  protected void methodTwo() {}
+
+  public void publicMethod() {}
+
+  private void privateMethod() {}
+
+  void packageMethod() {}
+
+  protected int fieldOne;
+  protected long fieldTwo;
+  public int publicField;
+  int packageField;
+  private int privateField;
+}
+""")
         .doTest();
   }
 
@@ -105,10 +129,12 @@ public class ProtectedMembersInFinalClassTest {
     compilationHelper
         .addSourceLines(
             "in/Test.java",
-            "final class Test {",
-            "  @SuppressWarnings(\"ProtectedMembersInFinalClass\")",
-            "  protected void methodOne() {}",
-            "}")
+            """
+            final class Test {
+              @SuppressWarnings("ProtectedMembersInFinalClass")
+              protected void methodOne() {}
+            }
+            """)
         .doTest();
   }
 
@@ -117,10 +143,63 @@ public class ProtectedMembersInFinalClassTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "final class Test {",
-            "  // BUG: Diagnostic contains: Test",
-            "  protected Test() {}",
-            "}")
+            """
+            final class Test {
+              // BUG: Diagnostic contains: Test
+              protected Test() {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void protectedRecordClassCanonicalConstructor() {
+    compilationHelper
+        .addSourceLines(
+            "in/Outer.java",
+            """
+            public class Outer {
+              protected record NestedRecord(int x) {
+                protected NestedRecord {}
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void packagePrivateRecordClassCanonicalConstructor() {
+    compilationHelper
+        .addSourceLines(
+            "in/Outer.java",
+            """
+            public class Outer {
+              record NestedRecord(int x) {
+                // BUG: Diagnostic contains: NestedRecord
+                protected NestedRecord {}
+              }
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void protectedRecordClassAuxiliaryConstructor() {
+    compilationHelper
+        .addSourceLines(
+            "in/Outer.java",
+            """
+            public class Outer {
+              protected record NestedRecord(int x) {
+                protected NestedRecord {}
+
+                // BUG: Diagnostic contains: NestedRecord
+                protected NestedRecord(int x, int y) {
+                  this(x + y);
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

@@ -20,13 +20,14 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
 import static com.google.errorprone.util.ASTHelpers.getType;
+import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
+import static com.google.errorprone.util.AnnotationNames.IMMUTABLE_ANNOTATION;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import com.google.errorprone.BugPattern;
-import com.google.errorprone.ErrorProneFlags;
+import com.google.errorprone.ClassName;
 import com.google.errorprone.VisitorState;
-import com.google.errorprone.annotations.Immutable;
 import com.google.errorprone.bugpatterns.BugChecker;
 import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.bugpatterns.threadsafety.ThreadSafety.Violation;
@@ -40,6 +41,7 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import java.util.Optional;
 import java.util.stream.Stream;
+import javax.inject.Inject;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
@@ -53,25 +55,21 @@ public class ImmutableEnumChecker extends BugChecker implements ClassTreeMatcher
       "enums are immutable by default; annotating them with"
           + " @com.google.errorprone.annotations.Immutable is unnecessary";
 
-  private final WellKnownMutability wellKnownMutability;
+  private final ImmutableAnalysis.Factory immutableAnalysisFactory;
 
-  @Deprecated // Used reflectively, but you should pass in ErrorProneFlags to get custom mutability
-  public ImmutableEnumChecker() {
-    this(ErrorProneFlags.empty());
-  }
-
-  public ImmutableEnumChecker(ErrorProneFlags flags) {
-    this.wellKnownMutability = WellKnownMutability.fromFlags(flags);
+  @Inject
+  ImmutableEnumChecker(ImmutableAnalysis.Factory immutableAnalysisFactory) {
+    this.immutableAnalysisFactory = immutableAnalysisFactory;
   }
 
   @Override
   public Description matchClass(ClassTree tree, VisitorState state) {
     ClassSymbol symbol = getSymbol(tree);
-    if (symbol == null || !symbol.isEnum()) {
+    if (!symbol.isEnum()) {
       return NO_MATCH;
     }
 
-    if (ASTHelpers.hasAnnotation(symbol, Immutable.class, state)
+    if (hasAnnotation(symbol, IMMUTABLE_ANNOTATION, state)
         && !implementsExemptInterface(symbol, state)) {
       AnnotationTree annotation =
           ASTHelpers.getAnnotationWithSimpleName(tree.getModifiers().getAnnotations(), "Immutable");
@@ -87,8 +85,8 @@ public class ImmutableEnumChecker extends BugChecker implements ClassTreeMatcher
     }
 
     Violation info =
-        new ImmutableAnalysis(
-                this, state, wellKnownMutability, ImmutableSet.of(Immutable.class.getName()))
+        immutableAnalysisFactory
+            .create(this::isSuppressed, state, ImmutableSet.of(IMMUTABLE_ANNOTATION.toString()))
             .checkForImmutability(
                 Optional.of(tree), ImmutableSet.of(), getType(tree), this::describe);
 
@@ -109,12 +107,11 @@ public class ImmutableEnumChecker extends BugChecker implements ClassTreeMatcher
         .anyMatch(supertype -> hasExemptAnnotation(supertype.tsym, state));
   }
 
-  private static final ImmutableSet<String> EXEMPT_ANNOTATIONS =
-      ImmutableSet.of(
-          "com.google.errorprone.annotations.Immutable");
+  private static final ImmutableSet<ClassName> EXEMPT_ANNOTATIONS =
+      ImmutableSet.of(IMMUTABLE_ANNOTATION);
 
   private static boolean hasExemptAnnotation(Symbol symbol, VisitorState state) {
     return EXEMPT_ANNOTATIONS.stream()
-        .anyMatch(annotation -> ASTHelpers.hasAnnotation(symbol, annotation, state));
+        .anyMatch(annotation -> hasAnnotation(symbol, annotation, state));
   }
 }

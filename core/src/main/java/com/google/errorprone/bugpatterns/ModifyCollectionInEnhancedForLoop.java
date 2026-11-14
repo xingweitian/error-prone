@@ -19,6 +19,7 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.anyOf;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
+import static com.google.errorprone.util.ASTHelpers.enclosingPackage;
 import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.sameVariable;
 
@@ -29,18 +30,21 @@ import com.google.errorprone.matchers.Description;
 import com.google.errorprone.matchers.Matcher;
 import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.EnhancedForLoopTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.StatementTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.util.TreePath;
 import java.util.List;
 
-/** @author anishvisaria98@gmail.com (Anish Visaria) */
+/**
+ * @author anishvisaria98@gmail.com (Anish Visaria)
+ */
 @BugPattern(
-    name = "ModifyCollectionInEnhancedForLoop",
     summary =
         "Modifying a collection while iterating over it in a loop may cause a"
             + " ConcurrentModificationException to be thrown or lead to undefined behavior.",
@@ -74,13 +78,10 @@ public class ModifyCollectionInEnhancedForLoop extends BugChecker
       return NO_MATCH;
     }
     if (state.getTypes().closure(ASTHelpers.getReceiverType(tree)).stream()
-        .anyMatch(
-            s ->
-                s.asElement()
-                    .packge()
-                    .getQualifiedName()
-                    .toString()
-                    .startsWith("java.util.concurrent"))) {
+        .anyMatch(s ->
+            enclosingPackage(s.asElement())
+                .map(p -> p.getQualifiedName().toString().startsWith("java.util.concurrent"))
+                .orElse(false))) {
       return NO_MATCH;
     }
     if (blockEndsInBreakOrReturn(state)) {
@@ -102,38 +103,40 @@ public class ModifyCollectionInEnhancedForLoop extends BugChecker
       return false;
     }
     Tree parent = statementPath.getParentPath().getLeaf();
-    if (!(parent instanceof BlockTree)) {
+    if (!(parent instanceof BlockTree blockTree)) {
       return false;
     }
     StatementTree statement = (StatementTree) statementPath.getLeaf();
-    List<? extends StatementTree> statements = ((BlockTree) parent).getStatements();
+    List<? extends StatementTree> statements = blockTree.getStatements();
     int idx = statements.indexOf(statement);
     if (idx == -1 || idx == statements.size()) {
       return false;
     }
-    switch (getLast(statements).getKind()) {
-      case BREAK:
-      case RETURN:
-        return true;
-      default:
-        return false;
-    }
+    return switch (getLast(statements).getKind()) {
+      case BREAK, RETURN -> true;
+      default -> false;
+    };
   }
 
   /** Returns true if {@code collection} is modified by an enclosing loop. */
   private static boolean enclosingLoop(VisitorState state, ExpressionTree collection) {
     for (Tree node : state.getPath()) {
-      switch (node.getKind()) {
-        case METHOD:
-        case CLASS:
-        case LAMBDA_EXPRESSION:
+      switch (node) {
+        case MethodTree methodTree -> {
           return false;
-        case ENHANCED_FOR_LOOP:
-          if (sameCollection(collection, ((EnhancedForLoopTree) node).getExpression(), state)) {
+        }
+        case ClassTree classTree -> {
+          return false;
+        }
+        case LambdaExpressionTree lambdaExpressionTree -> {
+          return false;
+        }
+        case EnhancedForLoopTree enhancedForLoopTree -> {
+          if (sameCollection(collection, enhancedForLoopTree.getExpression(), state)) {
             return true;
           }
-          break;
-        default: // fall out
+        }
+        default -> {}
       }
     }
     return false;
@@ -150,7 +153,7 @@ public class ModifyCollectionInEnhancedForLoop extends BugChecker
     }
 
     // Check if the loopExpression is a .keySet(), .entrySet, or .values() of the map
-    if (loopExpression.getKind() == Kind.METHOD_INVOCATION) {
+    if (loopExpression instanceof MethodInvocationTree) {
       ExpressionTree receiver = getReceiver(loopExpression);
       return receiver != null
           && sameVariable(collection, receiver)

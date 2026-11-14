@@ -42,11 +42,8 @@ import javax.lang.model.element.ElementKind;
  *
  * @author andrewrice@google.com (Andrew Rice)
  */
-@BugPattern(
-    name = "AssertEqualsArgumentOrderChecker",
-    summary = "Arguments are swapped in assertEquals-like call",
-    severity = WARNING)
-public class AssertEqualsArgumentOrderChecker extends BugChecker
+@BugPattern(summary = "Arguments are swapped in assertEquals-like call", severity = WARNING)
+public final class AssertEqualsArgumentOrderChecker extends BugChecker
     implements MethodInvocationTreeMatcher {
 
   private final ArgumentChangeFinder argumentchangeFinder =
@@ -64,9 +61,6 @@ public class AssertEqualsArgumentOrderChecker extends BugChecker
     }
 
     MethodSymbol symbol = ASTHelpers.getSymbol(tree);
-    if (symbol == null) {
-      return Description.NO_MATCH;
-    }
 
     InvocationInfo invocationInfo = InvocationInfo.createFromMethodInvocation(tree, symbol, state);
 
@@ -90,48 +84,43 @@ public class AssertEqualsArgumentOrderChecker extends BugChecker
    * perfect match otherwise we return a distance of 1.
    */
   private static Function<ParameterPair, Double> buildDistanceFunction() {
-    return new Function<ParameterPair, Double>() {
+    return (ParameterPair parameterPair) -> {
+      Parameter formal = parameterPair.formal();
+      Parameter actual = parameterPair.actual();
+      String formalName = formal.name();
+      String actualName = actual.name();
 
-      @Override
-      public Double apply(ParameterPair parameterPair) {
-        Parameter formal = parameterPair.formal();
-        Parameter actual = parameterPair.actual();
-        String formalName = formal.name();
-        String actualName = actual.name();
-
-        if (formalName.equals("expected")) {
-          if (actual.constant() || isEnumIdentifier(actual)) {
-            return 0.0;
-          }
-          if (actualName.startsWith("expected")) {
-            return 0.0;
-          }
-          return 1.0;
+      if (formalName.equals("expected")) {
+        if (actual.constant() || isEnumIdentifier(actual)) {
+          return 0.0;
         }
-
-        if (formalName.equals("actual")) {
-          if (actual.constant() || isEnumIdentifier(actual)) {
-            return 1.0;
-          }
-          if (actualName.startsWith("actual")) {
-            return 0.0;
-          }
-          return 1.0;
+        if (actualName.startsWith("expected")) {
+          return 0.0;
         }
-
-        return formal.index() == actual.index() ? 0.0 : Double.POSITIVE_INFINITY;
+        return 1.0;
       }
+
+      if (formalName.equals("actual")) {
+        if (actual.constant() || isEnumIdentifier(actual)) {
+          return 1.0;
+        }
+        if (actualName.startsWith("actual")) {
+          return 0.0;
+        }
+        return 1.0;
+      }
+
+      return formal.index() == actual.index() ? 0.0 : Double.POSITIVE_INFINITY;
     };
   }
 
   /** Returns true if this parameter is an enum identifier */
   private static boolean isEnumIdentifier(Parameter parameter) {
     switch (parameter.kind()) {
-      case IDENTIFIER:
-      case MEMBER_SELECT:
-        break;
-      default:
+      case IDENTIFIER, MEMBER_SELECT -> {}
+      default -> {
         return false;
+      }
     }
     TypeSymbol typeSymbol = parameter.type().tsym;
     if (typeSymbol != null) {

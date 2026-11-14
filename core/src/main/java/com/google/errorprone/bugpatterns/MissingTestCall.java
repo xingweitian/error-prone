@@ -16,38 +16,38 @@
 
 package com.google.errorprone.bugpatterns;
 
-import static com.google.common.collect.Iterables.getLast;
+import static com.google.common.collect.Streams.findLast;
 import static com.google.errorprone.BugPattern.SeverityLevel.ERROR;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
+import static com.google.errorprone.matchers.JUnitMatchers.TEST_CASE;
 import static com.google.errorprone.matchers.method.MethodMatchers.instanceMethod;
-import static com.google.errorprone.util.ASTHelpers.getReceiver;
 import static com.google.errorprone.util.ASTHelpers.getSymbol;
+import static com.google.errorprone.util.ASTHelpers.streamReceivers;
 
-import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.errorprone.BugPattern;
+import com.google.errorprone.ErrorProneFlags;
 import com.google.errorprone.VisitorState;
+import com.google.errorprone.bugpatterns.BugChecker.ExpressionStatementTreeMatcher;
 import com.google.errorprone.bugpatterns.BugChecker.MethodTreeMatcher;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.matchers.JUnitMatchers;
 import com.google.errorprone.matchers.Matcher;
-import com.google.errorprone.matchers.method.MethodMatchers.MethodClassMatcher;
-import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
-import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.StatementTree;
+import com.sun.source.tree.ReturnTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
 import com.sun.tools.javac.code.Symbol;
 import java.util.HashSet;
 import java.util.Set;
-import javax.annotation.Nullable;
+import javax.inject.Inject;
 import javax.lang.model.element.ElementKind;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Matches test helpers which require a terminating method to be called.
@@ -55,85 +55,109 @@ import javax.lang.model.element.ElementKind;
  * @author ghm@google.com (Graeme Morgan)
  */
 @BugPattern(
-    name = "MissingTestCall",
     summary = "A terminating method call is required for a test helper to have any effect.",
     severity = ERROR)
-public final class MissingTestCall extends BugChecker implements MethodTreeMatcher {
-
-  private static final MethodClassMatcher EQUALS_TESTER =
-      instanceMethod().onDescendantOf("com.google.common.testing.EqualsTester");
-  private static final MethodClassMatcher REFACTORING_HELPER =
-      instanceMethod().onDescendantOf("com.google.errorprone.BugCheckerRefactoringTestHelper");
-  private static final MethodClassMatcher COMPILATION_HELPER =
-      instanceMethod().onDescendantOf("com.google.errorprone.CompilationTestHelper");
+public final class MissingTestCall extends BugChecker
+    implements ExpressionStatementTreeMatcher, MethodTreeMatcher {
 
   private static final ImmutableSet<MethodPairing> PAIRINGS =
       ImmutableSet.of(
           MethodPairing.of(
               "EqualsTester",
-              EQUALS_TESTER.named("addEqualityGroup"),
-              EQUALS_TESTER.named("testEquals")),
+              instanceMethod()
+                  .onDescendantOf("com.google.common.testing.EqualsTester")
+                  .named("addEqualityGroup"),
+              instanceMethod()
+                  .onDescendantOf("com.google.common.testing.EqualsTester")
+                  .named("testEquals")),
           MethodPairing.of(
               "BugCheckerRefactoringTestHelper",
-              REFACTORING_HELPER.namedAnyOf(
-                  "addInput",
-                  "addInputLines",
-                  "addInputFile",
-                  "addOutput",
-                  "addOutputLines",
-                  "addOutputFile",
-                  "expectUnchanged"),
-              REFACTORING_HELPER.named("doTest")),
+              instanceMethod()
+                  .onDescendantOf("com.google.errorprone.BugCheckerRefactoringTestHelper")
+                  .namedAnyOf(
+                      "addInput",
+                      "addInputLines",
+                      "addInputFile",
+                      "addOutput",
+                      "addOutputLines",
+                      "addOutputFile",
+                      "expectUnchanged"),
+              instanceMethod()
+                  .onDescendantOf("com.google.errorprone.BugCheckerRefactoringTestHelper")
+                  .named("doTest")),
           MethodPairing.of(
               "CompilationTestHelper",
-              COMPILATION_HELPER.namedAnyOf(
-                  "addSourceLines", "addSourceFile", "expectNoDiagnostics"),
-              COMPILATION_HELPER.named("doTest")));
+              instanceMethod()
+                  .onDescendantOf("com.google.errorprone.CompilationTestHelper")
+                  .namedAnyOf("addSourceLines", "addSourceFile", "expectNoDiagnostics"),
+              instanceMethod()
+                  .onDescendantOf("com.google.errorprone.CompilationTestHelper")
+                  .named("doTest")));
+
+  private final boolean matchMemberReferences;
+
+  @Inject
+  MissingTestCall(ErrorProneFlags flags) {
+    this.matchMemberReferences =
+        flags.getBoolean("MissingTestCall:MatchMemberReferences").orElse(true);
+  }
 
   @Override
   public Description matchMethod(MethodTree tree, VisitorState state) {
-    if (!JUnitMatchers.TEST_CASE.matches(tree, state)) {
-      return NO_MATCH;
-    }
+    return TEST_CASE.matches(tree, state) ? handle(tree, PAIRINGS, state) : NO_MATCH;
+  }
+
+  @Override
+  public Description matchExpressionStatement(ExpressionStatementTree tree, VisitorState state) {
+    return NO_MATCH;
+  }
+
+  private Description handle(Tree tree, ImmutableSet<MethodPairing> pairings, VisitorState state) {
     Set<MethodPairing> required = new HashSet<>();
     Set<MethodPairing> called = new HashSet<>();
     new TreePathScanner<Void, Void>() {
       @Override
       public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
-        for (MethodPairing pairing : PAIRINGS) {
-          if (pairing.ifCall().matches(node, state)) {
+        handle(node);
+        return super.visitMethodInvocation(node, null);
+      }
+
+      @Override
+      public Void visitMemberReference(MemberReferenceTree node, Void unused) {
+        if (matchMemberReferences) {
+          handle(node);
+        }
+        return super.visitMemberReference(node, null);
+      }
+
+      private void handle(ExpressionTree node) {
+        for (MethodPairing pairing : pairings) {
+          VisitorState stateWithPath = state.withPath(getCurrentPath());
+          if (pairing.ifCall().matches(node, stateWithPath)) {
             if (!isField(getUltimateReceiver(node))
-                || isLastStatementInBlock(state.findPathToEnclosing(StatementTree.class))) {
+                && stateWithPath.findPathToEnclosing(ReturnTree.class) == null) {
               required.add(pairing);
             }
           }
-          if (pairing.mustCall().matches(node, state)) {
+          if (pairing.mustCall().matches(node, stateWithPath)) {
             called.add(pairing);
           }
         }
-        return super.visitMethodInvocation(node, null);
       }
     }.scan(state.getPath(), null);
     return Sets.difference(required, called).stream()
         .findFirst()
-        .map(
-            p ->
-                buildDescription(tree)
-                    .setMessage(
-                        String.format(
-                            "%s requires a terminating method call to have any effect.", p.name()))
-                    .build())
+        .map(p ->
+            buildDescription(tree)
+                .setMessage(
+                    String.format(
+                        "%s requires a terminating method call to have any effect.", p.name()))
+                .build())
         .orElse(NO_MATCH);
   }
 
-  @Nullable
-  private static ExpressionTree getUltimateReceiver(ExpressionTree tree) {
-    ExpressionTree receiver = getReceiver(tree);
-    while (receiver instanceof MemberSelectTree || receiver instanceof MethodInvocationTree) {
-      tree = receiver;
-      receiver = getReceiver(receiver);
-    }
-    return receiver;
+  private static @Nullable ExpressionTree getUltimateReceiver(ExpressionTree tree) {
+    return findLast(streamReceivers(tree)).orElse(null);
   }
 
   private static boolean isField(@Nullable ExpressionTree tree) {
@@ -144,28 +168,11 @@ public final class MissingTestCall extends BugChecker implements MethodTreeMatch
     return symbol != null && symbol.getKind() == ElementKind.FIELD;
   }
 
-  private static boolean isLastStatementInBlock(@Nullable TreePath pathToStatement) {
-    if (pathToStatement == null) {
-      return false;
-    }
-    Tree parent = pathToStatement.getParentPath().getLeaf();
-    if (!(parent instanceof BlockTree)) {
-      return false;
-    }
-    return getLast(((BlockTree) parent).getStatements()).equals(pathToStatement.getLeaf());
-  }
-
-  @AutoValue
-  abstract static class MethodPairing {
-    abstract String name();
-
-    abstract Matcher<ExpressionTree> ifCall();
-
-    abstract Matcher<ExpressionTree> mustCall();
-
+  private record MethodPairing(
+      String name, Matcher<ExpressionTree> ifCall, Matcher<ExpressionTree> mustCall) {
     private static MethodPairing of(
         String name, Matcher<ExpressionTree> ifCall, Matcher<ExpressionTree> mustCall) {
-      return new AutoValue_MissingTestCall_MethodPairing(name, ifCall, mustCall);
+      return new MethodPairing(name, ifCall, mustCall);
     }
   }
 }

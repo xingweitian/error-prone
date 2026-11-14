@@ -17,10 +17,10 @@ package com.google.errorprone.refaster;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.base.Functions;
-import com.google.common.base.Optional;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import java.util.Optional;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -33,38 +33,37 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class ChoiceTest {
   @Test
-  public void testNone() {
-    assertThat(Choice.none().first()).isAbsent();
-    assertThat(Choice.none().condition(true)).isSameInstanceAs(Choice.none());
-    assertThat(Choice.none().condition(Predicates.alwaysTrue())).isSameInstanceAs(Choice.none());
-    assertThat(Choice.none().thenChoose(Functions.constant(Choice.of("foo"))))
+  public void none() {
+    assertThat(Choice.none().findFirst()).isEmpty();
+    assertThat(Choice.none().filter(Predicates.alwaysTrue())).isSameInstanceAs(Choice.none());
+    assertThat(Choice.none().flatMap(Functions.constant(Choice.of("foo"))))
         .isSameInstanceAs(Choice.none());
   }
 
   @Test
-  public void testThenOption() {
+  public void thenOption() {
     assertThat(
             Choice.from(ImmutableList.of(1, 2, 3))
-                .thenOption(
+                .mapIfPresent(
                     Functions.forMap(
-                        ImmutableMap.of(2, Optional.of("foo")), Optional.<String>absent()))
+                        ImmutableMap.of(2, Optional.of("foo")), Optional.<String>empty()))
                 .asIterable())
         .containsExactly("foo");
   }
 
   @Test
-  public void testThenChoose() {
+  public void thenChoose() {
     assertThat(
             Choice.from(ImmutableList.of(1, 2, 3))
-                .thenChoose(
+                .flatMap(
                     Functions.forMap(ImmutableMap.of(2, Choice.of("foo")), Choice.<String>none()))
                 .asIterable())
         .containsExactly("foo");
   }
 
   @Test
-  public void testOr() {
-    assertThat(Choice.of(2).or(Choice.from(ImmutableList.of(1, 3))).asIterable())
+  public void or() {
+    assertThat(Choice.of(2).concat(Choice.from(ImmutableList.of(1, 3))).asIterable())
         .containsExactly(2, 1, 3)
         .inOrder();
   }

@@ -22,9 +22,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/**
- * Tests for {@link LockOnBoxedPrimitive} bugpattern.
- */
+/** Tests for {@link LockOnBoxedPrimitive} bugpattern. */
 @RunWith(JUnit4.class)
 public class LockOnBoxedPrimitiveTest {
 
@@ -64,13 +62,16 @@ public class LockOnBoxedPrimitiveTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private Object okLock;",
-            "  private void test() {",
-            "    synchronized (okLock) {",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              private Object okLock;
+
+              private void test() {
+                synchronized (okLock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -79,13 +80,16 @@ public class LockOnBoxedPrimitiveTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private final Object okLock = Test.class;",
-            "  private void test() {",
-            "    synchronized (okLock) {",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              private final Object okLock = Test.class;
+
+              private void test() {
+                synchronized (okLock) {
+                }
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -122,16 +126,19 @@ public class LockOnBoxedPrimitiveTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private Object okLock;",
-            "  private void test() throws InterruptedException {",
-            "    okLock.wait();",
-            "    okLock.wait(1);",
-            "    okLock.wait(1, 2);",
-            "    okLock.notify();",
-            "    okLock.notifyAll();",
-            "  }",
-            "}")
+            """
+            class Test {
+              private Object okLock;
+
+              private void test() throws InterruptedException {
+                okLock.wait();
+                okLock.wait(1);
+                okLock.wait(1, 2);
+                okLock.notify();
+                okLock.notifyAll();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -140,16 +147,19 @@ public class LockOnBoxedPrimitiveTest {
     compilationHelper
         .addSourceLines(
             "Test.java",
-            "class Test {",
-            "  private final Object okLock = new Object();",
-            "  private void test() throws InterruptedException {",
-            "    okLock.wait();",
-            "    okLock.wait(1);",
-            "    okLock.wait(1, 2);",
-            "    okLock.notify();",
-            "    okLock.notifyAll();",
-            "  }",
-            "}")
+            """
+            class Test {
+              private final Object okLock = new Object();
+
+              private void test() throws InterruptedException {
+                okLock.wait();
+                okLock.wait(1);
+                okLock.wait(1, 2);
+                okLock.notify();
+                okLock.notifyAll();
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -185,27 +195,35 @@ public class LockOnBoxedPrimitiveTest {
     BugCheckerRefactoringTestHelper.newInstance(LockOnBoxedPrimitive.class, getClass())
         .addInputLines(
             "Test.java",
-            "class Test {",
-            "  private Boolean myBoolean;",
-            "  void test(boolean value) {",
-            "    synchronized (myBoolean) {",
-            "      myBoolean = value;",
-            "    }",
-            "  }",
-            "}")
+            """
+            class Test {
+              private Boolean myBoolean;
+
+              void test(boolean value) {
+                synchronized (myBoolean) {
+                  myBoolean = value;
+                }
+              }
+            }
+            """)
         .addOutputLines(
             "Test.java",
-            "import com.google.errorprone.annotations.concurrent.GuardedBy;",
-            "class Test {",
-            "  private final Object myBooleanLock = new Object();",
-            "  @GuardedBy(\"myBooleanLock\")",
-            "  private boolean myBoolean;",
-            "  void test(boolean value) {",
-            "    synchronized (myBooleanLock) {",
-            "      myBoolean = value;",
-            "    }",
-            "  }",
-            "}")
+            """
+            import com.google.errorprone.annotations.concurrent.GuardedBy;
+
+            class Test {
+              private final Object myBooleanLock = new Object();
+
+              @GuardedBy("myBooleanLock")
+              private boolean myBoolean;
+
+              void test(boolean value) {
+                synchronized (myBooleanLock) {
+                  myBoolean = value;
+                }
+              }
+            }
+            """)
         .doTest();
   }
 }

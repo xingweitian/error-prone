@@ -16,6 +16,8 @@
 
 package com.google.errorprone.bugpatterns;
 
+import static com.google.common.truth.TruthJUnit.assume;
+
 import com.google.errorprone.CompilationTestHelper;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,25 +35,49 @@ public class SystemOutTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.io.PrintStream;",
-            "",
-            "class Test {",
-            "  void f() {",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    System.out.println();",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    System.err.println();",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    p(System.out);",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    p(System.err);",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    Thread.dumpStack();",
-            "    // BUG: Diagnostic contains: SystemOut",
-            "    new Exception().printStackTrace();",
-            "  }",
-            "  private void p(PrintStream ps) {}",
-            "}")
+            """
+            import java.io.PrintStream;
+
+            class Test {
+              void f() {
+                // BUG: Diagnostic contains: SystemOut
+                System.out.println();
+                // BUG: Diagnostic contains: SystemOut
+                System.err.println();
+                // BUG: Diagnostic contains: SystemOut
+                p(System.out);
+                // BUG: Diagnostic contains: SystemOut
+                p(System.err);
+                // BUG: Diagnostic contains: SystemOut
+                Thread.dumpStack();
+                // BUG: Diagnostic contains: SystemOut
+                new Exception().printStackTrace();
+              }
+
+              private void p(PrintStream ps) {}
+            }
+            """)
+        .doTest();
+  }
+
+  @Test
+  public void positiveIoPrint() {
+    assume().that(Runtime.version().feature()).isAtLeast(25);
+    helper
+        .addSourceLines(
+            "Test.java",
+            """
+            class Test {
+              void main() {
+                // BUG: Diagnostic contains: SystemOut
+                IO.print("hello JDK 25");
+                // BUG: Diagnostic contains: SystemOut
+                IO.println();
+                // BUG: Diagnostic contains: SystemOut
+                IO.println("hello JDK 25");
+              }
+            }
+            """)
         .doTest();
   }
 
@@ -60,14 +86,16 @@ public class SystemOutTest {
     helper
         .addSourceLines(
             "Test.java",
-            "import java.io.*;",
-            "",
-            "class Test {",
-            "  void f() {",
-            "    new Exception().printStackTrace(new PrintStream((OutputStream) null));",
-            "    new Exception().printStackTrace(new PrintWriter((OutputStream) null));",
-            "  }",
-            "}")
+            """
+            import java.io.*;
+
+            class Test {
+              void f() {
+                new Exception().printStackTrace(new PrintStream((OutputStream) null));
+                new Exception().printStackTrace(new PrintWriter((OutputStream) null));
+              }
+            }
+            """)
         .doTest();
   }
 }

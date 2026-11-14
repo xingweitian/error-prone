@@ -24,17 +24,15 @@ import com.google.errorprone.VisitorState;
 import com.google.errorprone.bugpatterns.BugChecker.NewClassTreeMatcher;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
+import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ExpressionStatementTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
-import com.sun.source.tree.Tree.Kind;
 import com.sun.source.tree.VariableTree;
 import com.sun.tools.javac.code.Symbol.TypeSymbol;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
-@BugPattern(
-    name = "UnusedAnonymousClass",
-    summary = "Instance created but never used",
-    severity = ERROR)
+@BugPattern(summary = "Instance created but never used", severity = ERROR)
 public class UnusedAnonymousClass extends BugChecker implements NewClassTreeMatcher {
 
   // An anonymous class creation cannot have side-effects if:
@@ -42,7 +40,7 @@ public class UnusedAnonymousClass extends BugChecker implements NewClassTreeMatc
   // (2) and has no instance initializer blocks or field initializers
   @Override
   public Description matchNewClass(NewClassTree newClassTree, VisitorState state) {
-    if (state.getPath().getParentPath().getLeaf().getKind() != Kind.EXPRESSION_STATEMENT) {
+    if (!(state.getPath().getParentPath().getLeaf() instanceof ExpressionStatementTree)) {
       return Description.NO_MATCH;
     }
     if (newClassTree.getClassBody() == null) {
@@ -52,19 +50,14 @@ public class UnusedAnonymousClass extends BugChecker implements NewClassTreeMatc
       return Description.NO_MATCH;
     }
     for (Tree def : newClassTree.getClassBody().getMembers()) {
-      switch (def.getKind()) {
-        case VARIABLE:
-          {
-            VariableTree variableTree = (VariableTree) def;
-            if (variableTree.getInitializer() != null) {
-              return Description.NO_MATCH;
-            }
-            break;
-          }
-        case BLOCK:
+      switch (def) {
+        case VariableTree variableTree when variableTree.getInitializer() != null -> {
           return Description.NO_MATCH;
-        default:
-          break;
+        }
+        case BlockTree blockTree -> {
+          return Description.NO_MATCH;
+        }
+        default -> {}
       }
     }
     if (!sideEffectFreeConstructor(ASTHelpers.getType(newClassTree.getIdentifier()).tsym, state)) {

@@ -21,7 +21,6 @@ import static com.google.common.collect.Streams.forEachPair;
 import static com.google.errorprone.BugPattern.SeverityLevel.SUGGESTION;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.util.ASTHelpers.getStartPosition;
-import static com.sun.tools.javac.parser.Tokens.Comment.CommentStyle.BLOCK;
 
 import com.google.common.base.Ascii;
 import com.google.common.collect.ImmutableSet;
@@ -35,6 +34,7 @@ import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
 import com.google.errorprone.util.ASTHelpers;
 import com.google.errorprone.util.Comments;
+import com.google.errorprone.util.ErrorProneComment.ErrorProneCommentStyle;
 import com.google.errorprone.util.ErrorProneToken;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.MethodInvocationTree;
@@ -51,7 +51,6 @@ import java.util.List;
 
 /** A {@link BugChecker}; see the associated {@link BugPattern} annotation for details. */
 @BugPattern(
-    name = "BooleanParameter",
     summary = "Use parameter comments to document ambiguous literals",
     severity = SUGGESTION)
 public class BooleanParameter extends BugChecker
@@ -131,12 +130,10 @@ public class BooleanParameter extends BugChecker
 
   private static boolean hasParameterComment(ErrorProneToken token) {
     return token.comments().stream()
-        .filter(c -> c.getStyle() == BLOCK)
-        .anyMatch(
-            c ->
-                NamedParameterComment.PARAMETER_COMMENT_PATTERN
-                    .matcher(Comments.getTextFromComment(c))
-                    .matches());
+        .filter(c -> c.getStyle() == ErrorProneCommentStyle.BLOCK)
+        .anyMatch(c ->
+            NamedParameterComment.parseParameterComment(Comments.getTextFromComment(c))
+                .isPresent());
   }
 
   private static boolean isBooleanLiteral(ExpressionTree tree) {
@@ -146,8 +143,8 @@ public class BooleanParameter extends BugChecker
   private static boolean areSingleArgumentsSelfDocumenting(Tree tree) {
     // Consider single-argument booleans for classes whose names contain "Boolean" to be self-
     // documenting. This is aimed at classes like AtomicBoolean which simply wrap a value.
-    if (tree instanceof NewClassTree) {
-      Symbol symbol = ASTHelpers.getSymbol(((NewClassTree) tree).getIdentifier());
+    if (tree instanceof NewClassTree newClassTree) {
+      Symbol symbol = ASTHelpers.getSymbol(newClassTree.getIdentifier());
       return symbol != null && Ascii.toLowerCase(symbol.getSimpleName()).contains("boolean");
     }
     return true;
